@@ -203,17 +203,20 @@ async def main():
                 chat_title = getattr(entity, 'title', None) or getattr(entity, 'first_name', 'Ярик')
                 save_chat(yarik_chat_id, chat_title, getattr(entity, 'username', None), "private")
 
-                after_id = args.after_id
-                if after_id is None:
-                    last_msgs = await client.get_messages(entity, limit=1)
-                    after_id = last_msgs[0].id if last_msgs else 0
-
                 bot_sent = get_bot_sent_ids()
+                after_id = args.after_id
+                if after_id is not None:
+                    check_stream = client.iter_messages(entity, min_id=after_id)
+                else:
+                    check_stream = client.iter_messages(entity, limit=6)
 
                 # Check recent unhandled messages
-                async for m in client.iter_messages(entity, min_id=after_id):
+                async for m in check_stream:
                     if m.id in bot_sent:
                         continue
+                    if (time.time() - m.date.timestamp()) > 600:
+                        continue
+
                     sender_uid = m.sender_id or (getattr(m.from_id, 'user_id', None) if getattr(m, 'from_id', None) else None)
                     is_owner = getattr(m, 'out', False) or (sender_uid == owner_id) or (sender_uid is not None and sender_uid != yarik_chat_id)
                     is_from_yarik = not is_owner
