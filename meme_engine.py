@@ -635,10 +635,15 @@ def clean_user_theme(raw_text):
     t = re.sub(r"^(?:мемчик|мемасик|мем|мэм|мемов|мэмов|картинку|пикчу|шутку|прикол)\s*", "", t, flags=re.I).strip()
 
     # Strip prepositions & broken fragments
-    t = re.sub(r"^(?:про|с|на тему|по теме|по игре|из|в|о|об)\s*", "", t, flags=re.I).strip()
+    t = re.sub(r"^(?:про|с|на тему|по теме|по игре|по|из|в|о|об)\s*", "", t, flags=re.I).strip()
     t = re.sub(r"^(?:кросаута|кроссаута|crossout)\s+(?:того\s+что\s+там\s+было\s+в|того\s+что\s+было\s+в|того\s+что\s+было|как\s+было\s+в|в)\s*", "Crossout ", t, flags=re.I).strip()
     t = re.sub(r"^(?:того\s+что\s+там\s+было\s+в|того\s+что\s+было\s+в|того\s+что\s+было|как\s+было\s+в)\s*", "", t, flags=re.I).strip()
     t = re.sub(r"^(?:про то как|про то что|как)\s*", "", t, flags=re.I).strip()
+
+    # Rain World typo & topic normalization
+    t = re.sub(r"\bодин\s+ворлд\w*\b", "Rain World", t, flags=re.I)
+    t = re.sub(r"\bрейн\s*ворлд\w*\b", "Rain World", t, flags=re.I)
+    t = re.sub(r"\bреин\s*ворлд\w*\b", "Rain World", t, flags=re.I)
 
     # Normalize year phrasing
     t = re.sub(r"\b(201[5-9]|202[0-6])\s*году\b", r"\1 года", t, flags=re.I)
@@ -671,7 +676,7 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     
     # Check if Mahoraga
     is_mahoraga = any(w in theme_lower for w in ["махораг", "адаптир", "бог котор", "дхарма", "jujutsu"])
-    is_rainworld = any(w in theme_lower for w in ["рейн", "rain", "слизнец"])
+    is_rainworld = any(w in theme_lower for w in ["рейн", "реин", "rain", "слизнец", "слизн", "ворлд", "вотчер", "watcher", "искусник", "артифисер", "карм", "пебблс"])
 
     # 2. Поиск картинки
     img_path = None
@@ -834,9 +839,15 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
                     "sound_or_extra": None
                 },
                 {
-                    "style": "impact",
-                    "title": "ВЗЯЛ ВЗРЫВНОЕ КОПЬЕ В РУКИ",
-                    "subtitle": "ТЕПЕРЬ СТЕРВЯТНИК САМ ПОЖАЛЕЕТ О СВОЕМ ПРИЛЕТЕ",
+                    "style": "caption",
+                    "title": "Когда анонсировали Rain World: The Watcher:",
+                    "subtitle": "Готовимся страдать в новых регионах и умирать от дождя по 50 раз за цикл",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "demotivator",
+                    "title": "THE WATCHER",
+                    "subtitle": "Новое DLC, старая добрая боль и бесконечная борьба за выживание",
                     "sound_or_extra": None
                 }
             ]
