@@ -44,6 +44,24 @@ def get_bot_sent_ids():
     except Exception:
         return set()
 
+HANDLED_MSGS_FILE = os.path.join(os.path.dirname(BOT_SENT_FILE), "handled_msg_ids.txt")
+
+def get_handled_ids():
+    if not os.path.exists(HANDLED_MSGS_FILE):
+        return set()
+    try:
+        with open(HANDLED_MSGS_FILE, "r") as f:
+            return {int(line.strip()) for line in f if line.strip().isdigit()}
+    except Exception:
+        return set()
+
+def add_handled_id(msg_id):
+    try:
+        with open(HANDLED_MSGS_FILE, "a") as f:
+            f.write(f"{msg_id}\n")
+    except Exception:
+        pass
+
 async def download_bot_file(bot_token, file_id, dest_path):
     try:
         url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
@@ -205,6 +223,7 @@ async def main():
                 save_chat(yarik_chat_id, chat_title, getattr(entity, 'username', None), "private")
 
                 bot_sent = get_bot_sent_ids()
+                handled_ids = get_handled_ids()
                 after_id = args.after_id
                 if after_id is not None:
                     check_stream = client.iter_messages(entity, min_id=after_id)
@@ -213,7 +232,7 @@ async def main():
 
                 # Check recent unhandled messages
                 async for m in check_stream:
-                    if m.id in bot_sent:
+                    if m.id in bot_sent or m.id in handled_ids:
                         continue
                     if (time.time() - m.date.timestamp()) > 600:
                         continue
@@ -224,6 +243,7 @@ async def main():
                     is_mention = is_bot_mention(m.message)
 
                     if not is_mention:
+                        add_handled_id(m.id)
                         if is_from_yarik:
                             save_message(
                                 chat_id=yarik_chat_id,
@@ -238,6 +258,8 @@ async def main():
                                 media_path=None
                             )
                         continue
+
+                    add_handled_id(m.id)
 
                     # Triggered by mention
                     media_path = None
@@ -325,8 +347,7 @@ async def main():
                 async def handle_candidate_message(msg):
                     if exit_event.is_set():
                         return
-                    bot_sent = get_bot_sent_ids()
-                    if msg.id in bot_sent:
+                    if msg.id in get_bot_sent_ids() or msg.id in get_handled_ids():
                         return
 
                     sender_uid = msg.sender_id or (getattr(msg.from_id, 'user_id', None) if getattr(msg, 'from_id', None) else None)
@@ -335,6 +356,7 @@ async def main():
                     is_mention = is_bot_mention(msg.message)
 
                     if not is_mention:
+                        add_handled_id(msg.id)
                         if is_from_yarik:
                             save_message(
                                 chat_id=yarik_chat_id,
@@ -349,6 +371,8 @@ async def main():
                                 media_path=None
                             )
                         return
+
+                    add_handled_id(msg.id)
 
                     media_path = None
                     has_media = 0
@@ -445,7 +469,7 @@ async def main():
                         try:
                             recent = await client.get_messages(entity, limit=4)
                             for rm in recent:
-                                if rm.id in get_bot_sent_ids():
+                                if rm.id in get_bot_sent_ids() or rm.id in get_handled_ids():
                                     continue
                                 if is_bot_mention(rm.message):
                                     if (time.time() - rm.date.timestamp()) <= 600:

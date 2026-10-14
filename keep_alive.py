@@ -1340,10 +1340,13 @@ def main():
     cleaner_thread.start()
 
     log_event("[ORCHESTRATOR] Main duty loop started...")
+    last_processed_id = None
 
     while True:
         try:
             cmd = [sys.executable, os.path.join(BASE_DIR, "wait_for_yarik.py"), "--timeout", "900"]
+            if last_processed_id is not None:
+                cmd.extend(["--after-id", str(last_processed_id)])
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
             stdout = proc.stdout.strip()
@@ -1372,6 +1375,9 @@ def main():
             log_event(f"[ORCHESTRATOR] Received {len(messages)} messages from {source}: {[m.get('text', '')[:60] for m in messages]}")
 
             for m in messages:
+                mid = m.get("id")
+                if mid and (last_processed_id is None or mid > last_processed_id):
+                    last_processed_id = mid
                 try:
                     if source == "owner":
                         handle_owner_message(m)
