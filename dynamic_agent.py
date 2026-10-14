@@ -12,14 +12,53 @@ import traceback
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXTENSIONS_DIR = os.path.join(BASE_DIR, "extensions")
 MEDIA_DIR = os.path.join(BASE_DIR, "media")
+REGISTRY_FILE = os.path.join(EXTENSIONS_DIR, "registry.json")
 
 os.makedirs(EXTENSIONS_DIR, exist_ok=True)
 os.makedirs(MEDIA_DIR, exist_ok=True)
 
+def load_registry():
+    if os.path.exists(REGISTRY_FILE):
+        try:
+            with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_registry(data):
+    try:
+        with open(REGISTRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[DYNAMIC AGENT] Failed to save registry: {e}")
+
+def register_extension(slug, filename, description, triggers):
+    reg = load_registry()
+    reg[slug] = {
+        "filename": filename,
+        "description": description,
+        "triggers": triggers,
+        "updated_at": time.time()
+    }
+    save_registry(reg)
+
+def find_existing_extension(task_text):
+    reg = load_registry()
+    t = task_text.lower()
+    for slug, info in reg.items():
+        triggers = info.get("triggers", [])
+        if any(tr in t for tr in triggers):
+            fn = info.get("filename")
+            fp = os.path.join(EXTENSIONS_DIR, fn)
+            if os.path.exists(fp):
+                return fp, info
+    return None, None
+
 def is_autonomous_task(text, has_media=False):
     """
-    Определяет, требует ли запрос динамического создания нового скрипта,
-    обработки медиафайла, выполнения кода или установки новых модулей.
+    Определяет, требует ли запрос динамического создания нового дополнения,
+    обработки медиафайла, генерации файла или расширения способностей бота.
     """
     if not text:
         return has_media
@@ -38,14 +77,56 @@ def is_autonomous_task(text, has_media=False):
         "нарисуй график", "создай график", "сделай парсер", "напиши парсер",
         "симулятор", "калькулятор", "посчитай", "выполни код", "запусти код",
         "сгенерируй код", "автономн", "сделай фичу", "добавь фичу",
-        "сделай так чтобы", "установи модуль", "поставь библиотеку", "скачай файл"
+        "сделай так чтобы", "установи модуль", "поставь библиотеку", "скачай файл",
+        "сделай таблицу", "сохрани в excel", "сохрани в csv", "сделай отчет",
+        "сделай pdf", "сгенерируй pdf", "добавь дополнение", "напиши дополнение",
+        "создай дополнение", "добавь модуль", "создай модуль"
     ]
 
     if any(verb in t for verb in action_verbs):
         return True
 
-    if has_media and any(w in t for w in ["сделай", "переделай", "измени", "убери", "добавь", "поправь"]):
+    if has_media and any(w in t for w in ["сделай", "переделай", "измени", "убери", "добавь", "поправь", "обрежь"]):
         return True
+
+    return False
+
+def check_or_classify_autonomous_task(text, has_media=False, ask_ai_fn=None):
+    """
+    Интеллектуальный классификатор: проверяет быстрые правила и при необходимости
+    спрашивает AI, является ли сообщение прямым поручением сделать/сгенерировать что-то.
+    """
+    if is_autonomous_task(text, has_media):
+        return True
+
+    t_clean = text.lower().strip()
+    if len(t_clean) < 6:
+        return False
+
+    # Исключаем обычные разговорные фразы
+    chit_chat = ["привет", "здарова", "как дела", "что делаешь", "ты тут", "спасибо", "пока", "ярик", "бот ты тут", "ясно", "понял"]
+    if t_clean in chit_chat:
+        return False
+
+    # Поручения создать что-то
+    action_intent_patterns = [
+        r"\b(сделай|создай|сгенерируй|напиши|запили|собери|выгрузи|сохрани|добавь|установи|прикрути|научись)\b",
+        r"\b(файл|скрипт|программ|дополнени|плагин|модул|функци|таблиц|отчет|график|диаграмм|баз|код)\b"
+    ]
+    matches = sum(1 for p in action_intent_patterns if re.search(p, t_clean))
+    if matches >= 2:
+        return True
+
+    # Если есть подозрение на поручение — опрашиваем AI
+    if ask_ai_fn and len(t_clean) > 8 and any(w in t_clean for w in ["сделай", "создай", "сгенерируй", "напиши", "добавь", "научись", "файл", "можешь", "умеешь"]):
+        check_prompt = (
+            f"Пользователь написал боту: «{text}».\n"
+            "Это конкретное поручение СДЕЛАТЬ/СГЕНЕРИРОВАТЬ ЧТО-ТО (файл, скрипт, вычисление, дополнение, обработку)?\n"
+            "Ответь строго 'TASK' если это поручение что-то сделать/создать/написать, или 'CHAT' если это просто беседа."
+        )
+        res = ask_ai_fn(check_prompt)
+        if res and "TASK" in res.upper():
+            return True
 
     return False
 
@@ -98,7 +179,11 @@ def auto_install_missing_packages(error_output):
         "pandas": "pandas",
         "numpy": "numpy",
         "imageio": "imageio",
-        "ffmpeg": "ffmpeg-python"
+        "ffmpeg": "ffmpeg-python",
+        "openpyxl": "openpyxl",
+        "xlsxwriter": "xlsxwriter",
+        "matplotlib": "matplotlib",
+        "reportlab": "reportlab"
     }
 
     for mod in set(missing_mods):
@@ -147,7 +232,7 @@ def run_script(script_path, input_file=None, timeout=60):
 def find_newest_media(before_files, stdout=""):
     # 1. Проверяем явный путь в stdout
     if stdout:
-        m = re.findall(r"([/\w.-]+\.(?:png|jpg|jpeg|gif|webp|mp4|webm|mov|mp3|ogg|wav|csv|txt|pdf))", stdout, re.IGNORECASE)
+        m = re.findall(r"([/\w.-]+\.(?:png|jpg|jpeg|gif|webp|mp4|webm|mov|mp3|ogg|wav|csv|xlsx|txt|pdf))", stdout, re.IGNORECASE)
         for cand in reversed(m):
             if os.path.exists(cand) and os.path.isfile(cand):
                 return cand
@@ -162,7 +247,7 @@ def find_newest_media(before_files, stdout=""):
         if os.path.exists(d):
             for root, _, files in os.walk(d):
                 for f in files:
-                    if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".webm", ".mov", ".mp3", ".ogg", ".wav", ".csv", ".txt", ".pdf")):
+                    if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".webm", ".mov", ".mp3", ".ogg", ".wav", ".csv", ".xlsx", ".txt", ".pdf")):
                         fp = os.path.join(root, f)
                         if os.path.isfile(fp) and (time.time() - os.path.getmtime(fp) < 90) and fp not in before_files:
                             all_candidates.append(fp)
@@ -175,13 +260,12 @@ def find_newest_media(before_files, stdout=""):
 def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=None):
     """
     Универсальный автономный саморасширяющийся исполнитель Antigravity:
-    1. Анализирует запрос и входные файлы.
-    2. При необходимости авто-устанавливает внешние библиотеки через pip.
-    3. Генерирует готовый к исполнению Python-скрипт с обработкой входного файла.
-    4. Запускает код в изолированной среде с передачей путей и параметров.
-    5. При ошибке (например, падение или нехватка модуля) проводит self-healing и auto-install.
-    6. Сохраняет новую способность в extensions/ для персистентности.
-    7. Возвращает готовый файл и пояснение.
+    1. Проверяет реестр существующих дополнений.
+    2. Если дополнения еще нет — генерирует новый автономный модуль под задачу.
+    3. Авто-устанавливает недостающие внешние библиотеки.
+    4. Запускает код, при ошибках запускает самоотладку (self-healing).
+    5. Регистрирует новое дополнение в extensions/registry.json для постоянного использования.
+    6. Возвращает созданный файл и подробный отчет.
     """
     if not ask_ai_fn:
         return "Модуль AI недоступен.", None
@@ -197,18 +281,39 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             f"или `sys.argv[1] if len(sys.argv) > 1 else None`.\n"
         )
 
+    # 1. Проверяем, есть ли уже готовое дополнение для этой задачи
+    existing_script, ext_info = find_existing_extension(task_text)
+    if existing_script:
+        print(f"[DYNAMIC AGENT] Reusing existing extension: {existing_script}")
+        code_rc, stdout, stderr = run_script(existing_script, input_file=photo_path)
+        if code_rc == 0:
+            new_media = find_newest_media(set(), stdout=stdout)
+            report = (
+                f"⚡ **Использовано дополнение к боту:** `{os.path.basename(existing_script)}`\n"
+                f"_{ext_info.get('description', 'Выполнение сохраненной функции')}_\n\n"
+            )
+            if stdout:
+                report += f"📊 **Результат:**\n```\n{stdout[:1000]}\n```\n"
+            if new_media:
+                report += f"📁 Готовый файл: `{os.path.basename(new_media)}`"
+            return report, new_media
+
+    # 2. Генерируем новое дополнение с нуля
     prompt = (
         f"Ты — автономный саморасширяющийся AI-движок Telegram-бота на базе Google Antigravity.\n"
-        f"Пользователь {sender_name} просит выполнить задачу: «{task_text}».\n"
+        f"Пользователь {sender_name} просит выполнить задачу, которой бот еще не умел: «{task_text}».\n"
         f"{file_context}\n"
-        "Инструкции для генерации исполняемого кода:\n"
-        "1. Напиши автономный скрипт на Python 3 для решения этой задачи.\n"
-        "2. Если требуется обработка видео или звука (обрезка, монтаж, извлечение аудио, конвертация):\n"
+        "Инструкции для создания нового дополнения (модуля):\n"
+        "1. Напиши автономный скрипт на Python 3, который добавляет эту новую функцию и выполняет её прямо сейчас.\n"
+        "2. В первой строке комментария укажи краткий slug и описание модуля в формате:\n"
+        "   # EXTENSION: <slug_name> | <Краткое описание>\n"
+        "3. Если требуется обработка видео или звука (обрезка, монтаж, извлечение аудио, конвертация):\n"
         f"   - Используй ffmpeg через `os.environ.get('FFMPEG_EXE', '{ffmpeg_bin}')` или модуль `subprocess`.\n"
         "   - Или используй moviepy / pydub / opencv / PIL.\n"
-        "3. Если требуются сторонние библиотеки (например: pillow, opencv-python-headless, qrcode, pydub, scipy, pandas, beautifulsoup4), смело используй их в import — движок автоматически установит недостающие пакеты при запуске!\n"
-        "4. Все создаваемые файлы сохраняй в папку `media/` (например, `os.path.join(os.path.dirname(__file__), '..', 'media', 'output_filename.ext')`) и печатай путь к итоговому файлу через `print(result_path)`.\n"
-        "5. Результаты работы и пояснения выводи через `print(...)`.\n\n"
+        "4. Если требуются сторонние библиотеки (например: openpyxl, pandas, qrcode, pillow, moviepy, pydub, matplotlib, reportlab):\n"
+        "   Смело импортируй их — движок автоматически установит их через pip!\n"
+        "5. Все создаваемые файлы сохраняй в папку `media/` и обязательно выводи путь к созданному файлу через `print(result_path)`.\n"
+        "6. Результаты работы и пояснения выводи через `print(...)`.\n\n"
         "Формат ответа:\n"
         "Краткое пояснение (1 строка).\n"
         "```python\n"
@@ -218,33 +323,27 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
 
     ai_reply = ask_ai_fn(prompt, photo_path=photo_path)
     if not ai_reply:
-        return f"{sender_name}, не удалось сгенерировать скрипт для этой задачи. Попробуй уточнить требования!", None
+        return f"{sender_name}, не удалось сгенерировать дополнение для этой задачи. Попробуй уточнить требования!", None
 
     code = extract_python_code(ai_reply)
     if not code:
         return ai_reply, None
 
-    # Предварительное обнаружение нужных библиотек из кода
-    needed_packages = []
-    if "import cv2" in code: needed_packages.append("opencv-python-headless")
-    if "import qrcode" in code: needed_packages.append("qrcode[pil]")
-    if "import moviepy" in code: needed_packages.append("moviepy")
-    if "import pydub" in code: needed_packages.append("pydub")
-    if "import docx" in code: needed_packages.append("python-docx")
-    if "import fitz" in code: needed_packages.append("pymupdf")
-    for pkg in needed_packages:
-        try:
-            subprocess.run([sys.executable, "-m", "pip", "install", pkg], capture_output=True, timeout=90)
-        except Exception:
-            pass
+    # Извлекаем метаданные дополнения
+    slug_match = re.search(r"#\s*EXTENSION:\s*([a-zA-Z0-9_-]+)\s*\|\s*(.+)", code)
+    if slug_match:
+        ext_slug = slug_match.group(1).strip()
+        ext_desc = slug_match.group(2).strip()
+    else:
+        ext_slug = "ext_" + hashlib.md5(task_text.encode()).hexdigest()[:6]
+        ext_desc = f"Дополнение для задачи: {task_text[:60]}"
 
-    script_id = hashlib.md5(f"{task_text}_{time.time()}".encode()).hexdigest()[:8]
-    script_filename = f"auto_{script_id}.py"
+    script_filename = f"{ext_slug}.py"
     script_path = os.path.join(EXTENSIONS_DIR, script_filename)
 
     with open(script_path, "w", encoding="utf-8") as f:
         f.write("# -*- coding: utf-8 -*-\n")
-        f.write(f"# Auto-generated by Antigravity Autonomous Engine for task: {task_text[:80]}\n\n")
+        f.write(f"# Auto-generated Antigravity Extension: {ext_desc}\n\n")
         f.write(code)
 
     before_files = set()
@@ -255,53 +354,58 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     # Первый запуск
     code_rc, stdout, stderr = run_script(script_path, input_file=photo_path)
 
-    # Если упал из-за отсутствия пакета — устанавливаем и перезапускаем
+    # Если не хватило модуля — авто-устанавливаем через pip и перезапускаем
     if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
         installed = auto_install_missing_packages(stderr)
         if installed:
             code_rc, stdout, stderr = run_script(script_path, input_file=photo_path)
 
-    # Self-healing / самоотладка через AI при ошибке выполнения
+    # Self-healing / самоотладка при ошибках
     if code_rc != 0 and stderr:
         fix_prompt = (
-            f"Скрипт, написанный для задачи «{task_text}», упал с ошибкой:\n\n"
+            f"Скрипт дополнения для «{task_text}» упал с ошибкой:\n\n"
             f"```\n{stderr[:900]}\n```\n\n"
             f"Исходный код:\n```python\n{code}\n```\n\n"
-            "Устрани причину падения, исправь синтаксис/логику и верни исправленный, полностью работающий Python-код строго внутри ```python ... ```."
+            "Устрани ошибку, исправь логику и верни исправленный, полностью работающий Python-код строго внутри ```python ... ```."
         )
         fixed_reply = ask_ai_fn(fix_prompt)
         fixed_code = extract_python_code(fixed_reply)
         if fixed_code:
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write("# -*- coding: utf-8 -*-\n")
-                f.write(f"# Auto-fixed by Antigravity Autonomous Engine for task: {task_text[:80]}\n\n")
+                f.write(f"# Auto-fixed Antigravity Extension: {ext_desc}\n\n")
                 f.write(fixed_code)
             code_rc, stdout, stderr = run_script(script_path, input_file=photo_path)
             if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
                 if auto_install_missing_packages(stderr):
                     code_rc, stdout, stderr = run_script(script_path, input_file=photo_path)
 
-    # Ищем появившийся файл
+    # Если скрипт успешно отработал — регистрируем его как постоянное дополнение к боту!
+    if code_rc == 0:
+        words = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", task_text.lower()) if w not in ["бот", "пожалуйста", "скинь", "сделай"]]
+        register_extension(ext_slug, script_filename, ext_desc, words[:5])
+        print(f"[DYNAMIC AGENT] Successfully registered new extension: {ext_slug}")
+
+    # Ищем созданный медиафайл
     new_media = find_newest_media(before_files, stdout=stdout)
 
     clean_desc = re.sub(r"```[\s\S]*?```", "", ai_reply).strip()
 
     final_text_parts = []
-    final_text_parts.append(f"⚡ **Автономное действие выполнено для {sender_name}:**")
-    if clean_desc:
-        final_text_parts.append(f"_{clean_desc}_\n")
+    final_text_parts.append(f"🧩 **Сгенерировано новое дополнение к боту:** `{script_filename}`")
+    final_text_parts.append(f"💡 _{ext_desc}_\n")
 
     if stdout:
-        clean_out = "\n".join([line for line in stdout.splitlines() if not line.startswith("/") and not line.endswith((".png", ".jpg", ".mp4", ".mp3"))])
+        clean_out = "\n".join([line for line in stdout.splitlines() if not line.startswith("/") and not line.endswith((".png", ".jpg", ".mp4", ".mp3", ".xlsx", ".pdf"))])
         if clean_out.strip():
             final_text_parts.append(f"📊 **Результат:**\n```\n{clean_out[:1200]}\n```")
 
     if code_rc == 0 and not new_media and not stdout:
-        final_text_parts.append("✅ Задача успешно выполнена и скрипт сохранен в `extensions/`.")
+        final_text_parts.append("✅ Дополнение успешно скомпилировано, зарегистрировано в системе и выполнено!")
     elif code_rc != 0 and not new_media:
-        final_text_parts.append(f"⚠️ Ошибка выполнения:\n`{stderr[:300]}`")
+        final_text_parts.append(f"⚠️ Ошибка при выполнении:\n`{stderr[:300]}`")
 
     if new_media:
-        final_text_parts.append(f"📁 Готовый файл: `{os.path.basename(new_media)}`")
+        final_text_parts.append(f"📁 Создан готовый файл: `{os.path.basename(new_media)}`")
 
     return "\n".join(final_text_parts), new_media

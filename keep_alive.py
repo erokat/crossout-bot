@@ -25,7 +25,9 @@ from config import (
 from db import init_db, resolve_confirmation, get_confirmation
 from meme_generator import generate_crossout_meme
 from gdrive import get_auth_url, exchange_code, upload_file_to_drive
-from dynamic_agent import is_autonomous_task, execute_autonomous_task
+from dynamic_agent import is_autonomous_task, check_or_classify_autonomous_task, execute_autonomous_task
+
+
 
 def delete_bot_message(bot_token, chat_id, message_id):
     if not bot_token or not chat_id or not message_id:
@@ -688,8 +690,9 @@ def handle_owner_message(msg_data):
         return
 
     # 0.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
-    if is_autonomous_task(text, has_media=bool(photo)):
+    if check_or_classify_autonomous_task(text, has_media=bool(photo), ask_ai_fn=ask_ai):
         res_text, res_media = execute_autonomous_task(text, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai)
+
         cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
         if res_media and os.path.exists(res_media):
             cmd_owner.extend(["--photo", res_media, "--text", res_text])
@@ -1061,8 +1064,9 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         return
 
     # 1.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
-    is_auto_task = is_autonomous_task(text, has_media=bool(photo_file))
+    is_auto_task = check_or_classify_autonomous_task(text, has_media=bool(photo_file), ask_ai_fn=ask_ai)
     if is_auto_task:
+
 
         target_name = "Миша" if is_owner_sender else "Ярик"
         res_text, res_media = execute_autonomous_task(text, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai)
