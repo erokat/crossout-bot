@@ -18,5 +18,5 @@ bot_sent_ids.txt
 media/meme_*.jpg
 media/meme_*.png
 media/test_*.png
-media/cached_*.jpg
-
+gdrive_config.json
+gdrive_token.json
