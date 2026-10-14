@@ -106,8 +106,22 @@ async def poll_control_bot(cfg, exit_event, result_box):
 
                     media_path = None
                     has_media = 0
-                    if "photo" in msg and msg["photo"]:
+                    media_type = None
+                    if "video" in msg and msg["video"]:
                         has_media = 1
+                        media_type = "video"
+                        vid = msg["video"]
+                        dest = os.path.join(MEDIA_DIR, f"owner_{msg_id}.mp4")
+                        media_path = await download_bot_file(bot_token, vid["file_id"], dest)
+                    elif "animation" in msg and msg["animation"]:
+                        has_media = 1
+                        media_type = "video"
+                        anim = msg["animation"]
+                        dest = os.path.join(MEDIA_DIR, f"owner_{msg_id}.mp4")
+                        media_path = await download_bot_file(bot_token, anim["file_id"], dest)
+                    elif "photo" in msg and msg["photo"]:
+                        has_media = 1
+                        media_type = "photo"
                         largest_photo = msg["photo"][-1]
                         dest = os.path.join(MEDIA_DIR, f"owner_{msg_id}.jpg")
                         media_path = await download_bot_file(bot_token, largest_photo["file_id"], dest)
@@ -117,6 +131,7 @@ async def poll_control_bot(cfg, exit_event, result_box):
                         fname = doc.get("file_name", f"doc_{msg_id}.bin")
                         dest = os.path.join(MEDIA_DIR, f"owner_{msg_id}_{fname}")
                         media_path = await download_bot_file(bot_token, doc["file_id"], dest)
+                        media_type = "video" if fname.lower().endswith((".mp4", ".mov", ".avi", ".webm")) else "document"
 
                     save_message(
                         chat_id=owner_id,
@@ -127,7 +142,7 @@ async def poll_control_bot(cfg, exit_event, result_box):
                         date=date_str,
                         text=text,
                         has_media=has_media,
-                        media_type="photo" if has_media else None,
+                        media_type=media_type,
                         media_path=media_path
                     )
 
@@ -215,11 +230,28 @@ async def main():
                     # Triggered by mention
                     media_path = None
                     has_media = 0
-                    if m.photo:
+                    media_type = None
+                    if m.video:
                         has_media = 1
+                        media_type = "video"
+                        media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{m.id}.mp4")
+                        if not os.path.exists(media_path):
+                            await m.download_media(file=media_path)
+                    elif m.photo:
+                        has_media = 1
+                        media_type = "photo"
                         media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{m.id}.jpg")
                         if not os.path.exists(media_path):
                             await m.download_media(file=media_path)
+                    elif m.media:
+                        try:
+                            dl_path = await m.download_media(file=MEDIA_DIR)
+                            if dl_path:
+                                has_media = 1
+                                media_path = dl_path
+                                media_type = "video" if dl_path.lower().endswith((".mp4", ".mov", ".avi", ".webm")) else "photo"
+                        except Exception:
+                            pass
 
                     save_message(
                         chat_id=yarik_chat_id,
@@ -230,7 +262,7 @@ async def main():
                         date=m.date.isoformat(),
                         text=m.message or "",
                         has_media=has_media,
-                        media_type="photo" if has_media else None,
+                        media_type=media_type,
                         media_path=media_path
                     )
 
@@ -245,6 +277,8 @@ async def main():
                             "date": m.date.isoformat(),
                             "text": m.message or "",
                             "photo": media_path,
+                            "video": media_path if media_type == "video" else None,
+                            "media_type": media_type,
                             "reply_to_msg_id": reply_to_id,
                             "is_mention": True,
                             "sender": "yarik" if is_from_yarik else "owner"
@@ -281,11 +315,30 @@ async def main():
 
                     media_path = None
                     has_media = 0
-                    if msg.photo:
+                    media_type = None
+                    if msg.video:
                         has_media = 1
+                        media_type = "video"
+                        media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{msg.id}.mp4")
+                        try:
+                            await msg.download_media(file=media_path)
+                        except Exception:
+                            pass
+                    elif msg.photo:
+                        has_media = 1
+                        media_type = "photo"
                         media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{msg.id}.jpg")
                         try:
                             await msg.download_media(file=media_path)
+                        except Exception:
+                            pass
+                    elif msg.media:
+                        try:
+                            dl_path = await msg.download_media(file=MEDIA_DIR)
+                            if dl_path:
+                                has_media = 1
+                                media_path = dl_path
+                                media_type = "video" if dl_path.lower().endswith((".mp4", ".mov", ".avi", ".webm")) else "photo"
                         except Exception:
                             pass
 
@@ -298,7 +351,7 @@ async def main():
                         date=msg.date.isoformat(),
                         text=msg.message or "",
                         has_media=has_media,
-                        media_type="photo" if has_media else None,
+                        media_type=media_type,
                         media_path=media_path
                     )
 
@@ -313,6 +366,8 @@ async def main():
                             "date": msg.date.isoformat(),
                             "text": msg.message or "",
                             "photo": media_path,
+                            "video": media_path if media_type == "video" else None,
+                            "media_type": media_type,
                             "reply_to_msg_id": reply_to_id,
                             "is_mention": True,
                             "sender": "yarik" if is_from_yarik else "owner"

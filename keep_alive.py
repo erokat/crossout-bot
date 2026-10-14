@@ -3,6 +3,9 @@ import sys
 import time
 import json
 import base64
+import gzip
+import shutil
+import tarfile
 import threading
 import subprocess
 import urllib.request
@@ -78,7 +81,51 @@ def setup_environment():
     except Exception as e:
         print(f"[INIT ERROR] Failed to write config.json: {e}")
 
-    # 5. Initialize database
+    # 5. Restore historical Antigravity session (de5ca636) and memory
+    session_data_dir = os.path.join(BASE_DIR, "session_data")
+    conv_gz = os.path.join(session_data_dir, "conversation.db.gz")
+    conv_target_dir = os.path.expanduser("~/.gemini/antigravity-cli/conversations")
+    conv_target = os.path.join(conv_target_dir, "de5ca636-4ede-4348-a756-2b4d4f01194a.db")
+    if os.path.exists(conv_gz) and not os.path.exists(conv_target):
+        try:
+            os.makedirs(conv_target_dir, exist_ok=True)
+            with gzip.open(conv_gz, "rb") as f_in, open(conv_target, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            print(f"[INIT] Historical conversation session restored to {conv_target}")
+        except Exception as e:
+            print(f"[INIT ERROR] Failed to restore conversation db: {e}")
+
+    sum_src = os.path.join(session_data_dir, "conversation_summaries.db")
+    sum_target = os.path.expanduser("~/.gemini/antigravity-cli/conversation_summaries.db")
+    if os.path.exists(sum_src) and not os.path.exists(sum_target):
+        try:
+            shutil.copy2(sum_src, sum_target)
+            print(f"[INIT] conversation_summaries.db restored to {sum_target}")
+        except Exception as e:
+            print(f"[INIT ERROR] Failed to restore conversation_summaries: {e}")
+
+    brain_tar = os.path.join(session_data_dir, "brain.tar.gz")
+    brain_target_dir = os.path.expanduser("~/.gemini/antigravity-cli/brain/de5ca636-4ede-4348-a756-2b4d4f01194a")
+    if os.path.exists(brain_tar) and not os.path.exists(brain_target_dir):
+        try:
+            os.makedirs(brain_target_dir, exist_ok=True)
+            with tarfile.open(brain_tar, "r:gz") as tar:
+                tar.extractall(path=brain_target_dir)
+            print(f"[INIT] Brain artifacts restored to {brain_target_dir}")
+        except Exception as e:
+            print(f"[INIT ERROR] Failed to restore brain artifacts: {e}")
+
+    # Copy GEMINI.md to user global rules
+    rule_src = os.path.join(BASE_DIR, "GEMINI.md")
+    if os.path.exists(rule_src):
+        for r_dest in [os.path.expanduser("~/.gemini/GEMINI.md"), os.path.expanduser("~/.gemini/config/GEMINI.md")]:
+            try:
+                os.makedirs(os.path.dirname(r_dest), exist_ok=True)
+                shutil.copy2(rule_src, r_dest)
+            except Exception:
+                pass
+
+    # 6. Initialize database
     init_db()
 
 class WebServerHandler(BaseHTTPRequestHandler):
@@ -172,14 +219,61 @@ def run_self_pinger(render_url):
         except Exception as e:
             print(f"[PINGER WARNING] Ping failed: {e}")
 
-def run_antigravity_cli(prompt):
-    cmd = ["agy", "--dangerously-skip-permissions", "-p", prompt]
+def cleanup_video_file(file_path):
+    """Deletes downloaded video/TikTok from disk after viewing/processing to save memory."""
+    if not file_path:
+        return
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".ts"]:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"[CLEANUP] Deleted processed video to free memory: {file_path}")
+    except Exception as e:
+        print(f"[CLEANUP WARNING] Failed to delete video {file_path}: {e}")
+
+def run_periodic_media_cleaner():
+    """Background daemon that sweeps media folder every 5 minutes and purges leftover videos."""
+    while True:
+        time.sleep(300)
+        try:
+            now = time.time()
+            if os.path.exists(MEDIA_DIR):
+                for f in os.listdir(MEDIA_DIR):
+                    fpath = os.path.join(MEDIA_DIR, f)
+                    if not os.path.isfile(fpath):
+                        continue
+                    ext = os.path.splitext(f)[1].lower()
+                    if (ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".ts"] or f.startswith("tmp_")) and (now - os.path.getmtime(fpath) > 120):
+                        try:
+                            os.remove(fpath)
+                            print(f"[AUTO-CLEANUP] Purged cached file: {f}")
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"[CLEANUP EXCEPTION] Error in periodic cleaner: {e}")
+
+def run_antigravity_cli(prompt):
+    conv_id = "de5ca636-4ede-4348-a756-2b4d4f01194a"
+    conv_db = os.path.expanduser(f"~/.gemini/antigravity-cli/conversations/{conv_id}.db")
+
+    # If historical conversation session is loaded, continue it!
+    if os.path.exists(conv_db):
+        cmd = ["agy", "--dangerously-skip-permissions", f"--conversation={conv_id}", "-p", prompt]
+    else:
+        cmd = ["agy", "--dangerously-skip-permissions", "-p", prompt]
+
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
         if res.returncode == 0:
             return res.stdout.strip()
         else:
             print(f"[AGY WARNING] Error running agy: {res.stderr}")
+            if f"--conversation={conv_id}" in cmd:
+                fb_cmd = ["agy", "--dangerously-skip-permissions", "-p", prompt]
+                fb_res = subprocess.run(fb_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+                if fb_res.returncode == 0:
+                    return fb_res.stdout.strip()
             return None
     except Exception as e:
         print(f"[AGY EXCEPTION] Failed to execute agy: {e}")
@@ -399,6 +493,9 @@ def main():
         pinger_thread = threading.Thread(target=run_self_pinger, args=(render_url,), daemon=True)
         pinger_thread.start()
 
+    cleaner_thread = threading.Thread(target=run_periodic_media_cleaner, daemon=True)
+    cleaner_thread.start()
+
     print("[ORCHESTRATOR] Main duty loop started...")
 
     while True:
@@ -431,10 +528,16 @@ def main():
             messages = data.get("messages", [])
 
             for m in messages:
-                if source == "owner":
-                    handle_owner_message(m)
-                elif source == "yarik":
-                    handle_yarik_message(m, chat_title=data.get("chat_title", "Ярик"))
+                try:
+                    if source == "owner":
+                        handle_owner_message(m)
+                    elif source == "yarik":
+                        handle_yarik_message(m, chat_title=data.get("chat_title", "Ярик"))
+                finally:
+                    # After viewing/processing TikTok or any video, immediately delete to save disk/memory
+                    vid_candidate = m.get("video") or (m.get("photo") if (m.get("photo") and m.get("photo").lower().endswith((".mp4", ".mov", ".avi", ".webm", ".mkv", ".ts"))) else None)
+                    if vid_candidate:
+                        cleanup_video_file(vid_candidate)
 
         except Exception as e:
             print(f"[ORCHESTRATOR EXCEPTION] Unexpected error in duty loop: {e}")

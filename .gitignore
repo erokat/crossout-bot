@@ -4,6 +4,7 @@
 *.db
 *.db-shm
 *.db-wal
+!session_data/**
 messages.db
 telegram.db
 .env
