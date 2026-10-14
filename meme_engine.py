@@ -25,33 +25,43 @@ if os.path.exists("/storage/emulated/0/Pictures"):
 # ----------------- FONT HELPERS -----------------
 
 def get_font(name="russo", size=32):
+    russo_path = os.path.join(MEDIA_DIR, "RussoOne-Regular.ttf")
+    montserrat_path = os.path.join(MEDIA_DIR, "Montserrat.ttf")
+    dejavu_bold = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    dejavu_sans = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
     font_map = {
         "russo": [
-            os.path.join(MEDIA_DIR, "RussoOne-Regular.ttf"),
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            russo_path,
+            dejavu_bold,
+            montserrat_path,
         ],
         "bold": [
-            os.path.join(MEDIA_DIR, "RobotoCondensed-Bold.ttf"),
-            os.path.join(MEDIA_DIR, "Anton.ttf"),
-            os.path.join(MEDIA_DIR, "Oswald.ttf"),
-            os.path.join(MEDIA_DIR, "RussoOne-Regular.ttf"),
+            russo_path,
+            dejavu_bold,
+            montserrat_path,
         ],
         "impact": [
-            os.path.join(MEDIA_DIR, "Anton.ttf"),
-            os.path.join(MEDIA_DIR, "RussoOne-Regular.ttf"),
-            os.path.join(MEDIA_DIR, "RobotoCondensed-Bold.ttf"),
+            russo_path,
+            dejavu_bold,
+            montserrat_path,
         ],
         "regular": [
-            os.path.join(MEDIA_DIR, "RobotoCondensed-Bold.ttf"),
-            os.path.join(MEDIA_DIR, "Comfortaa.ttf"),
-            os.path.join(MEDIA_DIR, "Montserrat.ttf"),
+            montserrat_path,
+            dejavu_sans,
+            russo_path,
         ]
     }
     candidates = font_map.get(name, font_map["russo"])
     for path in candidates:
         if os.path.exists(path):
             try:
-                return ImageFont.truetype(path, size)
+                font = ImageFont.truetype(path, size)
+                # Verify font can render Cyrillic 'А' without tofu
+                bb_cyr = font.getbbox("А")
+                bb_tofu = font.getbbox("\ufffe")
+                if bb_cyr != bb_tofu:
+                    return font
             except Exception:
                 continue
     return ImageFont.load_default()

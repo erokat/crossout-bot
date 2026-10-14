@@ -14,16 +14,17 @@ from db import is_meme_already_sent, record_sent_meme, get_last_sent_meme
 def get_font(size):
     font_paths = [
         os.path.join(MEDIA_DIR, "RussoOne-Regular.ttf"),
-        os.path.join(MEDIA_DIR, "RobotoCondensed-Bold.ttf"),
-        os.path.join(MEDIA_DIR, "Anton.ttf"),
-        os.path.join(MEDIA_DIR, "Comfortaa.ttf"),
-        os.path.join(MEDIA_DIR, "Oswald.ttf"),
+        os.path.join(MEDIA_DIR, "Montserrat.ttf"),
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     ]
     for p in font_paths:
         if os.path.exists(p):
             try:
-                return ImageFont.truetype(p, size)
+                font = ImageFont.truetype(p, size)
+                bb_cyr = font.getbbox("А")
+                bb_tofu = font.getbbox("\ufffe")
+                if bb_cyr != bb_tofu:
+                    return font
             except Exception:
                 continue
     return ImageFont.load_default()
