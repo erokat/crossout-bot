@@ -44,10 +44,17 @@ def init_db():
             question TEXT,
             status TEXT DEFAULT 'pending',
             comment TEXT,
+            message_id INTEGER,
+            initiator TEXT,
             created_at REAL,
             resolved_at REAL
         )
         """)
+        for col, col_type in [("message_id", "INTEGER"), ("initiator", "TEXT")]:
+            try:
+                conn.execute(f"ALTER TABLE confirmations ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS kv_store (
@@ -82,13 +89,20 @@ def save_message(chat_id, message_id, chat_title, sender_id, sender_name, date, 
             media_path = COALESCE(excluded.media_path, messages.media_path)
         """, (chat_id, message_id, chat_title, sender_id, sender_name, str(date), text, 1 if has_media else 0, media_type, media_path))
 
-def create_confirmation(req_id, question):
+def create_confirmation(req_id, question, message_id=None, initiator=None):
     with get_db() as conn:
         conn.execute("""
-        INSERT INTO confirmations (req_id, question, status, comment, created_at, resolved_at)
-        VALUES (?, ?, 'pending', NULL, ?, NULL)
-        ON CONFLICT(req_id) DO NOTHING
-        """, (req_id, question, time.time()))
+        INSERT INTO confirmations (req_id, question, status, comment, message_id, initiator, created_at, resolved_at)
+        VALUES (?, ?, 'pending', NULL, ?, ?, ?, NULL)
+        ON CONFLICT(req_id) DO UPDATE SET
+            question = excluded.question,
+            message_id = COALESCE(excluded.message_id, confirmations.message_id),
+            initiator = COALESCE(excluded.initiator, confirmations.initiator)
+        """, (req_id, question, message_id, initiator, time.time()))
+
+def update_confirmation_message_id(req_id, message_id):
+    with get_db() as conn:
+        conn.execute("UPDATE confirmations SET message_id = ? WHERE req_id = ?", (message_id, req_id))
 
 def resolve_confirmation(req_id, status, comment=None):
     with get_db() as conn:
@@ -100,7 +114,7 @@ def resolve_confirmation(req_id, status, comment=None):
 
 def get_confirmation(req_id):
     with get_db() as conn:
-        cursor = conn.execute("SELECT req_id, question, status, comment, created_at, resolved_at FROM confirmations WHERE req_id = ?", (req_id,))
+        cursor = conn.execute("SELECT req_id, question, status, comment, message_id, initiator, created_at, resolved_at FROM confirmations WHERE req_id = ?", (req_id,))
         row = cursor.fetchone()
         if not row:
             return None
@@ -109,8 +123,10 @@ def get_confirmation(req_id):
             "question": row[1],
             "status": row[2],
             "comment": row[3],
-            "created_at": row[4],
-            "resolved_at": row[5]
+            "message_id": row[4],
+            "initiator": row[5],
+            "created_at": row[6],
+            "resolved_at": row[7]
         }
 
 def get_kv(key, default=None):

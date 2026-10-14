@@ -8,6 +8,7 @@ import shutil
 import tarfile
 import threading
 import subprocess
+import re
 import urllib.request
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -21,9 +22,24 @@ from config import (
     BOT_SENT_FILE,
     load_config
 )
-from db import init_db, resolve_confirmation
+from db import init_db, resolve_confirmation, get_confirmation
 from meme_generator import generate_crossout_meme
 from gdrive import get_auth_url, exchange_code, upload_file_to_drive
+
+def delete_bot_message(bot_token, chat_id, message_id):
+    if not bot_token or not chat_id or not message_id:
+        return False
+    url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+    payload = {"chat_id": chat_id, "message_id": int(message_id)}
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            return res.get("ok", False)
+    except Exception as e:
+        sys.stderr.write(f"Failed to delete bot message {message_id}: {e}\n")
+        return False
 
 def setup_environment():
     # 1. Decode SESSION_BASE64 if present
@@ -158,6 +174,12 @@ class WebServerHandler(BaseHTTPRequestHandler):
 
             if req_id and action in ["approve", "reject"]:
                 resolve_confirmation(req_id, action, comment="Web link click")
+                conf = get_confirmation(req_id)
+                cfg = load_config()
+                bot_token = cfg.get("bot_token")
+                owner_id = cfg.get("owner_id")
+                if conf and conf.get("message_id") and bot_token and owner_id:
+                    delete_bot_message(bot_token, owner_id, conf["message_id"])
                 status_text = "РАЗРЕШЕНО" if action == "approve" else "ОТКЛОНЕНО"
                 badge_class = "badge-appr" if action == "approve" else "badge-rej"
 
@@ -427,6 +449,40 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
+    # If owner asks to delete a message in chat with Yarik
+    if any(w in t_lower for w in ["удали", "снеси", "сотри", "delete"]):
+        target_id = get_last_bot_sent_id()
+        num_match = re.search(r"#?(\d{4,})", text)
+        if num_match:
+            target_id = int(num_match.group(1))
+
+        ask_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "ask_owner.py"),
+            f"Ты запросил удаление сообщения{' #' + str(target_id) if target_id else ''} в чате с Яриком: «{text}»",
+            "--initiator", "Ты (Владелец)"
+        ]
+        res = subprocess.run(ask_cmd, stdout=subprocess.PIPE, text=True)
+        approved = False
+        try:
+            parsed_verdict = json.loads(res.stdout.strip())
+            approved = (parsed_verdict.get("verdict") == "APPROVED")
+        except Exception:
+            approved = ("APPROVED" in res.stdout)
+
+        if approved and target_id:
+            del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--delete", str(target_id)]
+            subprocess.run(del_cmd)
+            reply = f"Сообщение #{target_id} в чате с Яриком успешно снесено у всех! 🧹💥"
+        elif approved:
+            reply = "Действие подтверждено, но не удалось определить ID сообщения для удаления."
+        else:
+            reply = "Удаление отменено, шеф!"
+
+        cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
+        subprocess.run(cmd)
+        return
+
     # If owner asks for status or health
     if any(w in t_lower for w in ["статус", "status", "пинг", "ping", "инфо"]):
         reply = "🟢 Сервер Render активен 24/7! Все службы юзербота, Bot API и Telethon на дежурстве."
@@ -464,15 +520,28 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     msg_id = msg_data.get("id")
     text = msg_data.get("text", "").strip()
     t_lower = text.lower()
-    print(f"[ORCHESTRATOR] Handling YARIK summon: {text!r} (msg_id={msg_id})")
+    sender = msg_data.get("sender", "yarik")
+    is_owner_sender = (sender == "owner")
+    initiator_label = "Ты (Владелец)" if is_owner_sender else "Ярик"
+    print(f"[ORCHESTRATOR] Handling YARIK summon from {initiator_label}: {text!r} (msg_id={msg_id})")
 
     # 1. Запрос на удаление
     if "удали" in t_lower:
         target_id = msg_data.get("reply_to_msg_id") or get_last_bot_sent_id()
+        num_match = re.search(r"#?(\d{4,})", text)
+        if num_match:
+            target_id = int(num_match.group(1))
+
+        if is_owner_sender:
+            question_text = f"Ты запросил удаление сообщения{' #' + str(target_id) if target_id else ''} в чате с Яриком: «{text}»"
+        else:
+            question_text = f"Ярик просит удалить сообщение{' #' + str(target_id) if target_id else ''} в чате: «{text}»"
+
         ask_cmd = [
             sys.executable,
             os.path.join(BASE_DIR, "ask_owner.py"),
-            f"Ярик просит удалить сообщение{' #' + str(target_id) if target_id else ''} в чате: «{text}»"
+            question_text,
+            "--initiator", initiator_label
         ]
         res = subprocess.run(ask_cmd, stdout=subprocess.PIPE, text=True)
         approved = False
@@ -493,28 +562,38 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                     "--delete", str(target_id)
                 ]
                 subprocess.run(del_cmd)
-            
-            prompt_appr = (
-                f"Ярик попросил в чате удалить сообщение ('{text}'). Владелец разрешил, и ты только что снес его к чертям из чата у всех (у обоих). "
-                "Напиши живой, угарный, саркастичный ответ Ярику в чат в стиле опытного игрока Crossout (без официоза, без щитов '🛡️', по-пацански, "
-                "про детонацию, зачистку ангара или замятый позор, мол никто ничего не видел). 1-2 сочных предложения. Выдай ТОЛЬКО сам текст реплики."
-            )
-            reply = run_antigravity_cli(prompt_appr)
-            if not reply:
-                reply = "Стер этот позор к чертям у всех, будто Газген сдетонировал в упор 💥 Ярик, спи спокойно, свидетелей нет."
+
+            if is_owner_sender:
+                prompt_appr = (
+                    f"Владелец запросил в чате с Яриком удаление сообщения ('{text}'). Действие разрешено, и сообщение только что снесено у обоих собеседников (у Ярика и у владельца). "
+                    "Напиши короткую живую реплику в чат в стиле опытного игрока Crossout (мол, зачистил ангар / убрал лишнее / без свидетелей). 1 предложение."
+                )
+                reply = run_antigravity_cli(prompt_appr) or "Снес под ноль у всех, как будто кабина отлетела! Чат зачищен 🚜💥"
+            else:
+                prompt_appr = (
+                    f"Ярик попросил в чате удалить сообщение ('{text}'). Владелец разрешил, и ты только что снес его к чертям из чата у всех (у обоих). "
+                    "Напиши живой, угарный, саркастичный ответ Ярику в чат в стиле опытного игрока Crossout (без официоза, без щитов '🛡️', по-пацански, "
+                    "про детонацию, зачистку ангара или замятый позор, мол никто ничего не видел). 1-2 сочных предложения. Выдай ТОЛЬКО сам текст реплики."
+                )
+                reply = run_antigravity_cli(prompt_appr)
+                if not reply:
+                    reply = "Стер этот позор к чертям у всех, будто Газген сдетонировал в упор 💥 Ярик, спи спокойно, свидетелей нет."
         else:
             reason_str = f", сказав: '{owner_comment}'" if (owner_comment and owner_comment not in ["Inline button", "Web link click"] and not owner_comment.startswith("Timeout")) else ""
-            prompt_rej = (
-                f"Ярик просил удалить сообщение ('{text}'), но владелец отказал{reason_str}. "
-                "Напиши живой, саркастичный и смешной ответ Ярику в чат (без официоза '⚠️ Владелец отклонил', по-дружески подколи его, мол, этот шедевр останется для истории Пустошей). "
-                "1-2 предложения. Выдай ТОЛЬКО сам текст реплики."
-            )
-            reply = run_antigravity_cli(prompt_rej)
-            if not reply:
-                if reason_str:
-                    reply = f"Не-а, шеф наложил вето: «{owner_comment}» 😂 Так что любуйся своим шедевром."
-                else:
-                    reply = "Шеф сказал оставить для потомков 😂 Этот легендарный высер останется в истории Пустошей!"
+            if is_owner_sender:
+                reply = "Отбой, удаление отменено — сообщение остается на месте 🚜"
+            else:
+                prompt_rej = (
+                    f"Ярик просил удалить сообщение ('{text}'), но владелец отказал{reason_str}. "
+                    "Напиши живой, саркастичный и смешной ответ Ярику в чат (без официоза '⚠️ Владелец отклонил', по-дружески подколи его, мол, этот шедевр останется для истории Пустошей). "
+                    "1-2 предложения. Выдай ТОЛЬКО сам текст реплики."
+                )
+                reply = run_antigravity_cli(prompt_rej)
+                if not reply:
+                    if reason_str:
+                        reply = f"Не-а, шеф наложил вето: «{owner_comment}» 😂 Так что любуйся своим шедевром."
+                    else:
+                        reply = "Шеф сказал оставить для потомков 😂 Этот легендарный высер останется в истории Пустошей!"
 
         send_cmd = [
             sys.executable,

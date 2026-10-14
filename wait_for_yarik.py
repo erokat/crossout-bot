@@ -208,7 +208,8 @@ async def main():
                 async for m in client.iter_messages(entity, min_id=after_id):
                     if m.id in bot_sent:
                         continue
-                    is_from_yarik = (m.sender_id == yarik_chat_id)
+                    is_owner = getattr(m, 'out', False) or (m.sender_id != yarik_chat_id and m.sender_id is not None)
+                    is_from_yarik = not is_owner
                     is_mention = is_bot_mention(m.message)
 
                     if not is_mention:
@@ -253,12 +254,13 @@ async def main():
                         except Exception:
                             pass
 
+                    sender_label = "Ты (Владелец)" if is_owner else "Ярик"
                     save_message(
                         chat_id=yarik_chat_id,
                         message_id=m.id,
                         chat_title=chat_title,
                         sender_id=m.sender_id,
-                        sender_name=chat_title if is_from_yarik else "Me",
+                        sender_name=sender_label,
                         date=m.date.isoformat(),
                         text=m.message or "",
                         has_media=has_media,
@@ -281,7 +283,8 @@ async def main():
                             "media_type": media_type,
                             "reply_to_msg_id": reply_to_id,
                             "is_mention": True,
-                            "sender": "yarik" if is_from_yarik else "owner"
+                            "sender": "owner" if is_owner else "yarik",
+                            "sender_name": sender_label
                         }]
                     }
                     exit_event.set()
@@ -294,7 +297,8 @@ async def main():
                     if msg.id in bot_sent:
                         return
 
-                    is_from_yarik = (msg.sender_id == yarik_chat_id)
+                    is_owner = getattr(msg, 'out', False) or (msg.sender_id != yarik_chat_id and msg.sender_id is not None)
+                    is_from_yarik = not is_owner
                     is_mention = is_bot_mention(msg.message)
 
                     if not is_mention:
@@ -342,12 +346,13 @@ async def main():
                         except Exception:
                             pass
 
+                    sender_label = "Ты (Владелец)" if is_owner else "Ярик"
                     save_message(
                         chat_id=yarik_chat_id,
                         message_id=msg.id,
                         chat_title=chat_title,
                         sender_id=msg.sender_id,
-                        sender_name=chat_title if is_from_yarik else "Me",
+                        sender_name=sender_label,
                         date=msg.date.isoformat(),
                         text=msg.message or "",
                         has_media=has_media,
@@ -370,7 +375,8 @@ async def main():
                             "media_type": media_type,
                             "reply_to_msg_id": reply_to_id,
                             "is_mention": True,
-                            "sender": "yarik" if is_from_yarik else "owner"
+                            "sender": "owner" if is_owner else "yarik",
+                            "sender_name": sender_label
                         }]
                     }
                     exit_event.set()
