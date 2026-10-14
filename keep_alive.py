@@ -627,9 +627,33 @@ def handle_owner_message(msg_data):
             "--to", "owner",
             "--text", "Всё, запулил этот мем Ярику в чат! Ждем реакцию 🔥🚜"
         ]
-        subprocess.run(cmd_owner)
+    # 0.4. Скачивание и отправка музыки / треков / песен для владельца
+    is_music_owner = any(w in t_lower for w in ["музык", "песн", "трек", "песен", "music", "song", "mp3"]) and any(w in t_lower for w in ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь"])
+    if is_music_owner:
+        from media_finder import find_and_download_music
+        track_path, track_title = find_and_download_music(text)
+        if track_path and os.path.exists(track_path):
+            cap = f"🎵 Держи трек, Миша: {track_title}"
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--photo", track_path, "--text", cap])
+        else:
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", f"Не удалось скачать трек по запросу: {track_title}"])
+        return
+
+    # 0.45. Поиск и отправка GIF анимаций для владельца
+    is_gif_owner = any(w in t_lower for w in ["гиф", "гифк", "gif", "анимац"]) and any(w in t_lower for w in ["скинь", "найди", "скачай", "дай", "кинь", "отправь"])
+    if is_gif_owner:
+        from media_finder import find_and_download_gif
+        gif_path, gif_title = find_and_download_gif(text)
+        if gif_path and os.path.exists(gif_path):
+            cap = f"✨ GIF для тебя, Миша: {gif_title}"
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--photo", gif_path, "--text", cap])
+        else:
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", f"Не удалось найти GIF по теме: {gif_title}"])
+        return
+
     # 0.5. Поиск видео / момента / клипа на YouTube для владельца
     is_search_video = any(w in t_lower for w in ["найди", "поищи", "ютуб", "youtube", "откуда", "что за видео", "что за момент", "оригинал"]) and any(w in t_lower for w in ["момент", "видео", "клип", "ютуб", "youtube", "сери", "серия", "фильм", "мульт", "скинь", "ссылк", "линк"])
+
     if is_search_video:
         prompt_q = f"Пользователь просит найти видео/момент: «{text}». Какое название видео/мультфильма/момента нужно ввести в YouTube для поиска? Выдай ТОЛЬКО 2-4 ключевых слова для поиска на YouTube без кавычек."
         search_kw = ask_ai(prompt_q) or text
@@ -957,8 +981,33 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
+    # 1.4. Скачивание и отправка музыки / треков / песен в чат
+    is_music_chat = any(w in t_lower for w in ["музык", "песн", "трек", "песен", "music", "song", "mp3"]) and any(w in t_lower for w in ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь"])
+    if is_music_chat:
+        from media_finder import find_and_download_music
+        track_path, track_title = find_and_download_music(text)
+        if track_path and os.path.exists(track_path):
+            cap = f"🎵 Держи трек: {track_title}"
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", track_path, "--text", cap, "--reply-to", str(msg_id)])
+        else:
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", f"Не удалось найти или скачать трек по запросу: {track_title}", "--reply-to", str(msg_id)])
+        return
+
+    # 1.45. Поиск и отправка GIF анимаций в чат
+    is_gif_chat = any(w in t_lower for w in ["гиф", "гифк", "gif", "анимац"]) and any(w in t_lower for w in ["скинь", "найди", "скачай", "дай", "кинь", "отправь"])
+    if is_gif_chat:
+        from media_finder import find_and_download_gif
+        gif_path, gif_title = find_and_download_gif(text)
+        if gif_path and os.path.exists(gif_path):
+            cap = f"✨ GIF по теме: {gif_title}"
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", gif_path, "--text", cap, "--reply-to", str(msg_id)])
+        else:
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", f"Не удалось найти GIF: {gif_title}", "--reply-to", str(msg_id)])
+        return
+
     # 1.5. Поиск видео / момента / клипа на YouTube
     is_search_video = any(w in t_lower for w in ["найди", "поищи", "ютуб", "youtube", "откуда", "что за видео", "что за момент", "оригинал"]) and any(w in t_lower for w in ["момент", "видео", "клип", "ютуб", "youtube", "сери", "серия", "фильм", "мульт", "скинь", "ссылк", "линк"])
+
     if is_search_video:
         prompt_q = f"Пользователь переслал сообщение/медиа и просит: «{text}». Какое название видео/мультфильма/момента нужно ввести в YouTube для поиска? Выдай ТОЛЬКО 2-4 ключевых слова для поиска на YouTube без кавычек."
         search_kw = ask_ai(prompt_q) or text

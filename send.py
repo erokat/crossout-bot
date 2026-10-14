@@ -43,10 +43,24 @@ def send_via_bot_api(bot_token, chat_id, text=None, file_path=None, reply_to=Non
     try:
         if file_path and os.path.exists(file_path):
             ext = os.path.splitext(file_path)[1].lower()
-            endpoint = "sendAnimation" if ext in [".gif", ".mp4"] else "sendPhoto"
-            file_field = "animation" if ext in [".gif", ".mp4"] else "photo"
-            mime_type = "image/gif" if ext == ".gif" else ("video/mp4" if ext == ".mp4" else "image/png")
+            if ext in [".gif"]:
+                endpoint = "sendAnimation"
+                file_field = "animation"
+                mime_type = "image/gif"
+            elif ext in [".mp4", ".mov", ".mkv", ".webm"]:
+                endpoint = "sendVideo"
+                file_field = "video"
+                mime_type = "video/mp4"
+            elif ext in [".mp3", ".ogg", ".wav", ".m4a", ".flac"]:
+                endpoint = "sendAudio"
+                file_field = "audio"
+                mime_type = "audio/mpeg"
+            else:
+                endpoint = "sendPhoto"
+                file_field = "photo"
+                mime_type = "image/png"
             url = f"https://api.telegram.org/bot{bot_token}/{endpoint}"
+
             
             with open(file_path, "rb") as f:
                 content = f.read()
