@@ -51,7 +51,22 @@ def load_config():
             pass
 
     bot_token = os.environ.get("CONTROL_BOT_TOKEN", "").strip()
+    if not bot_token:
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    bot_token = json.load(f).get("bot_token", "").strip()
+            except Exception:
+                pass
+        if not bot_token and os.path.exists(termux_config):
+            try:
+                with open(termux_config, "r", encoding="utf-8") as f:
+                    bot_token = json.load(f).get("bot_token", "").strip()
+            except Exception:
+                pass
+
     owner_id = int(os.environ.get("OWNER_ID", "5067025016"))
+
     yarik_chat_id = int(os.environ.get("YARIK_CHAT_ID", "6271387044"))
     render_url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 
