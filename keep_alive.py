@@ -901,8 +901,21 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     initiator_label = "Ты (Владелец)" if is_owner_sender else "Ярик"
     print(f"[ORCHESTRATOR] Handling YARIK summon from {initiator_label}: {text!r} (msg_id={msg_id})")
 
+    # 0. Специальный пасхалочный триггер от Ярика
+    if re.search(r"х+у+е+с+о+с+", t_lower):
+        reply = "ХУЕСОС СКОРО ПРИЙДЕТ"
+        subprocess.run([
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--text", reply,
+            "--reply-to", str(msg_id)
+        ])
+        return
+
     # 1. Запрос на удаление
     if "удали" in t_lower:
+
         target_id = msg_data.get("reply_to_msg_id") or get_last_bot_sent_id()
         num_match = re.search(r"#?(\d{4,})", text)
         if num_match:

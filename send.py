@@ -158,14 +158,7 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
                 shutil.copy2(photo_path, dest_file)
             print(f"Meme copy saved: {dest_file}")
 
-            # Upload to Google Drive
-            try:
-                from gdrive import upload_file_to_drive
-                upload_file_to_drive(dest_file)
-            except Exception as e:
-                print(f"[GDRIVE UPLOAD WARNING] {e}")
-
-            # 2. Send to chat (Yarik) via Telethon
+            # 1. Send to chat (Yarik) via Telethon
             msg = await client.send_file(
                 entity,
                 photo_path,
@@ -174,15 +167,36 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
             )
             print(f"Telethon file sent (msg_id={msg.id})")
 
-            # 3. Automatically forward a copy to Owner via Control Bot
+            # 2. Automatically forward a copy to Owner via Control Bot
             if cfg.get("bot_token") and cfg.get("owner_id"):
-                caption = f"🚀 Копия отправленного Ярику мема:\n{text or ''}".strip()
+                caption = f"🚀 Копия отправленного Ярику медиа:\n{text or ''}".strip()
                 send_via_bot_api(
                     cfg["bot_token"],
                     cfg["owner_id"],
                     text=caption,
-                    file_path=dest_file
+                    file_path=photo_path
                 )
+
+            # 3. Upload to Google Drive and clean up local storage
+            try:
+                from gdrive import upload_and_cleanup
+                ext = os.path.splitext(photo_path)[1].lower()
+                if ext in [".mp3", ".ogg", ".wav", ".m4a", ".flac"]:
+                    folder_type = "music"
+                elif ext in [".mp4", ".mov", ".mkv", ".webm", ".avi", ".gif"]:
+                    folder_type = "videos"
+                else:
+                    folder_type = "memes"
+
+                upload_and_cleanup(photo_path, folder_type=folder_type)
+                if dest_file != photo_path and os.path.exists(dest_file):
+                    try:
+                        os.remove(dest_file)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[GDRIVE UPLOAD WARNING] {e}")
+
         else:
             msg = await client.send_message(
                 entity,

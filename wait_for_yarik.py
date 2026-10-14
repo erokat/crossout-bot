@@ -28,7 +28,12 @@ def is_bot_mention(text):
         return True
     if re.search(r"\bбот\b", t):
         return True
+    if re.search(r"х+у+е+с+о+с+", t):
+        return True
+    if any(m in t for m in ["музык", "трек", "песн", "гиф", "gif", "видос", "видео"]) and any(a in t for a in ["скинь", "найди", "скачай", "включи", "поставь", "сгенерируй"]):
+        return True
     return False
+
 
 def get_bot_sent_ids():
     if not os.path.exists(BOT_SENT_FILE):
