@@ -175,6 +175,7 @@ async def main():
     init_db()
     cfg = load_config()
     yarik_chat_id = cfg["yarik_chat_id"]
+    owner_id = cfg.get("owner_id", 5067025016)
 
     exit_event = asyncio.Event()
     result_box = {}
@@ -208,7 +209,8 @@ async def main():
                 async for m in client.iter_messages(entity, min_id=after_id):
                     if m.id in bot_sent:
                         continue
-                    is_owner = getattr(m, 'out', False) or (m.sender_id != yarik_chat_id and m.sender_id is not None)
+                    sender_uid = m.sender_id or (getattr(m.from_id, 'user_id', None) if getattr(m, 'from_id', None) else None)
+                    is_owner = getattr(m, 'out', False) or (sender_uid == owner_id) or (sender_uid is not None and sender_uid != yarik_chat_id)
                     is_from_yarik = not is_owner
                     is_mention = is_bot_mention(m.message)
 
@@ -218,7 +220,7 @@ async def main():
                                 chat_id=yarik_chat_id,
                                 message_id=m.id,
                                 chat_title=chat_title,
-                                sender_id=m.sender_id,
+                                sender_id=sender_uid,
                                 sender_name=chat_title,
                                 date=m.date.isoformat(),
                                 text=m.message or "",
@@ -255,11 +257,12 @@ async def main():
                             pass
 
                     sender_label = "Ты (Владелец)" if is_owner else "Ярик"
+                    sender_key = "owner" if is_owner else "yarik"
                     save_message(
                         chat_id=yarik_chat_id,
                         message_id=m.id,
                         chat_title=chat_title,
-                        sender_id=m.sender_id,
+                        sender_id=sender_uid,
                         sender_name=sender_label,
                         date=m.date.isoformat(),
                         text=m.message or "",
@@ -283,7 +286,8 @@ async def main():
                             "media_type": media_type,
                             "reply_to_msg_id": reply_to_id,
                             "is_mention": True,
-                            "sender": "owner" if is_owner else "yarik",
+                            "sender": sender_key,
+                            "sender_id": sender_uid,
                             "sender_name": sender_label
                         }]
                     }
@@ -297,7 +301,8 @@ async def main():
                     if msg.id in bot_sent:
                         return
 
-                    is_owner = getattr(msg, 'out', False) or (msg.sender_id != yarik_chat_id and msg.sender_id is not None)
+                    sender_uid = msg.sender_id or (getattr(msg.from_id, 'user_id', None) if getattr(msg, 'from_id', None) else None)
+                    is_owner = getattr(msg, 'out', False) or (sender_uid == owner_id) or (sender_uid is not None and sender_uid != yarik_chat_id)
                     is_from_yarik = not is_owner
                     is_mention = is_bot_mention(msg.message)
 
@@ -307,7 +312,7 @@ async def main():
                                 chat_id=yarik_chat_id,
                                 message_id=msg.id,
                                 chat_title=chat_title,
-                                sender_id=msg.sender_id,
+                                sender_id=sender_uid,
                                 sender_name=chat_title,
                                 date=msg.date.isoformat(),
                                 text=msg.message or "",
@@ -347,11 +352,12 @@ async def main():
                             pass
 
                     sender_label = "Ты (Владелец)" if is_owner else "Ярик"
+                    sender_key = "owner" if is_owner else "yarik"
                     save_message(
                         chat_id=yarik_chat_id,
                         message_id=msg.id,
                         chat_title=chat_title,
-                        sender_id=msg.sender_id,
+                        sender_id=sender_uid,
                         sender_name=sender_label,
                         date=msg.date.isoformat(),
                         text=msg.message or "",
@@ -375,7 +381,8 @@ async def main():
                             "media_type": media_type,
                             "reply_to_msg_id": reply_to_id,
                             "is_mention": True,
-                            "sender": "owner" if is_owner else "yarik",
+                            "sender": sender_key,
+                            "sender_id": sender_uid,
                             "sender_name": sender_label
                         }]
                     }
