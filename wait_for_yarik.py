@@ -187,6 +187,7 @@ async def main():
 
     # Start Bot API listener task for Owner
     bot_task = asyncio.create_task(poll_control_bot(cfg, exit_event, result_box))
+    poll_messages_task = None
 
     # Initialize Telethon client for Yarik
     client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
@@ -321,9 +322,9 @@ async def main():
                     exit_event.set()
                     break
 
-                @client.on(events.NewMessage(chats=yarik_chat_id))
-                async def on_new_message(event):
-                    msg = event.message
+                async def handle_candidate_message(msg):
+                    if exit_event.is_set():
+                        return
                     bot_sent = get_bot_sent_ids()
                     if msg.id in bot_sent:
                         return
@@ -434,6 +435,28 @@ async def main():
                     }
                     exit_event.set()
 
+                @client.on(events.NewMessage(chats=yarik_chat_id))
+                async def on_new_message(event):
+                    await handle_candidate_message(event.message)
+
+                # Periodic polling of chat messages to catch outgoing messages from owner (UpdateShortSentMessage)
+                async def poll_recent_telethon_messages():
+                    while not exit_event.is_set():
+                        try:
+                            recent = await client.get_messages(entity, limit=4)
+                            for rm in recent:
+                                if rm.id in get_bot_sent_ids():
+                                    continue
+                                if is_bot_mention(rm.message):
+                                    if (time.time() - rm.date.timestamp()) <= 600:
+                                        await handle_candidate_message(rm)
+                                        return
+                        except Exception:
+                            pass
+                        await asyncio.sleep(3)
+
+                poll_messages_task = asyncio.create_task(poll_recent_telethon_messages())
+
             except Exception as e:
                 sys.stderr.write(f"Telethon entity error: {e}\n")
 
@@ -446,7 +469,10 @@ async def main():
 
     finally:
         bot_task.cancel()
+        if poll_messages_task:
+            poll_messages_task.cancel()
         await client.disconnect()
 
 if __name__ == "__main__":
     asyncio.run(main())
+

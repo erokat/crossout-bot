@@ -11,7 +11,15 @@ import subprocess
 import re
 import urllib.request
 import urllib.parse
+import collections
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+RECENT_LOGS = collections.deque(maxlen=250)
+
+def log_event(text):
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {text}"
+    print(line, flush=True)
+    RECENT_LOGS.append(line)
 
 from config import (
     BASE_DIR,
@@ -168,6 +176,14 @@ class WebServerHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             resp = json.dumps({"status": "ok", "service": "yarik-crossout-userbot", "time": time.time()})
+            self.wfile.write(resp.encode("utf-8"))
+            return
+
+        elif path == "/logs":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            resp = "\n".join(RECENT_LOGS) if RECENT_LOGS else "No logs recorded yet"
             self.wfile.write(resp.encode("utf-8"))
             return
 
@@ -1323,7 +1339,7 @@ def main():
     cleaner_thread = threading.Thread(target=run_periodic_media_cleaner, daemon=True)
     cleaner_thread.start()
 
-    print("[ORCHESTRATOR] Main duty loop started...")
+    log_event("[ORCHESTRATOR] Main duty loop started...")
 
     while True:
         try:
@@ -1353,6 +1369,7 @@ def main():
 
             source = data.get("source")
             messages = data.get("messages", [])
+            log_event(f"[ORCHESTRATOR] Received {len(messages)} messages from {source}: {[m.get('text', '')[:60] for m in messages]}")
 
             for m in messages:
                 try:
@@ -1367,7 +1384,7 @@ def main():
                         cleanup_video_file(vid_candidate)
 
         except Exception as e:
-            print(f"[ORCHESTRATOR EXCEPTION] Unexpected error in duty loop: {e}")
+            log_event(f"[ORCHESTRATOR EXCEPTION] Unexpected error in duty loop: {e}")
             time.sleep(3)
 
 if __name__ == "__main__":
