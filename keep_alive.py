@@ -23,6 +23,7 @@ from config import (
 )
 from db import init_db, resolve_confirmation
 from meme_generator import generate_crossout_meme
+from gdrive import get_auth_url, exchange_code, upload_file_to_drive
 
 def setup_environment():
     # 1. Decode SESSION_BASE64 if present
@@ -196,6 +197,86 @@ class WebServerHandler(BaseHTTPRequestHandler):
                 self.wfile.write(b"Bad Request: Missing or invalid id/action parameters.")
                 return
 
+        elif path == "/gdrive/connect":
+            auth_url = get_auth_url()
+            if auth_url:
+                self.send_response(302)
+                self.send_header("Location", auth_url)
+                self.end_headers()
+                return
+            else:
+                self.send_response(500)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"GDRIVE_CLIENT_ID not configured.")
+                return
+
+        elif path == "/oauth/google/callback":
+            code = qs.get("code", [None])[0]
+            error = qs.get("error", [None])[0]
+
+            if error:
+                self.send_response(400)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(f"<h1>Ошибка авторизации Google: {error}</h1>".encode("utf-8"))
+                return
+
+            if code:
+                success, msg = exchange_code(code)
+                if success:
+                    def sync_all():
+                        if os.path.exists(SAVED_MEMES_DIR):
+                            for f in os.listdir(SAVED_MEMES_DIR):
+                                if f.endswith((".png", ".jpg", ".gif")):
+                                    upload_file_to_drive(os.path.join(SAVED_MEMES_DIR, f))
+                    threading.Thread(target=sync_all, daemon=True).start()
+
+                    cfg = load_config()
+                    if cfg.get("bot_token") and cfg.get("owner_id"):
+                        cmd = [
+                            sys.executable,
+                            os.path.join(BASE_DIR, "send.py"),
+                            "--to", "owner",
+                            "--text", "🎉 <b>Google Диск успешно подключен!</b>\nПапка <code>memes</code> создана. Все сохраненные и новые мемы теперь автоматически синхронизируются с твоим личным Google Диском! 📁☁️"
+                        ]
+                        subprocess.run(cmd)
+
+                    html = """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Google Диск подключен</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+        .card { background: #1e293b; border-radius: 16px; padding: 32px; max-width: 440px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; }
+        h1 { margin-top: 0; font-size: 24px; color: #38bdf8; }
+        p { color: #94a3b8; font-size: 15px; line-height: 1.5; }
+        .badge { display: inline-block; padding: 6px 14px; border-radius: 9999px; font-weight: bold; font-size: 14px; margin-bottom: 16px; background: #166534; color: #4ade80; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="badge">СИНХРОНИЗАЦИЯ АКТИВНА</div>
+        <h1>✅ Google Диск подключен!</h1>
+        <p>Папка <b>memes</b> успешно создана в твоем Google Диске. Все создаваемые мемы бота будут автоматически загружаться туда в фоне.</p>
+        <p>Можешь закрыть эту вкладку и вернуться в Telegram.</p>
+    </div>
+</body>
+</html>"""
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(html.encode("utf-8"))
+                    return
+                else:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(f"<h1>Ошибка обмена токена:</h1><p>{msg}</p>".encode("utf-8"))
+                    return
+
         self.send_response(404)
         self.end_headers()
 
@@ -335,8 +416,19 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # Run Antigravity CLI or smart helper
-    response = None
+    # If owner asks for Google Drive connection
+    if any(w in t_lower for w in ["диск", "drive", "gdrive"]):
+        connect_url = "https://yarik-crossout-userbot.onrender.com/gdrive/connect"
+        reply = (
+            "📁 <b>Подключение Google Диска:</b>\n\n"
+            f"Перейди по ссылке для разовой авторизации:\n"
+            f"👉 <a href='{connect_url}'>Нажми сюда, чтобы войти через Google</a>\n\n"
+            "После подтверждения бот автоматически создаст папку <code>memes</code> на твоем Диске и загрузит туда все созданные мемы!"
+        )
+        cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
+        subprocess.run(cmd)
+        return
+
     # Run Antigravity CLI or smart helper
     response = None
     if text:

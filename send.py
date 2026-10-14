@@ -144,6 +144,14 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
                 shutil.copy2(photo_path, dest_file)
             print(f"Meme copy saved: {dest_file}")
 
+            # Trigger background upload to Google Drive
+            try:
+                from gdrive import upload_file_to_drive
+                import threading
+                threading.Thread(target=upload_file_to_drive, args=(dest_file,), daemon=True).start()
+            except Exception as e:
+                print(f"[GDRIVE TRIGGER WARNING] {e}")
+
             # 2. Send to chat (Yarik) via Telethon
             msg = await client.send_file(
                 entity,
