@@ -356,19 +356,175 @@ def run_periodic_media_cleaner():
         except Exception as e:
             print(f"[CLEANUP EXCEPTION] Error in periodic cleaner: {e}")
 
+def ask_gemini_api(prompt, photo_path=None, system_instruction=None):
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not gemini_key:
+        return None
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+        parts = []
+        if photo_path and os.path.exists(photo_path):
+            mime = "image/jpeg" if photo_path.lower().endswith((".jpg", ".jpeg")) else "image/png"
+            with open(photo_path, "rb") as f:
+                b64_img = base64.b64encode(f.read()).decode("utf-8")
+            parts.append({"inlineData": {"mimeType": mime, "data": b64_img}})
+        parts.append({"text": prompt})
+        body = {"contents": [{"parts": parts}]}
+        if system_instruction:
+            body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            res_data = json.loads(resp.read().decode("utf-8"))
+            candidates = res_data.get("candidates", [])
+            if candidates:
+                parts_out = candidates[0].get("content", {}).get("parts", [])
+                out_texts = [p.get("text", "") for p in parts_out if "text" in p]
+                if out_texts:
+                    return "".join(out_texts).strip()
+    except Exception as e:
+        print(f"[GEMINI API EXCEPTION] {e}")
+    return None
+
+def ocr_image_file(photo_path):
+    if not photo_path or not os.path.exists(photo_path):
+        return ""
+    try:
+        import pytesseract
+        from PIL import Image
+        img = Image.open(photo_path)
+        try:
+            txt = pytesseract.image_to_string(img, lang="ron+rus+eng").strip()
+        except Exception:
+            txt = pytesseract.image_to_string(img).strip()
+        return txt
+    except Exception as e:
+        print(f"[OCR ERROR] {e}")
+        return ""
+
 def run_antigravity_cli(prompt):
-    cmd = ["agy", "--dangerously-skip-permissions", "-p", prompt]
+    agy_bin = shutil.which("agy") or shutil.which("antigravity")
+    if not agy_bin:
+        for candidate in ["/usr/local/bin/agy", "/root/.local/bin/agy", "/data/data/com.termux/files/usr/bin/agy"]:
+            if os.path.exists(candidate):
+                agy_bin = candidate
+                break
+    if not agy_bin:
+        agy_bin = "agy"
+
+    cmd = [agy_bin, "--dangerously-skip-permissions", "-p", prompt]
     try:
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
         else:
             if res.stderr:
-                print(f"[AGY WARNING] Error running agy: {res.stderr[:200]}")
+                print(f"[AGY WARNING] Error running {agy_bin}: {res.stderr[:200]}")
             return None
     except Exception as e:
-        print(f"[AGY EXCEPTION] Failed to execute agy: {e}")
+        print(f"[AGY EXCEPTION] Failed to execute {agy_bin}: {e}")
         return None
+
+def ask_ai(prompt, photo_path=None, system_instruction=None):
+    # 1. Try Gemini API directly if configured
+    gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction=system_instruction)
+    if gemini_res:
+        return gemini_res
+
+    # 2. If photo is present and no Gemini API, extract text via OCR
+    ocr_text = ""
+    if photo_path and os.path.exists(photo_path):
+        ocr_text = ocr_image_file(photo_path)
+
+    combined_prompt = prompt
+    if ocr_text:
+        combined_prompt = f"Текст с прикрепленной фотографии задания/учебника:\n«««\n{ocr_text}\n»»»\n\nЗапрос пользователя: {prompt}"
+    if system_instruction:
+        combined_prompt = f"{system_instruction}\n\n{combined_prompt}"
+
+    # 3. Call Antigravity CLI
+    return run_antigravity_cli(combined_prompt)
+
+def is_homework_or_study(text, has_photo=False):
+    if not text and not has_photo:
+        return False
+    t = text.lower().strip()
+    hw_words = [
+        "дз", "домашк", "домашка", "домашнее", "переведи", "перевод", "реши",
+        "помоги с", "задач", "номер", "упражнен", "сочинен", "эссе", "изложен",
+        "молдавск", "румынск", "английск", "немецк", "французск", "математ",
+        "алгебр", "геометр", "физик", "хими", "биолог", "истори", "географ",
+        "литератур", "правил", "как переводится", "что значит", "разбери слово",
+        "морфологическ", "синтаксическ", "падеж", "спряжен", "уравнен", "теорем",
+        "интеграл", "производн", "корень", "дробь", "диктант", "урок", "реферат",
+        "ответь на вопрос", "параграф"
+    ]
+    if any(w in t for w in hw_words):
+        return True
+    if has_photo and any(w in t for w in ["что тут", "что это", "помоги", "напиши", "сделай", "разбери", "текст", "перевод", "реши", "прочитай"]):
+        return True
+    return False
+
+def solve_school_task(text, photo_path=None, is_owner=False, sender_name="Ярик"):
+    t_lower = text.lower()
+    is_essay = any(w in t_lower for w in ["сочинен", "эссе", "изложен"])
+    is_trans = any(w in t_lower for w in ["переведи", "перевод", "молдавск", "румынск", "английск", "немецк", "французск", "как переводится"])
+
+    target_name = "Миша" if is_owner else "Ярик"
+
+    if is_essay:
+        system_instruction = (
+            "Ты — опытный репетитор по русскому языку и литературе. Напиши образцовое школьное сочинение, строго соблюдая структуру:\n"
+            "1. Вступление (тезис, 3-5 предложений): определение ключевого понятия своими словами, постановка проблемы и четкий тезис.\n"
+            "2. Основная часть (литературный аргумент, 8-14 предложений): глубокий анализ ОДНОГО конкретного героя и ОДНОГО произведения, указать ФИО автора, название, жанр, мотивы героя, ключевой конфликт и финал.\n"
+            "3. Заключение (3-5 предложений): актуальность проблемы для современного человека и обобщающий вывод.\n"
+            "Стиль: живой, грамотный язык реального ученика-старшеклассника, без канцеляризмов и штампов. Без выдуманных фактов."
+        )
+        prompt = f"Напиши школьное сочинение на тему: «{text}»."
+    elif is_trans:
+        system_instruction = (
+            "Ты — профессиональный переводчик и преподаватель языков. Твоя задача — максимально точно, грамотно и качественно перевести текст для школьника. "
+            "Если текст на молдавском / румынском языке, переведи его на чистый литературный русский язык. "
+            "Структура ответа:\n"
+            "1. Перевод на русский язык (четкий, связный, грамотный).\n"
+            "2. Если переводишь с фото — приведи оригинальный текст и перевод каждого абзаца/предложения.\n"
+            "3. Если есть сложные или интересные слова/грамматика — кратко поясни их значение."
+        )
+        prompt = f"Переведи задание/текст: «{text}»."
+    else:
+        system_instruction = (
+            "Ты — умный и доброжелательный школьный репетитор по всем предметам (математика, физика, химия, русский язык, биология, история). "
+            "Твоя задача — помочь ученику разобраться с домашним заданием. "
+            "Объясняй понятно, по шагам, с формулами и пояснениями. В конце обязательно выдели четкий ОТВЕТ. "
+            "Будь вежливым, поддерживающим и конструктивным. Никакого геймерского сленга и дурацких шуток."
+        )
+        prompt = f"Помоги решить школьное задание / домашку: «{text}»."
+
+    solution = ask_ai(prompt, photo_path=photo_path, system_instruction=system_instruction)
+
+    if not solution:
+        if photo_path:
+            return (
+                f"{target_name}, я попытался разобрать фото с заданием, но не смог четко распознать текст. "
+                "Пожалуйста, сфотографируй страницу ближе и четче (при хорошем освещении) или напиши само задание текстом — я сразу всё решу!"
+            )
+        else:
+            return f"{target_name}, напиши чуть подробнее условие задания или номер упражнения — я помогу решить и всё объясню по полочкам!"
+
+    prefix = f"📚 **Домашка для {target_name}:**\n\n"
+    if is_trans:
+        prefix = f"🌐 **Перевод для {target_name}:**\n\n"
+    elif is_essay:
+        prefix = f"📝 **Сочинение для {target_name}:**\n\n"
+
+    solution = re.sub(r"\bшеф[а-я]*\b", "Миша", solution, flags=re.I)
+    solution = re.sub(r"\bбосс[а-я]*\b", "Миша", solution, flags=re.I)
+
+    return prefix + solution
 
 def search_youtube_video(query):
     try:
@@ -459,7 +615,7 @@ def handle_owner_message(msg_data):
             meme_path = generate_crossout_meme(theme="Crossout random madness", allow_repeat=False, recipient="yarik")
 
         prompt_cap = "Ты отправляешь свежий мем Ярику в чат по поручению своего друга (создателя). Напиши короткую живую пацанскую реплику Ярику (1 предложение) в стиле игроков Crossout про рандом и крафты. Выдай ТОЛЬКО текст."
-        caption = run_antigravity_cli(prompt_cap) or "Ярик, зацени этот шедевр! Требуется твоя строгая экспертная оценка от 1 до 10 💥🚜"
+        caption = ask_ai(prompt_cap) or "Ярик, зацени этот шедевр! Требуется твоя строгая экспертная оценка от 1 до 10 💥🚜"
 
         cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", meme_path, "--text", caption]
         subprocess.run(cmd_yarik)
@@ -475,7 +631,7 @@ def handle_owner_message(msg_data):
     is_search_video = any(w in t_lower for w in ["найди", "поищи", "ютуб", "youtube", "откуда", "что за видео", "что за момент", "оригинал"]) and any(w in t_lower for w in ["момент", "видео", "клип", "ютуб", "youtube", "сери", "серия", "фильм", "мульт", "скинь", "ссылк", "линк"])
     if is_search_video:
         prompt_q = f"Пользователь просит найти видео/момент: «{text}». Какое название видео/мультфильма/момента нужно ввести в YouTube для поиска? Выдай ТОЛЬКО 2-4 ключевых слова для поиска на YouTube без кавычек."
-        search_kw = run_antigravity_cli(prompt_q) or text
+        search_kw = ask_ai(prompt_q) or text
         vid_url, vid_title = search_youtube_video(search_kw)
         if not vid_url:
             vid_url, vid_title = search_youtube_video(text)
@@ -490,6 +646,18 @@ def handle_owner_message(msg_data):
             os.path.join(BASE_DIR, "send.py"),
             "--to", "owner",
             "--text", reply_search
+        ]
+        subprocess.run(cmd_owner)
+        return
+
+    # 0.6. Домашнее задание / решение задач / перевод текста / учеба
+    if is_homework_or_study(text, has_photo=bool(photo)):
+        answer = solve_school_task(text, photo_path=photo, is_owner=True, sender_name="Миша")
+        cmd_owner = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "owner",
+            "--text", answer
         ]
         subprocess.run(cmd_owner)
         return
@@ -514,7 +682,7 @@ def handle_owner_message(msg_data):
                     fb_cap = f"Ярик, зацени этот шедевр по Rain World{num_suffix}! Требуется твоя строгая экспертная оценка от 1 до 10 🌧️🐱"
                 else:
                     fb_cap = f"Ярик, зацени этот шедевр{num_suffix}! Требуется твоя строгая экспертная оценка от 1 до 10 🔥🚜"
-                caption = run_antigravity_cli(prompt_cap) or fb_cap
+                caption = ask_ai(prompt_cap) or fb_cap
 
                 # Отправка Ярику через Telethon
                 cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", meme_path, "--text", caption]
@@ -539,7 +707,7 @@ def handle_owner_message(msg_data):
                 f"Владелец бота поручил передать Ярику следующее: «{text}». "
                 "Сформулируй классное, живое пацанское сообщение Ярику в чат от имени бота/кореша. Выдай ТОЛЬКО текст."
             )
-            msg_text = run_antigravity_cli(prompt_msg) or text
+            msg_text = ask_ai(prompt_msg) or text
             cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", msg_text]
             subprocess.run(cmd_yarik)
             cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", f"Передал Ярику: «{msg_text}» 🫡"]
@@ -576,7 +744,7 @@ def handle_owner_message(msg_data):
             "Ответь живо, дружелюбно, по-товарищески (1-2 коротких предложения), мол держи коллекцию, Миша. Обращайся к нему по имени Миша. "
             "Обязательно включи ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat"
         )
-        reply = run_antigravity_cli(prompt_stk)
+        reply = ask_ai(prompt_stk)
         if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
             reply = "Держи наш стикерпак, Миша! Раздавай стиль в чатах: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
         cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
@@ -667,7 +835,7 @@ def handle_owner_message(msg_data):
             "СТРОЖАЙШИЙ ЗАПРЕТ: НИКАКИХ 'Принял, шеф', НИКАКИХ 'шеф', 'босс', 'командир', 'Задача в работе', 'Все службы на связи', 'Чем займемся' и никаких шаблонных фраз робота! "
             "Отвечай просто, прикольно, живо и по делу (1-2 предложения). Выдай ТОЛЬКО чистый текст реплики."
         )
-        response = run_antigravity_cli(prompt)
+        response = ask_ai(prompt, photo_path=photo)
 
     if not response or any(bad in response.lower() for bad in ["принял, шеф", "принял шеф", "задача в работе", "все службы на связи", "шеф", "босс"]):
         if any(w in t_lower for w in ["в сети", "тут", "живой", "работаешь"]):
@@ -740,14 +908,14 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                     f"Владелец запросил в чате с Яриком удаление сообщения ('{text}'). Действие разрешено, и сообщение только что снесено у обоих собеседников (у Ярика и у владельца). "
                     "Напиши короткую живую реплику в чат в стиле опытного игрока Crossout (мол, зачистил ангар / убрал лишнее / без свидетелей). 1 предложение."
                 )
-                reply = run_antigravity_cli(prompt_appr) or "Снес под ноль у всех, как будто кабина отлетела! Чат зачищен 🚜💥"
+                reply = ask_ai(prompt_appr) or "Снес под ноль у всех, как будто кабина отлетела! Чат зачищен 🚜💥"
             else:
                 prompt_appr = (
                     f"Ярик попросил в чате удалить сообщение ('{text}'). Владелец разрешил, и ты только что снес его к чертям из чата у всех (у обоих). "
                     "Напиши живой, угарный, саркастичный ответ Ярику в чат в стиле опытного игрока Crossout (без официоза, без щитов '🛡️', по-пацански, "
                     "про детонацию, зачистку ангара или замятый позор, мол никто ничего не видел). 1-2 сочных предложения. Выдай ТОЛЬКО сам текст реплики."
                 )
-                reply = run_antigravity_cli(prompt_appr)
+                reply = ask_ai(prompt_appr)
                 if not reply:
                     reply = "Стер этот позор к чертям у всех, будто Газген сдетонировал в упор 💥 Ярик, спи спокойно, свидетелей нет."
         else:
@@ -760,7 +928,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                     "Напиши живой, саркастичный и смешной ответ Ярику в чат (без официоза, по-дружески подколи его, мол, Миша не разрешил удалять этот шедевр). "
                     "1-2 предложения. Выдай ТОЛЬКО сам текст реплики."
                 )
-                reply = run_antigravity_cli(prompt_rej)
+                reply = ask_ai(prompt_rej)
                 if not reply:
                     if reason_str:
                         reply = f"Не-а, Миша наложил вето: «{owner_comment}» 😂 Так что любуйся своим шедевром."
@@ -781,7 +949,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     is_search_video = any(w in t_lower for w in ["найди", "поищи", "ютуб", "youtube", "откуда", "что за видео", "что за момент", "оригинал"]) and any(w in t_lower for w in ["момент", "видео", "клип", "ютуб", "youtube", "сери", "серия", "фильм", "мульт", "скинь", "ссылк", "линк"])
     if is_search_video:
         prompt_q = f"Пользователь переслал сообщение/медиа и просит: «{text}». Какое название видео/мультфильма/момента нужно ввести в YouTube для поиска? Выдай ТОЛЬКО 2-4 ключевых слова для поиска на YouTube без кавычек."
-        search_kw = run_antigravity_cli(prompt_q) or text
+        search_kw = ask_ai(prompt_q) or text
         vid_url, vid_title = search_youtube_video(search_kw)
         if not vid_url:
             vid_url, vid_title = search_youtube_video(text)
@@ -802,12 +970,28 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
+    # 1.6. Домашнее задание / решение задач / перевод текста / учеба
+    photo_file = msg_data.get("photo")
+    is_homework = is_homework_or_study(text, has_photo=bool(photo_file))
+    if is_homework:
+        recipient_name = "Миша" if is_owner_sender else "Ярик"
+        answer = solve_school_task(text, photo_path=photo_file, is_owner=is_owner_sender, sender_name=recipient_name)
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--text", answer,
+            "--reply-to", str(msg_id)
+        ]
+        subprocess.run(send_cmd)
+        return
+
     # 2. Запрос на мем / картинку
     is_meme_word = any(w in t_lower for w in ["мем", "мэм", "пикч", "картинк", "гиф", "сделай", "склепай", "запили", "нарисуй"])
     is_another_word = any(w in t_lower for w in ["другое", "другой", "следующ", "новеньк", "переделай", "еще", "ещё"]) and any(w in t_lower for w in ["скинь", "давай", "дай", "покажи", "кинь", "сделай", "ботик", "бот", "выдай"])
     is_reply_to_media = bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["скинь", "давай", "другое", "другой", "еще", "ещё", "переделай", "не то", "фигня", "хуйня", "говно", "заново", "повтори"])
 
-    if (is_meme_word or is_another_word or is_reply_to_media) and not is_search_video:
+    if (is_meme_word or is_another_word or is_reply_to_media) and not is_search_video and not is_homework:
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "тоже самое"])
         count = extract_meme_count(text)
         recipient_target = "owner" if is_owner_sender else "yarik"
@@ -852,7 +1036,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 )
                 fallback_cap = fallback_yarik
 
-            caption = run_antigravity_cli(prompt_cap)
+            caption = ask_ai(prompt_cap)
             if not caption:
                 caption = fallback_cap
             if is_owner_sender:
@@ -927,7 +1111,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             )
             fallback_stk = "Держи наш склад отборного позора и детонаций, Ярик, спамь пока раму не оторвало: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
 
-        reply = run_antigravity_cli(prompt_stk_share)
+        reply = ask_ai(prompt_stk_share)
         if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
             reply = fallback_stk
         if is_owner_sender:
@@ -964,7 +1148,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 stk_reply = "Закинул этот угар в стикерпак, Миша! Шедевр зафиксирован в ангаре 🔥"
             else:
                 prompt_stk = "Ты только что добавил последний мем в стикерпак по просьбе Ярика. Напиши живую, короткую фразу (1 предложение) в стиле Crossout про добавление в стикерпак."
-                stk_reply = run_antigravity_cli(prompt_stk) or "Закинул этот угар в стикерпак, шедевр зафиксирован в ангаре! 🔥"
+                stk_reply = ask_ai(prompt_stk) or "Закинул этот угар в стикерпак, шедевр зафиксирован в ангаре! 🔥"
             confirm_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
@@ -985,32 +1169,33 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             subprocess.run(send_cmd)
         return
 
-    # 5. Общий живой разговорный ответ по Crossout
+    # 5. Общий живой разговорный ответ
     if is_owner_sender:
         prompt = (
-            f"Ты — юзербот в чате Crossout. Твой создатель и ВЛАДЕЛЕЦ МИША написал тебе: «{text}». "
-            "Ответь ему по-товарищески, живо, бодро, прикольно и по-пацански с легким юмором Crossout. "
+            f"Тебе написал твой друг и создатель МИША: «{text}». "
+            "Ответь ему по-товарищески, живо, бодро, прикольно и по-пацански с легким дружеским юмором. "
             "Обращайся к нему по имени: Миша (или Миха, Мишан). "
             "СТРОЖАЙШИЙ ЗАПРЕТ: НИ В КОЕМ СЛУЧАЕ НЕ НАЗЫВАЙ ЕГО 'шеф', 'босс', 'командир'! И НЕ называй его Яриком (Ярик — его друг в чате)! "
             "Без занудства и роботоподобных шаблонов. Выдай ТОЛЬКО чистый текст реплики."
         )
-        answer = run_antigravity_cli(prompt)
+        answer = ask_ai(prompt, photo_path=photo_file)
         if not answer:
-            answer = "На связи, Миша! 🚜 Газген заправлен, орудия смазаны. Что замутим или какой мем запилим?"
+            answer = "На связи, Миша! 🚀 Чем помочь или что замутим?"
         answer = re.sub(r"\bшеф[а-я]*\b", "Миша", answer, flags=re.I)
         answer = re.sub(r"\bбосс[а-я]*\b", "Миша", answer, flags=re.I)
         answer = re.sub(r"\bкомандир[а-я]*\b", "Миша", answer, flags=re.I)
         if any(w in answer.lower() for w in ["ярик", "ярику", "ярика"]):
-            answer = "На связи, Миша! 🚜 Газген заправлен, орудия смазаны. Что замутим или какой мем запилим?"
+            answer = "На связи, Миша! 🚀 Чем помочь или что замутим?"
     else:
         prompt = (
-            f"Ты — юзербот и кореш Ярика в чате (играете вместе в Crossout). Твой друг Ярик написал тебе: «{text}». "
-            "Ответь ему как живой пацан-геймер, с юмором, сарказмом и сленгом Crossout (газгены, ховеры, утюги, рандом, крафты), а не как робот-помощник! "
-            "Коротко, на «ты», без душности, без фраз 'Я бот, чем помочь' и без официоза. Только сам текст живой реплики в чат."
+            f"Тебе написал Ярик в чате: «{text}». "
+            "Ответь ему по-дружески, живо, бодро, с легким юмором, без занудства и роботоподобности. "
+            "Если он спрашивает что-то по учебе, играм или жизни — ответь по делу и понятно. "
+            "Коротко, на «ты», без душности, без фраз 'Я бот, чем помочь' и без официоза. Выдай ТОЛЬКО сам текст живой реплики в чат."
         )
-        answer = run_antigravity_cli(prompt)
+        answer = ask_ai(prompt, photo_path=photo_file)
         if not answer:
-            answer = "Че кого, Ярик? 🚜 Пока ты в гараже крафт пересобираешь, твой Газген уже на грани детонации. Гоняй в бой или кидай тему для мема!"
+            answer = "На связи, Ярик! Чем помочь или что обсудим? Кидай вопрос или тему!"
 
     send_cmd = [
         sys.executable,

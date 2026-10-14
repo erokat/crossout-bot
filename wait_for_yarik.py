@@ -272,6 +272,25 @@ async def main():
                     )
 
                     reply_to_id = getattr(m, "reply_to_msg_id", None) or (m.reply_to.reply_to_msg_id if getattr(m, "reply_to", None) else None)
+                    if not media_path and reply_to_id:
+                        try:
+                            replied_m = await client.get_messages(chat_title, ids=reply_to_id)
+                            if replied_m:
+                                if replied_m.photo:
+                                    has_media = 1
+                                    media_type = "photo"
+                                    media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.jpg")
+                                    if not os.path.exists(media_path):
+                                        await replied_m.download_media(file=media_path)
+                                elif replied_m.video:
+                                    has_media = 1
+                                    media_type = "video"
+                                    media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.mp4")
+                                    if not os.path.exists(media_path):
+                                        await replied_m.download_media(file=media_path)
+                        except Exception:
+                            pass
+
                     result_box["data"] = {
                         "status": "new_messages",
                         "source": "yarik",
@@ -367,6 +386,25 @@ async def main():
                     )
 
                     reply_to_id = getattr(msg, "reply_to_msg_id", None) or (msg.reply_to.reply_to_msg_id if getattr(msg, "reply_to", None) else None)
+                    if not media_path and reply_to_id:
+                        try:
+                            replied_m = await client.get_messages(chat_title, ids=reply_to_id)
+                            if replied_m:
+                                if replied_m.photo:
+                                    has_media = 1
+                                    media_type = "photo"
+                                    media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.jpg")
+                                    if not os.path.exists(media_path):
+                                        await replied_m.download_media(file=media_path)
+                                elif replied_m.video:
+                                    has_media = 1
+                                    media_type = "video"
+                                    media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.mp4")
+                                    if not os.path.exists(media_path):
+                                        await replied_m.download_media(file=media_path)
+                        except Exception:
+                            pass
+
                     result_box["data"] = {
                         "status": "new_messages",
                         "source": "yarik",
