@@ -108,8 +108,8 @@ async def delete_via_telethon(cfg, chat_id, message_ids):
 
     try:
         entity = await client.get_entity(chat_id)
-        await client.delete_messages(entity, message_ids)
-        print(f"Telethon deleted messages {message_ids} in chat {chat_id}")
+        await client.delete_messages(entity, message_ids, revoke=True)
+        print(f"Telethon deleted messages {message_ids} in chat {chat_id} (revoke=True for everyone)")
         return True
     finally:
         await client.disconnect()

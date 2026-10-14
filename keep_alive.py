@@ -337,12 +337,14 @@ def handle_owner_message(msg_data):
 
     # Run Antigravity CLI or smart helper
     response = None
+    # Run Antigravity CLI or smart helper
+    response = None
     if text:
-        prompt = f"Ты управляющий ИИ-ассистент юзербота Crossout. Владелец написал тебе следующее сообщение:\n\n{text}\n\nВыполни задачу и дай четкий, полезный ответ."
+        prompt = f"Ты умный и преданный помощник владельца (erokat). Владелец написал тебе в личку: «{text}». Ответь четко, по делу, дружелюбно и живо, без шаблонных канцеляризмов."
         response = run_antigravity_cli(prompt)
 
     if not response:
-        response = f"✅ Сообщение принято! Текст: «{text}»\nБот и субагенты в строю."
+        response = f"Принял, шеф! Задача по «{text}» в работе. Все службы на связи 🫡"
 
     # Reply to owner
     cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", response]
@@ -381,12 +383,28 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                     "--delete", str(target_id)
                 ]
                 subprocess.run(del_cmd)
-            reply = "🛡️ Владелец подтвердил действие! Сообщение удалено."
+            
+            prompt_appr = (
+                f"Ярик попросил в чате удалить сообщение ('{text}'). Владелец разрешил, и ты только что снес его к чертям из чата у всех (у обоих). "
+                "Напиши живой, угарный, саркастичный ответ Ярику в чат в стиле опытного игрока Crossout (без официоза, без щитов '🛡️', по-пацански, "
+                "про детонацию, зачистку ангара или замятый позор, мол никто ничего не видел). 1-2 сочных предложения. Выдай ТОЛЬКО сам текст реплики."
+            )
+            reply = run_antigravity_cli(prompt_appr)
+            if not reply:
+                reply = "Стер этот позор к чертям у всех, будто Газген сдетонировал в упор 💥 Ярик, спи спокойно, свидетелей нет."
         else:
-            if owner_comment and owner_comment not in ["Inline button", "Web link click"] and not owner_comment.startswith("Timeout"):
-                reply = f"⚠️ Владелец отклонил удаление: «{owner_comment}»"
-            else:
-                reply = "⚠️ Владелец отклонил удаление сообщения 🛡️"
+            reason_str = f", сказав: '{owner_comment}'" if (owner_comment and owner_comment not in ["Inline button", "Web link click"] and not owner_comment.startswith("Timeout")) else ""
+            prompt_rej = (
+                f"Ярик просил удалить сообщение ('{text}'), но владелец отказал{reason_str}. "
+                "Напиши живой, саркастичный и смешной ответ Ярику в чат (без официоза '⚠️ Владелец отклонил', по-дружески подколи его, мол, этот шедевр останется для истории Пустошей). "
+                "1-2 предложения. Выдай ТОЛЬКО сам текст реплики."
+            )
+            reply = run_antigravity_cli(prompt_rej)
+            if not reply:
+                if reason_str:
+                    reply = f"Не-а, шеф наложил вето: «{owner_comment}» 😂 Так что любуйся своим шедевром."
+                else:
+                    reply = "Шеф сказал оставить для потомков 😂 Этот легендарный высер останется в истории Пустошей!"
 
         send_cmd = [
             sys.executable,
@@ -400,13 +418,14 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
 
     # 2. Запрос на мем / картинку
     if any(w in t_lower for w in ["мем", "пикч", "картинк", "гиф", "сделай"]):
-        # 1 meme = 1 isolated subagent / generator call
         meme_path = generate_crossout_meme(theme=text)
-        caption = "Свежий авторский мем по Пустошам готов! 🚜💥"
-        if "автосборк" in t_lower:
-            caption = "Когда доверился кнопке «Автосборка» в гараже 😂🤖"
-        elif "птур" in t_lower:
-            caption = "Птуровод на позиции: скилл максимальный 🚀🎯"
+        prompt_cap = (
+            f"Ты генератор мемов по игре Crossout. Придумай одну смешную, угарную, жизненную подпись к мему по теме: «{text}». "
+            "В стиле игроков Crossout (с сарказмом про рандом, взрывы, автосборку, детонацию крафтов). Без кавычек, 1 короткое сочное предложение с эмодзи."
+        )
+        caption = run_antigravity_cli(prompt_cap)
+        if not caption:
+            caption = "Когда собрал крафт из говна и палок и поехал тащить рандом 🚜💀"
 
         send_cmd = [
             sys.executable,
@@ -426,11 +445,13 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 "--image", meme_path
             ]
             subprocess.run(sticker_cmd)
+            prompt_stk = "Ярик попросил добавить созданный мем в стикерпак Crossout. Ты только что закинул его в пак. Напиши короткую живую фразу в чат (1 предложение), что мем добавлен в стикерпак и готов к спаму."
+            stk_reply = run_antigravity_cli(prompt_stk) or "Закинул этот угар в стикерпак! Теперь можно спамить в чатах 🔥💀"
             confirm_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "yarik",
-                "--text", "Добавил этот мем в стикерпак! 🔥",
+                "--text", stk_reply,
                 "--reply-to", str(msg_id)
             ]
             subprocess.run(confirm_cmd)
@@ -438,7 +459,6 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
 
     # 3. Добавление в стикерпак отдельной командой
     if "стикер" in t_lower:
-        # Найти последний мем
         recent_memes = sorted([
             os.path.join(SAVED_MEMES_DIR, f) for f in os.listdir(SAVED_MEMES_DIR)
             if f.endswith((".png", ".jpg"))
@@ -451,21 +471,27 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 "--image", recent_memes[0]
             ]
             subprocess.run(sticker_cmd)
+            prompt_stk = "Ты только что добавил последний мем в стикерпак по просьбе Ярика. Напиши живую, короткую фразу (1 предложение) про добавление в стикерпак."
+            stk_reply = run_antigravity_cli(prompt_stk) or "Добавил в стикерпак, шедевр зафиксирован! 🔥"
             confirm_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "yarik",
-                "--text", "Добавил этот мем в стикерпак! 🔥",
+                "--text", stk_reply,
                 "--reply-to", str(msg_id)
             ]
             subprocess.run(confirm_cmd)
         return
 
-    # 4. Общий ответ / рассуждение по Crossout
-    prompt = f"Ты Crossout бот в чате с Яриком. Ответь кратко, по фактам и с юмором по игре Crossout на обращение: «{text}»"
+    # 4. Общий живой разговорный ответ по Crossout
+    prompt = (
+        f"Ты — юзербот и кореш Ярика в чате (играете вместе в Crossout). Ярик написал тебе: «{text}». "
+        "Ответь ему как живой пацан-геймер, с юмором, сарказмом и сленгом Crossout (газгены, ховеры, утюги, рандом, крафты), а не как робот-помощник! "
+        "Коротко, на «ты», без душности, без фраз 'Я бот, чем помочь' и без официоза. Только сам текст живой реплики в чат."
+    )
     answer = run_antigravity_cli(prompt)
     if not answer:
-        answer = "На связи! 🤖 Слушаю внимательно. Могу сгенерить мем (`!бот сделай мем...`) или пояснить за мету и крафты в Crossout!"
+        answer = "Че кого, Ярик? 🚜 Пока ты в гараже крафт пересобираешь, твой Газген уже на грани детонации. Гоняй в бой или кидай тему для мема!"
 
     send_cmd = [
         sys.executable,
