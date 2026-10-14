@@ -384,15 +384,26 @@ def extract_meme_count(text):
     if not text:
         return 1
     t = text.lower()
+    # 1. Number before meme word: "3 мема", "5 картинок"
     m = re.search(r"(\d+)\s*(?:мем|пикч|картинк|штук)", t)
     if m:
         return max(1, min(int(m.group(1)), 10))
+    # 2. Number after meme word (e.g. "мемов по кросауту 3", "мемов 3", "пикчи 2")
+    m = re.search(r"(?:мем[а-я]*|пикч[а-я]*|картинк[а-я]*|штук[а-я]*)\D*?(\d+)", t)
+    if m:
+        return max(1, min(int(m.group(1)), 10))
+    # 3. Any standalone number in text if meme keyword is present
+    if any(w in t for w in ["мем", "пикч", "картинк", "гиф"]):
+        m = re.search(r"\b(\d+)\b", t)
+        if m:
+            return max(1, min(int(m.group(1)), 10))
+    # 4. Words for numbers
     num_words = {
         "два": 2, "две": 2, "пару": 2, "три": 3, "четыре": 4, "пять": 5,
         "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10
     }
     for word, val in num_words.items():
-        if re.search(rf"\b{word}\b\s*(?:мем|пикч|картинк|штук)?", t):
+        if re.search(rf"\b{word}\b", t):
             return val
     return 1
 
