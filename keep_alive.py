@@ -25,6 +25,7 @@ from config import (
 from db import init_db, resolve_confirmation, get_confirmation
 from meme_generator import generate_crossout_meme
 from gdrive import get_auth_url, exchange_code, upload_file_to_drive
+from dynamic_agent import is_autonomous_task, execute_autonomous_task
 
 def delete_bot_message(bot_token, chat_id, message_id):
     if not bot_token or not chat_id or not message_id:
@@ -662,6 +663,17 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd_owner)
         return
 
+    # 0.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
+    if is_autonomous_task(text):
+        res_text, res_media = execute_autonomous_task(text, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai)
+        cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
+        if res_media and os.path.exists(res_media):
+            cmd_owner.extend(["--photo", res_media, "--text", res_text])
+        else:
+            cmd_owner.extend(["--text", res_text])
+        subprocess.run(cmd_owner)
+        return
+
     # 1. Поручение отправить что-то Ярику (мем или сообщение)
     is_yarik_dest = any(w in t_lower for w in ["ярик", "ярику", "кореш"]) or is_meme_theme_req
     if is_yarik_dest:
@@ -986,12 +998,30 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
+    # 1.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
+    is_auto_task = is_autonomous_task(text)
+    if is_auto_task:
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        res_text, res_media = execute_autonomous_task(text, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai)
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--reply-to", str(msg_id)
+        ]
+        if res_media and os.path.exists(res_media):
+            send_cmd.extend(["--photo", res_media, "--text", res_text])
+        else:
+            send_cmd.extend(["--text", res_text])
+        subprocess.run(send_cmd)
+        return
+
     # 2. Запрос на мем / картинку
     is_meme_word = any(w in t_lower for w in ["мем", "мэм", "пикч", "картинк", "гиф", "сделай", "склепай", "запили", "нарисуй"])
     is_another_word = any(w in t_lower for w in ["другое", "другой", "следующ", "новеньк", "переделай", "еще", "ещё"]) and any(w in t_lower for w in ["скинь", "давай", "дай", "покажи", "кинь", "сделай", "ботик", "бот", "выдай"])
     is_reply_to_media = bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["скинь", "давай", "другое", "другой", "еще", "ещё", "переделай", "не то", "фигня", "хуйня", "говно", "заново", "повтори"])
 
-    if (is_meme_word or is_another_word or is_reply_to_media) and not is_search_video and not is_homework:
+    if (is_meme_word or is_another_word or is_reply_to_media) and not is_search_video and not is_homework and not is_auto_task:
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "тоже самое"])
         count = extract_meme_count(text)
         recipient_target = "owner" if is_owner_sender else "yarik"

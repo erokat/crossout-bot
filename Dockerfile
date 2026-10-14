@@ -32,7 +32,7 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app/
-RUN mkdir -p /app/media /app/saved_memes
+RUN mkdir -p /app/media /app/saved_memes /app/extensions
 
 EXPOSE 10000
 
