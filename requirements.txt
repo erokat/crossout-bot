@@ -1,5 +1,6 @@
-telethon>=1.36.0
-pillow>=10.0.0
-fastapi>=0.110.0
-uvicorn>=0.28.0
+telethon>=1.34.0
+pillow>=10.2.0
 requests>=2.31.0
+opencv-python-headless>=4.8.0.76
+imageio>=2.31.0
+numpy>=1.24.0

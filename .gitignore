@@ -1,0 +1,16 @@
+*.session
+*.session-journal
+*.lock
+*.db
+*.db-shm
+*.db-wal
+messages.db
+telegram.db
+.env
+.env.*
+__pycache__/
+config.json
+saved_memes/
+session/
+session.session
+bot_sent_ids.txt

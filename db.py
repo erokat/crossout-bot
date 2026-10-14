@@ -1,0 +1,128 @@
+import sqlite3
+import os
+import time
+from config import DB_PATH
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn.execute("PRAGMA journal_mode = WAL")
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS chats (
+            chat_id INTEGER PRIMARY KEY,
+            title TEXT,
+            username TEXT,
+            type TEXT,
+            last_synced TEXT
+        )
+        """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            chat_id INTEGER,
+            message_id INTEGER,
+            chat_title TEXT,
+            sender_id INTEGER,
+            sender_name TEXT,
+            date TEXT,
+            text TEXT,
+            has_media INTEGER DEFAULT 0,
+            media_type TEXT,
+            media_path TEXT,
+            PRIMARY KEY (chat_id, message_id)
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_date ON messages(date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages(chat_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_text ON messages(text)")
+
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS confirmations (
+            req_id TEXT PRIMARY KEY,
+            question TEXT,
+            status TEXT DEFAULT 'pending',
+            comment TEXT,
+            created_at REAL,
+            resolved_at REAL
+        )
+        """)
+
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS kv_store (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """)
+
+def save_chat(chat_id, title, username, chat_type, last_synced=None):
+    with get_db() as conn:
+        conn.execute("""
+        INSERT INTO chats (chat_id, title, username, type, last_synced)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET
+            title = excluded.title,
+            username = excluded.username,
+            type = excluded.type,
+            last_synced = COALESCE(excluded.last_synced, chats.last_synced)
+        """, (chat_id, title, username, chat_type, last_synced))
+
+def save_message(chat_id, message_id, chat_title, sender_id, sender_name, date, text, has_media=0, media_type=None, media_path=None):
+    with get_db() as conn:
+        conn.execute("""
+        INSERT INTO messages (chat_id, message_id, chat_title, sender_id, sender_name, date, text, has_media, media_type, media_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(chat_id, message_id) DO UPDATE SET
+            chat_title = excluded.chat_title,
+            sender_name = excluded.sender_name,
+            text = excluded.text,
+            has_media = excluded.has_media,
+            media_type = excluded.media_type,
+            media_path = COALESCE(excluded.media_path, messages.media_path)
+        """, (chat_id, message_id, chat_title, sender_id, sender_name, str(date), text, 1 if has_media else 0, media_type, media_path))
+
+def create_confirmation(req_id, question):
+    with get_db() as conn:
+        conn.execute("""
+        INSERT INTO confirmations (req_id, question, status, comment, created_at, resolved_at)
+        VALUES (?, ?, 'pending', NULL, ?, NULL)
+        ON CONFLICT(req_id) DO NOTHING
+        """, (req_id, question, time.time()))
+
+def resolve_confirmation(req_id, status, comment=None):
+    with get_db() as conn:
+        conn.execute("""
+        UPDATE confirmations
+        SET status = ?, comment = COALESCE(?, comment), resolved_at = ?
+        WHERE req_id = ?
+        """, (status.lower(), comment, time.time(), req_id))
+
+def get_confirmation(req_id):
+    with get_db() as conn:
+        cursor = conn.execute("SELECT req_id, question, status, comment, created_at, resolved_at FROM confirmations WHERE req_id = ?", (req_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "req_id": row[0],
+            "question": row[1],
+            "status": row[2],
+            "comment": row[3],
+            "created_at": row[4],
+            "resolved_at": row[5]
+        }
+
+def get_kv(key, default=None):
+    with get_db() as conn:
+        cursor = conn.execute("SELECT value FROM kv_store WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        return row[0] if row else default
+
+def set_kv(key, value):
+    with get_db() as conn:
+        conn.execute("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
+
+if __name__ == "__main__":
+    init_db()
+    print("Database initialized at", DB_PATH)
