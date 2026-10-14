@@ -897,7 +897,11 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     style = joke_data.get("style", "caption").lower()
     t_top = joke_data.get("title", f"МЕМ: {clean_theme.upper()}")
     t_bot = joke_data.get("subtitle", "Классика жанра, которой нет объяснения")
-    t_extra = joke_data.get("sound_or_extra")
+    # Enforce style compatibility so styles look natural with the image
+    img_path_str = str(img_path).lower() if img_path else ""
+    if "gigachad" in img_path_str or (curated_match and curated_match.get("name") in ["gigachad", "roll_safe", "is_this_a_pigeon", "bernie_sanders"]):
+        if style in ["breaking_news", "tweet"]:
+            style = "demotivator" if random.random() < 0.5 else "caption"
 
     # 4. Рендеринг в выбранном стиле
     if style == "demotivator":
