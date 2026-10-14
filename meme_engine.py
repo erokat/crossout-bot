@@ -106,8 +106,8 @@ MEMES_2020_2022 = [
         "title": "Trade Offer",
         "url": "https://i.imgflip.com/54hjww.jpg",
         "keywords": ["сделка", "trade offer", "обмен", "предложение"],
-        "default_setup": "ДЕЛО ПРЕДЛОЖЕНИЯ (TRADE OFFER):",
-        "default_punchline": "Я получаю: твою жемчужину\nТы получаешь: 8 взрывных копий в лицо"
+        "default_setup": "ВЫГОДНОЕ ПРЕДЛОЖЕНИЕ ОБМЕНА:",
+        "default_punchline": "Я получаю: твою победу\nТы получаешь: 8 копий в лоб"
     },
     {
         "name": "think_mark",
@@ -179,7 +179,7 @@ MEMES_2020_2022 = [
         "url": "https://i.imgflip.com/1g8my4.jpg",
         "keywords": ["две кнопки", "сложный выбор", "кнопка", "пот"],
         "default_setup": "Сложный выбор в 3 часа ночи:",
-        "default_punchline": "Лечь спать вовремя OR Сыграть ещё один цикл / бой"
+        "default_punchline": "Лечь спать вовремя ИЛИ Сыграть ещё один бой"
     },
     {
         "name": "distracted_boyfriend",
@@ -194,7 +194,7 @@ MEMES_2020_2022 = [
         "title": "Ugandan Knuckles 2018",
         "url": "https://i.imgflip.com/22bdq6.jpg",
         "keywords": ["2018", "уганда", "наклз", "knuckles", "do you know the way", "da way"],
-        "default_setup": "DO YOU KNOW DA WAY?",
+        "default_setup": "КОГДА СПРАШИВАЮТ: «ТЫ ЗНАЕШЬ ПУТЬ?»",
         "default_punchline": "Когда выкатил утюг с дробовиками в рандом 2018 года."
     },
     {
@@ -203,7 +203,7 @@ MEMES_2020_2022 = [
         "url": "https://i.imgflip.com/24y43o.jpg",
         "keywords": ["2018", "change my mind", "измени мое мнение", "стол", "crowder"],
         "default_setup": "Кроссаут 2018 года с утюгами и ховерами в космосе был легендарным.",
-        "default_punchline": "Change my mind."
+        "default_punchline": "Попробуй изменить моё мнение."
     },
     {
         "name": "is_this_a_pigeon",
@@ -666,19 +666,20 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     # 3. Генерация юмора и текста через AI или креативные шаблоны
     prompt_ai = (
         f"Придумай угарный, жизненный интернет-мем на тему: «{clean_theme}».\n"
+        "СТРОЖАЙШЕЕ ТРЕБОВАНИЕ: ВСЕ ТЕКСТЫ ДОЛЖНЫ БЫТЬ СТРОГО НА РУССКОМ ЯЗЫКЕ! НИКАКОГО АНГЛИЙСКОГО!\n"
         "Ответь строго в JSON без разметки markdown:\n"
         "{\n"
         '  "style": "caption" (или "demotivator", "impact", "breaking_news", "tweet", "pov"),\n'
-        '  "title": "Заголовок или верхний текст (1-2 строки)",\n'
-        '  "subtitle": "Панчлайн, цитата или нижний текст",\n'
-        '  "sound_or_extra": "Звуковой эффект или доп. реплика"\n'
+        '  "title": "Заголовок или верхний текст строго на русском (1-2 строки)",\n'
+        '  "subtitle": "Панчлайн, цитата или нижний текст строго на русском",\n'
+        '  "sound_or_extra": "Звуковой эффект или доп. реплика на русском"\n'
         "}"
     )
 
     joke_data = None
     try:
-        from keep_alive import run_antigravity_cli
-        res_ai = run_antigravity_cli(prompt_ai)
+        from keep_alive import ask_ai, run_antigravity_cli
+        res_ai = ask_ai(prompt_ai) or run_antigravity_cli(prompt_ai)
         if res_ai:
             m = re.search(r"\{.*\}", res_ai, re.DOTALL)
             if m:
