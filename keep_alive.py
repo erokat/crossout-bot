@@ -370,6 +370,24 @@ def run_antigravity_cli(prompt):
         print(f"[AGY EXCEPTION] Failed to execute agy: {e}")
         return None
 
+def search_youtube_video(query):
+    try:
+        clean_q = re.sub(r"(?:найди|поищи|скинь|в|на|ютубе|ютуб|youtube|ссылку|этот|момент|бот|ботик)\s*", " ", query, flags=re.I).strip()
+        if not clean_q:
+            clean_q = query
+        encoded = urllib.parse.quote(clean_q)
+        url = f"https://www.youtube.com/results?search_query={encoded}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8")
+        matches = re.findall(r"\"videoId\":\"([a-zA-Z0-9_-]{11})\".*?\"title\":\{\"runs\":\[\{\"text\":\"([^\"]+)\"\}\]", html)
+        if matches:
+            vid, title = matches[0]
+            return f"https://www.youtube.com/watch?v={vid}", title
+    except Exception as e:
+        print(f"[YOUTUBE SEARCH ERROR] {e}")
+    return None, None
+
 def get_last_bot_sent_id():
     if not os.path.exists(BOT_SENT_FILE):
         return None
@@ -451,6 +469,27 @@ def handle_owner_message(msg_data):
             os.path.join(BASE_DIR, "send.py"),
             "--to", "owner",
             "--text", "Всё, запулил этот мем Ярику в чат! Ждем реакцию 🔥🚜"
+        ]
+        subprocess.run(cmd_owner)
+    # 0.5. Поиск видео / момента / клипа на YouTube для владельца
+    is_search_video = any(w in t_lower for w in ["найди", "поищи", "ютуб", "youtube", "откуда", "что за видео", "что за момент", "оригинал"]) and any(w in t_lower for w in ["момент", "видео", "клип", "ютуб", "youtube", "сери", "серия", "фильм", "мульт", "скинь", "ссылк", "линк"])
+    if is_search_video:
+        prompt_q = f"Пользователь просит найти видео/момент: «{text}». Какое название видео/мультфильма/момента нужно ввести в YouTube для поиска? Выдай ТОЛЬКО 2-4 ключевых слова для поиска на YouTube без кавычек."
+        search_kw = run_antigravity_cli(prompt_q) or text
+        vid_url, vid_title = search_youtube_video(search_kw)
+        if not vid_url:
+            vid_url, vid_title = search_youtube_video(text)
+
+        if vid_url:
+            reply_search = f"Держи этот момент на YouTube, Миша:\n🎬 {vid_title}\n👉 {vid_url}"
+        else:
+            reply_search = f"Попробовал поискать на YouTube, Миша, но точный ролик не нашелся. Попробуй уточнить название или персонажа!"
+
+        cmd_owner = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "owner",
+            "--text", reply_search
         ]
         subprocess.run(cmd_owner)
         return
@@ -738,12 +777,37 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
+    # 1.5. Поиск видео / момента / клипа на YouTube
+    is_search_video = any(w in t_lower for w in ["найди", "поищи", "ютуб", "youtube", "откуда", "что за видео", "что за момент", "оригинал"]) and any(w in t_lower for w in ["момент", "видео", "клип", "ютуб", "youtube", "сери", "серия", "фильм", "мульт", "скинь", "ссылк", "линк"])
+    if is_search_video:
+        prompt_q = f"Пользователь переслал сообщение/медиа и просит: «{text}». Какое название видео/мультфильма/момента нужно ввести в YouTube для поиска? Выдай ТОЛЬКО 2-4 ключевых слова для поиска на YouTube без кавычек."
+        search_kw = run_antigravity_cli(prompt_q) or text
+        vid_url, vid_title = search_youtube_video(search_kw)
+        if not vid_url:
+            vid_url, vid_title = search_youtube_video(text)
+
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        if vid_url:
+            reply_search = f"Держи этот момент на YouTube, {target_name}:\n🎬 {vid_title}\n👉 {vid_url}"
+        else:
+            reply_search = f"Попробовал поискать на YouTube, {target_name}, но точный ролик не нашелся. Попробуй уточнить название или персонажа!"
+
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--text", reply_search,
+            "--reply-to", str(msg_id)
+        ]
+        subprocess.run(send_cmd)
+        return
+
     # 2. Запрос на мем / картинку
     is_meme_word = any(w in t_lower for w in ["мем", "мэм", "пикч", "картинк", "гиф", "сделай", "склепай", "запили", "нарисуй"])
     is_another_word = any(w in t_lower for w in ["другое", "другой", "следующ", "новеньк", "переделай", "еще", "ещё"]) and any(w in t_lower for w in ["скинь", "давай", "дай", "покажи", "кинь", "сделай", "ботик", "бот", "выдай"])
     is_reply_to_media = bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["скинь", "давай", "другое", "другой", "еще", "ещё", "переделай", "не то", "фигня", "хуйня", "говно", "заново", "повтори"])
 
-    if is_meme_word or is_another_word or is_reply_to_media:
+    if (is_meme_word or is_another_word or is_reply_to_media) and not is_search_video:
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "тоже самое"])
         count = extract_meme_count(text)
         recipient_target = "owner" if is_owner_sender else "yarik"
