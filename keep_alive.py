@@ -688,7 +688,7 @@ def handle_owner_message(msg_data):
         return
 
     # 0.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
-    if is_autonomous_task(text):
+    if is_autonomous_task(text, has_media=bool(photo)):
         res_text, res_media = execute_autonomous_task(text, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai)
         cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
         if res_media and os.path.exists(res_media):
@@ -1061,8 +1061,9 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         return
 
     # 1.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
-    is_auto_task = is_autonomous_task(text)
+    is_auto_task = is_autonomous_task(text, has_media=bool(photo_file))
     if is_auto_task:
+
         target_name = "Миша" if is_owner_sender else "Ярик"
         res_text, res_media = execute_autonomous_task(text, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai)
         send_cmd = [
