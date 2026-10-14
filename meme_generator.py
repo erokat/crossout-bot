@@ -3,6 +3,9 @@ import random
 import time
 import hashlib
 import shutil
+import json
+import re
+import subprocess
 from PIL import Image, ImageDraw, ImageFont
 
 from config import MEDIA_DIR, SAVED_MEMES_DIR
@@ -103,6 +106,228 @@ def gen_rw_crossover_2():
 
     draw_text_with_outline(draw, (140, 810), "«Пустоши похуже любого Затененного Цитаделя»", get_font(28), fill="#E2E8F0")
     return img, "rw_crossover_2", headline
+
+# --- PURE RAIN WORLD GENERATORS ---
+
+def gen_rw_scav_toll():
+    width, height = 900, 950
+    img = Image.new("RGB", (width, height), color=(14, 16, 22))
+    draw = ImageDraw.Draw(img)
+    headline = "ТАМОЖНЯ МУСОРЩИКОВ В RAIN WORLD: ОЖИДАНИЕ VS РЕАЛЬНОСТЬ"
+
+    draw_text_with_outline(draw, (50, 40), "ТАМОЖНЯ МУСОРЩИКОВ (SCAV TOLL)", get_font(36), fill="#FBBF24")
+    draw.line([(40, 90), (860, 90)], fill="#444444", width=3)
+    draw_text_with_outline(draw, (50, 110), "«Я просто хотел мирно пройти в следующую зону...»", get_font(24), fill="#94A3B8")
+
+    scav = get_asset("scav_large.png") or get_asset("scavenger.png")
+    if scav:
+        im = Image.open(scav).convert("RGBA").resize((270, 270))
+        img.paste(im, (60, 160), im)
+
+    sp = get_asset("spear.png") or get_asset("spear_clean.png")
+    if sp:
+        im_sp = Image.open(sp).convert("RGBA").resize((220, 220))
+        img.paste(im_sp, (580, 180), im_sp)
+
+    draw.rectangle([(40, 480), (860, 770)], fill=(22, 26, 38), outline="#FBBF24", width=2)
+    draw_text_with_outline(draw, (60, 505), "1. Аккуратно положил редкую жемчужину на землю", get_font(26), fill="#4ADE80")
+    draw_text_with_outline(draw, (60, 560), "2. Случайно подпрыгнул / моргнул / посмотрел не так", get_font(26), fill="#F87171")
+    draw_text_with_outline(draw, (60, 620), "3. ВСЯ ЗАСТАВА ОДНОВРЕМЕННО КИНУЛА 8 ВЗРЫВНЫХ КОПИЙ 💥", get_font(26), fill="#EF4444")
+    draw_text_with_outline(draw, (60, 685), "• Репутация у мусорщиков: -100 (Враг народа)", get_font(24), fill="#FFAA00")
+    draw_text_with_outline(draw, (60, 725), "• Слизнекот: распылен на атомы до конца цикла", get_font(24), fill="#AAAAAA")
+
+    draw_text_with_outline(draw, (110, 820), "«Самое вежливое общение в Rain World»", get_font(30), fill="#38BDF8")
+    return img, "rw_scav_toll", headline
+
+def gen_rw_rain_cycle():
+    width, height = 900, 950
+    img = Image.new("RGB", (width, height), color=(12, 14, 26))
+    draw = ImageDraw.Draw(img)
+    headline = "СУРОВАЯ ЖИЗНЬ В RAIN WORLD: 10 МЕТРОВ ДО УБЕЖИЩА"
+
+    draw_text_with_outline(draw, (70, 40), "КОНЕЦ ЦИКЛА В RAIN WORLD", get_font(38), fill="#38BDF8")
+    draw.line([(40, 90), (860, 90)], fill="#3B82F6", width=3)
+    draw_text_with_outline(draw, (50, 110), "Таймер цикла подошел к концу. Начинается потоп.", get_font(24), fill="#94A3B8")
+
+    draw.rectangle([(50, 160), (850, 420)], fill=(20, 24, 40), outline="#60A5FA", width=2)
+    draw_text_with_outline(draw, (70, 185), "ТВОИ ДОСТИЖЕНИЯ ЗА ЦИКЛ:", get_font(28), fill="#FBBF24")
+    draw_text_with_outline(draw, (70, 235), "✓ Накормил Слизнекота 4 ягодами", get_font(24), fill="#FFFFFF")
+    draw_text_with_outline(draw, (70, 280), "✓ Увернулся от двух стервятников на открытом мосту", get_font(24), fill="#FFFFFF")
+    draw_text_with_outline(draw, (70, 325), "✓ Завалил зеленого ящера с одного копья", get_font(24), fill="#4ADE80")
+    draw_text_with_outline(draw, (70, 370), "✓ До заветного люка убежища осталось ровно 3 метра", get_font(24), fill="#38BDF8")
+
+    draw.rectangle([(50, 460), (850, 740)], fill=(34, 18, 24), outline="#EF4444", width=2)
+    draw_text_with_outline(draw, (70, 485), "РЕАЛЬНОСТЬ У САМОГО ВХОДА:", get_font(28), fill="#F87171")
+    draw_text_with_outline(draw, (70, 540), "• В трубе застряла летучая мышь и жирная пиявка 💀", get_font(26), fill="#FFFFFF")
+    draw_text_with_outline(draw, (70, 595), "• Экран темнеет, вода поднимается на 2 метра в секунду", get_font(26), fill="#FCA5A5")
+    draw_text_with_outline(draw, (70, 650), "• Люк закрывается перед твоим носом", get_font(26), fill="#EF4444")
+    draw_text_with_outline(draw, (70, 695), "💥 КАРМА ПАДАЕТ НА ДНО. УДАЧИ В СЛЕДУЮЩЕМ ЦИКЛЕ 💥", get_font(24), fill="#F87171")
+
+    draw_text_with_outline(draw, (180, 810), "«Дождь Пустошей никого не щадит»", get_font(30), fill="#93C5FD")
+    return img, "rw_rain_cycle", headline
+
+def gen_rw_artificer_chaos():
+    width, height = 900, 950
+    img = Image.new("RGB", (width, height), color=(26, 14, 14))
+    draw = ImageDraw.Draw(img)
+    headline = "КАМПАНИЯ АРТИФИСЕРА: 50% СКИЛЛ, 50% САМОПОДРЫВ"
+
+    draw_text_with_outline(draw, (50, 40), "БУДНИ АРТИФИСЕРА (ВЗРЫВОТЕХНИКА)", get_font(34), fill="#EF4444")
+    draw.line([(40, 90), (860, 90)], fill="#B91C1C", width=3)
+    draw_text_with_outline(draw, (50, 110), "Геймплей за красного слизнекота в одном кадре:", get_font(24), fill="#FCA5A5")
+
+    art = get_asset("artificer.png")
+    if art:
+        im = Image.open(art).convert("RGBA").resize((280, 280))
+        img.paste(im, (80, 160), im)
+
+    sp = get_asset("spear.png")
+    if sp:
+        im_sp = Image.open(sp).convert("RGBA").resize((220, 220))
+        img.paste(im_sp, (560, 180), im_sp)
+
+    draw.rectangle([(40, 470), (860, 760)], fill=(34, 18, 20), outline="#EF4444", width=2)
+    draw_text_with_outline(draw, (60, 495), "План на раунд:", get_font(28), fill="#FBBF24")
+    draw_text_with_outline(draw, (60, 545), "1. Скрафтил взрывное копье из слюны и камня", get_font(26), fill="#FFFFFF")
+    draw_text_with_outline(draw, (60, 595), "2. Сделал двойной взрывной прыжок через пропасть", get_font(26), fill="#FFFFFF")
+    draw_text_with_outline(draw, (60, 645), "3. Бросил копье в элитного скэва в упор...", get_font(26), fill="#F87171")
+    draw_text_with_outline(draw, (60, 700), "💥 ВЗРЫВНАЯ ВОЛНА ОТБРОСИЛА В ПАСТЬ КРАСНОМУ ЯЩЕРУ 💀", get_font(24), fill="#EF4444")
+
+    draw_text_with_outline(draw, (120, 810), "«Насилие — это не ответ, это единственный выход»", get_font(28), fill="#FCA5A5")
+    return img, "rw_artificer_chaos", headline
+
+def gen_rw_vulture_mask():
+    width, height = 900, 950
+    img = Image.new("RGB", (width, height), color=(18, 18, 26))
+    draw = ImageDraw.Draw(img)
+    headline = "МАСКА СТЕРВЯТНИКА В RAIN WORLD: ОЖИДАНИЕ VS РЕАЛЬНОСТЬ"
+
+    draw_text_with_outline(draw, (60, 40), "МАСКА СТЕРВЯТНИКА (VULTURE MASK)", get_font(34), fill="#A78BFA")
+    draw.line([(40, 90), (860, 90)], fill="#6D28D9", width=3)
+
+    vult = get_asset("King_Vulture_Mask_icon.png") or get_asset("Vulture_Mask_icon.png")
+    if vult:
+        im = Image.open(vult).convert("RGBA").resize((240, 240))
+        img.paste(im, (330, 130), im)
+
+    draw.rectangle([(40, 400), (860, 570)], fill=(22, 28, 42), outline="#38BDF8", width=2)
+    draw_text_with_outline(draw, (60, 420), "ОЖИДАНИЕ:", get_font(28), fill="#38BDF8")
+    draw_text_with_outline(draw, (60, 470), "• Ты опаснейший альфа-хищник Дренажной Системы", get_font(24), fill="#FFFFFF")
+    draw_text_with_outline(draw, (60, 515), "• Все ящеры в ужасе вжимаются в стены и бегут", get_font(24), fill="#4ADE80")
+
+    draw.rectangle([(40, 600), (860, 770)], fill=(36, 20, 24), outline="#EF4444", width=2)
+    draw_text_with_outline(draw, (60, 620), "РЕАЛЬНОСТЬ:", get_font(28), fill="#EF4444")
+    draw_text_with_outline(draw, (60, 670), "• Красный ящер не умеет читать и откусил пол-лица", get_font(24), fill="#FFFFFF")
+    draw_text_with_outline(draw, (60, 715), "• Обезличенный стервятник летит за тобой через 3 региона 💀", get_font(24), fill="#F87171")
+
+    draw_text_with_outline(draw, (140, 820), "«Стиль 10 из 10, выживаемость — отрицательная»", get_font(28), fill="#DDD6FE")
+    return img, "rw_vulture_mask", headline
+
+def gen_rw_five_pebbles():
+    width, height = 900, 950
+    img = Image.new("RGB", (width, height), color=(16, 20, 32))
+    draw = ImageDraw.Draw(img)
+    headline = "ВИЗИТ К ПЯТИ ГАЛЬКАМ (FIVE PEBBLES) В RAIN WORLD"
+
+    draw_text_with_outline(draw, (80, 40), "АУДИЕНЦИЯ У ПЯТИ ГАЛЕК (5P)", get_font(36), fill="#38BDF8")
+    draw.line([(40, 90), (860, 90)], fill="#0284C7", width=3)
+    draw_text_with_outline(draw, (50, 110), "Преодолел Гниль, невесомость и 40 смертей, чтобы дойти...", get_font(24), fill="#94A3B8")
+
+    draw.rectangle([(40, 160), (860, 450)], fill=(20, 26, 44), outline="#38BDF8", width=2)
+    draw_text_with_outline(draw, (60, 185), "ТЫ: маленькое невинное существо, принесшее жемчужину", get_font(26), fill="#FBBF24")
+    draw_text_with_outline(draw, (60, 240), "Итератор Пять Галек через 3 секунды:", get_font(26), fill="#FFFFFF")
+    draw_text_with_outline(draw, (60, 295), "«ТЫ ПОЧЕМУ ВСЁ ЕЩЁ В МОЕЙ КАМЕРЕ, МОКРЫЙ КРЫСЕНЫШ?!»", get_font(26), fill="#EF4444")
+    draw_text_with_outline(draw, (60, 355), "Врубает гравитационный удар силой 500G и вышвыривает в трубу 💥", get_font(24), fill="#60A5FA")
+
+    draw.rectangle([(40, 490), (860, 750)], fill=(28, 20, 36), outline="#A855F7", width=2)
+    draw_text_with_outline(draw, (60, 515), "ИТОГ ПЕРЕГОВОРОВ ВЫСШИХ СУЩЕСТВ:", get_font(28), fill="#C084FC")
+    draw_text_with_outline(draw, (60, 570), "• Получил знак Созидания (Mark of Communication)", get_font(24), fill="#FFFFFF")
+    draw_text_with_outline(draw, (60, 620), "• Получил сотрясение мозга 4-й степени", get_font(24), fill="#F87171")
+    draw_text_with_outline(draw, (60, 675), "• Смотрящая на Луну вздыхает где-то на другом конце карты", get_font(24), fill="#94A3B8")
+
+    draw_text_with_outline(draw, (150, 810), "«Священный путь вознесения полон боли»", get_font(30), fill="#E0E7FF")
+    return img, "rw_five_pebbles", headline
+
+# --- DYNAMIC THEME GENERATOR ---
+
+def gen_dynamic_meme(theme=""):
+    width, height = 900, 950
+    img = Image.new("RGB", (width, height), color=(18, 20, 28))
+    draw = ImageDraw.Draw(img)
+
+    clean_theme = (theme or "Мем").strip()
+    clean_theme = re.sub(r"(?:сделай|склепай|запили|отправь|скинь|мем|мэм|по|про)\s*", "", clean_theme, flags=re.I).strip() or clean_theme
+    headline = f"МЕМ: {clean_theme.upper()[:40]}"
+
+    prompt_meme = (
+        f"Придумай очень смешной, жизненный, угарный геймерский/интернет мем по теме: «{clean_theme}».\n"
+        "Ответь строго в формате JSON со следующими ключами:\n"
+        "{\n"
+        '  "title": "КОРОТКИЙ ЗАГОЛОВОК КАПСОМ",\n'
+        '  "subtitle": "Подзаголовок или контекст ситуации (1 строка)",\n'
+        '  "section1_title": "ОЖИДАНИЕ:",\n'
+        '  "section1_items": ["пункт 1", "пункт 2"],\n'
+        '  "section2_title": "РЕАЛЬНОСТЬ:",\n'
+        '  "section2_items": ["пункт 1 с юмором/фейлом", "пункт 2 с эмодзи"],\n'
+        '  "footer": "Финальная смешная цитата в кавычках"\n'
+        "}\n"
+        "Выдай ТОЛЬКО чистый JSON без markdown блоков ```json."
+    )
+    res_ai = None
+    try:
+        from keep_alive import run_antigravity_cli
+        res_ai = run_antigravity_cli(prompt_meme)
+    except Exception:
+        pass
+
+    meme_data = None
+    if res_ai:
+        try:
+            m_json = re.search(r"\{.*\}", res_ai, re.DOTALL)
+            if m_json:
+                meme_data = json.loads(m_json.group(0))
+        except Exception:
+            pass
+
+    if not meme_data:
+        meme_data = {
+            "title": f"МЕМ: {clean_theme.upper()[:30]}",
+            "subtitle": "Когда решил проверить это на личном опыте...",
+            "section1_title": "ОЖИДАНИЕ:",
+            "section1_items": ["Идеальный скилл и лёгкая победа", "Всё под полным контролем"],
+            "section2_title": "РЕАЛЬНОСТЬ:",
+            "section2_items": ["Всё пошло наперекосяк на 1-й секунде 💀", "Полнейший хаос, поражение и уход на спавн"],
+            "footer": "«Классика жанра, которой нет объяснения»"
+        }
+
+    # Draw meme canvas
+    draw_text_with_outline(draw, (50, 40), meme_data.get("title", "МЕМ")[:35], get_font(34), fill="#38BDF8")
+    draw.line([(40, 90), (860, 90)], fill="#3B82F6", width=3)
+    draw_text_with_outline(draw, (50, 110), meme_data.get("subtitle", "")[:60], get_font(24), fill="#94A3B8")
+
+    # Section 1
+    draw.rectangle([(40, 170), (860, 440)], fill=(22, 28, 42), outline="#38BDF8", width=2)
+    draw_text_with_outline(draw, (60, 195), meme_data.get("section1_title", "ОЖИДАНИЕ:"), get_font(28), fill="#4ADE80")
+    y_sec1 = 250
+    for itm in meme_data.get("section1_items", []):
+        draw_text_with_outline(draw, (70, y_sec1), f"• {itm}"[:55], get_font(25), fill="#FFFFFF")
+        y_sec1 += 55
+
+    # Section 2
+    draw.rectangle([(40, 480), (860, 750)], fill=(36, 20, 26), outline="#EF4444", width=2)
+    draw_text_with_outline(draw, (60, 505), meme_data.get("section2_title", "РЕАЛЬНОСТЬ:"), get_font(28), fill="#F87171")
+    y_sec2 = 560
+    for itm in meme_data.get("section2_items", []):
+        draw_text_with_outline(draw, (70, y_sec2), f"• {itm}"[:55], get_font(25), fill="#FFFFFF")
+        y_sec2 += 55
+
+    # Footer
+    footer = meme_data.get("footer", "")
+    if footer:
+        draw_text_with_outline(draw, (80, 810), footer[:60], get_font(28), fill="#FBBF24")
+
+    headline = f"МЕМ: {meme_data.get('title', clean_theme)}"
+    return img, "dynamic_theme", headline
 
 def gen_autobuild():
     width, height = 900, 950
@@ -302,9 +527,20 @@ def gen_hover_physics():
     draw_text_with_outline(draw, (180, 740), "«Гравитация Пустошей беспощадна»", get_font(28), fill="#80D8FF")
     return img, "hover_physics", headline
 
-ALL_GENERATORS = [
+RW_GENERATORS = [
+    ("rw_toll", gen_rw_scav_toll),
+    ("rw_cycle", gen_rw_rain_cycle),
+    ("rw_artificer", gen_rw_artificer_chaos),
+    ("rw_vulture", gen_rw_vulture_mask),
+    ("rw_pebbles", gen_rw_five_pebbles),
+]
+
+CROSSOVER_GENERATORS = [
     ("rw_1", gen_rw_crossover_1),
     ("rw_2", gen_rw_crossover_2),
+]
+
+CROSSOUT_GENERATORS = [
     ("autobuild", gen_autobuild),
     ("gasgen", gen_gasgen_blast),
     ("ptur", gen_ptur_sniper),
@@ -316,6 +552,8 @@ ALL_GENERATORS = [
     ("hover", gen_hover_physics),
 ]
 
+ALL_GENERATORS = RW_GENERATORS + CROSSOVER_GENERATORS + CROSSOUT_GENERATORS
+
 def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
     theme_lower = (theme or "").lower()
 
@@ -326,10 +564,26 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
             print(f"[MEME] Repeat allowed and requested. Returning last meme: {last['file_path']}")
             return last["file_path"]
 
-    # Select candidates matching the theme
+    is_crossout_topic = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "ховер", "автосборк", "птур", "скорп", "мамонт", "жнец"])
+    is_rw_topic = any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
+    is_crossover_topic = is_crossout_topic and is_rw_topic
+    is_custom_topic = any(w in theme_lower for w in ["тикток", "tiktok", "тт", "дота", "dota", "кс", "cs", "майнкрафт", "minecraft", "аниме", "сталкер", "stalker"]) or (theme and not is_crossout_topic and not is_rw_topic and len(theme) > 5)
+
     candidates = []
-    if any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "копье", "ворлд", "rw"]):
-        candidates = [gen_rw_crossover_1, gen_rw_crossover_2]
+
+    if is_crossover_topic:
+        cands = [func for _, func in CROSSOVER_GENERATORS]
+        random.shuffle(cands)
+        candidates = cands
+    elif is_rw_topic and not is_crossout_topic:
+        # ЧИСТЫЙ ЗАПРОС ПО RAIN WORLD: НИКАКОГО КРОССАУТА!
+        cands = [func for _, func in RW_GENERATORS]
+        random.shuffle(cands)
+        cands.append(lambda: gen_dynamic_meme(theme or "Rain World"))
+        candidates = cands
+    elif is_custom_topic:
+        # КАСТОМНАЯ ТЕМА (ТикТок / другая игра / прикол)
+        candidates = [lambda: gen_dynamic_meme(theme)]
     elif "автосборк" in theme_lower:
         candidates = [gen_autobuild]
     elif any(w in theme_lower for w in ["газген", "взрыв", "детонац"]):
@@ -348,19 +602,24 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         candidates = [gen_clown_progression]
     elif any(w in theme_lower for w in ["доге", "дог", "сравнен"]):
         candidates = [gen_doge_comparison]
-
-    # Combine with full generator pool shuffled
-    all_funcs = [func for _, func in ALL_GENERATORS]
-    random.shuffle(all_funcs)
-    candidate_queue = candidates + [f for f in all_funcs if f not in candidates]
+    else:
+        # Общий пул Crossout
+        cands = [func for _, func in CROSSOUT_GENERATORS]
+        random.shuffle(cands)
+        candidates = cands
 
     chosen_img = None
     chosen_tpl = None
     chosen_hl = None
     chosen_hash = None
 
-    for gen_func in candidate_queue:
-        img, tpl_name, headline = gen_func()
+    for gen_func in candidates:
+        try:
+            img, tpl_name, headline = gen_func()
+        except Exception as e:
+            print(f"[MEME ERROR] Generator failed: {e}")
+            continue
+
         h = hashlib.sha256(headline.encode("utf-8") + img.tobytes()).hexdigest()
 
         # Check if already sent!
@@ -374,14 +633,18 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         chosen_hash = h
         break
 
-    # If all existing templates were somehow exhausted, create a uniquely salted variation
+    # If all templates were exhausted, generate a dynamic meme matching the requested theme
     if not chosen_img:
-        gen_func = random.choice(all_funcs)
-        chosen_img, chosen_tpl, chosen_hl = gen_func()
-        # Add dynamic unique salt timestamp watermark to guarantee 100% uniqueness
+        if is_rw_topic:
+            chosen_img, chosen_tpl, chosen_hl = gen_dynamic_meme("Rain World выживание и карма")
+        elif is_custom_topic:
+            chosen_img, chosen_tpl, chosen_hl = gen_dynamic_meme(theme)
+        else:
+            chosen_img, chosen_tpl, chosen_hl = gen_dynamic_meme("Crossout Пустоши")
+
         salt_text = f"№ {int(time.time() * 1000) % 100000}"
         draw = ImageDraw.Draw(chosen_img)
-        draw.text((800, 920), salt_text, fill=(80, 80, 80), font=get_font(16))
+        draw.text((750, 915), salt_text, fill=(80, 80, 80), font=get_font(16))
         chosen_hl = f"{chosen_hl} ({salt_text})"
         chosen_hash = hashlib.sha256(chosen_hl.encode("utf-8") + chosen_img.tobytes()).hexdigest()
 
@@ -407,3 +670,6 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
     print(f"[MEME RECORDED] Successfully registered new unique meme '{chosen_hl}' (hash={chosen_hash[:8]}) for {recipient}")
 
     return out_path
+
+# Alias for universal meme generation
+generate_meme = generate_crossout_meme
