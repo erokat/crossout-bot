@@ -564,25 +564,20 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
             print(f"[MEME] Repeat allowed and requested. Returning last meme: {last['file_path']}")
             return last["file_path"]
 
-    # 1. ALWAYS route requests for memes of specific years, Mahoraga, adaptive, custom, or general themes through the multi-style meme engine!
-    is_era_topic = any(w in theme_lower for w in ["2020", "2021", "2022", "эпох", "год", "лет", "старые мемы"])
-    is_mahoraga_topic = any(w in theme_lower for w in ["махораг", "адаптир", "бог котор", "дхарма", "jujutsu"])
-    is_custom_topic = any(w in theme_lower for w in ["тикток", "tiktok", "тт", "дота", "dota", "кс", "cs", "майнкрафт", "minecraft", "аниме", "сталкер", "stalker", "кот", "школ", "сесси", "дз", "домашк"]) or (theme and len(theme) > 10)
+    # 1. ALWAYS use the multi-style meme engine (Demotivator, Caption, Breaking News, Tweet, POV, Impact)
+    try:
+        from meme_engine import generate_universal_meme
+        out_path, headline = generate_universal_meme(theme=theme, allow_repeat=allow_repeat, recipient=recipient)
+        h = hashlib.sha256(headline.encode("utf-8") + str(time.time()).encode()).hexdigest()
+        record_sent_meme(h, "universal_engine", headline, out_path, sent_to=recipient)
+        print(f"[MEME ENGINE] Successfully generated diverse meme: {out_path} ({headline})")
+        return out_path
+    except Exception as e:
+        print(f"[MEME ENGINE] Universal engine error: {e}, falling back to local pool")
 
-    # If specific internet topic or era or Mahoraga, use meme_engine directly
-    if is_era_topic or is_mahoraga_topic or is_custom_topic or random.random() < 0.75:
-        try:
-            from meme_engine import generate_universal_meme
-            out_path, headline = generate_universal_meme(theme=theme, allow_repeat=allow_repeat, recipient=recipient)
-            h = hashlib.sha256(headline.encode("utf-8") + str(time.time()).encode()).hexdigest()
-            record_sent_meme(h, "universal_engine", headline, out_path, sent_to=recipient)
-            print(f"[MEME ENGINE] Successfully generated diverse meme: {out_path} ({headline})")
-            return out_path
-        except Exception as e:
-            print(f"[MEME ENGINE] Universal engine error: {e}, falling back to local pool")
-
-    # 2. Local Crossout/Rain World templates pool with high diversity
+    # 2. Local fallback pool if meme_engine completely fails
     is_crossout_topic = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "ховер", "автосборк", "птур", "скорп", "мамонт", "жнец"])
+
     is_rw_topic = any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
     is_crossover_topic = is_crossout_topic and is_rw_topic
 

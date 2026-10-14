@@ -178,8 +178,52 @@ MEMES_2020_2022 = [
         "keywords": ["парень обернулся", "измена", "отвлекся"],
         "default_setup": "Когда у тебя есть проверенный надежный крафт...",
         "default_punchline": "Но в ангаре появилась новая безумная идея."
+    },
+    {
+        "name": "uganda_knuckles",
+        "title": "Ugandan Knuckles 2018",
+        "url": "https://i.imgflip.com/22bdq6.jpg",
+        "keywords": ["2018", "уганда", "наклз", "knuckles", "do you know the way", "da way"],
+        "default_setup": "DO YOU KNOW DA WAY?",
+        "default_punchline": "Когда выкатил утюг с дробовиками в рандом 2018 года."
+    },
+    {
+        "name": "change_my_mind",
+        "title": "Change My Mind 2018",
+        "url": "https://i.imgflip.com/24y43o.jpg",
+        "keywords": ["2018", "change my mind", "измени мое мнение", "стол", "crowder"],
+        "default_setup": "Кроссаут 2018 года с утюгами и ховерами в космосе был легендарным.",
+        "default_punchline": "Change my mind."
+    },
+    {
+        "name": "is_this_a_pigeon",
+        "title": "Is This A Pigeon 2018",
+        "url": "https://i.imgflip.com/1o00in.jpg",
+        "keywords": ["2018", "бабочка", "голубь", "is this a pigeon", "аниме"],
+        "default_setup": "Игрок 2018 года видит крафт на ховерах на высоте 500 метров над картой:",
+        "default_punchline": "«Это сбалансированная игра?»"
+    },
+    {
+        "name": "grus_plan",
+        "title": "Gru's Plan 2018",
+        "url": "https://i.imgflip.com/26jxvz.jpg",
+        "keywords": ["2018", "план грю", "грю", "доска", "презентация"],
+        "default_setup": "1. Собираешь утюг. 2. Летишь в лоб врагу. 3. Сам переворачиваешься и взрываешься.",
+        "default_punchline": "Сам переворачиваешься и взрываешься?!"
+    },
+    {
+        "name": "roll_safe",
+        "title": "Roll Safe Think About It",
+        "url": "https://i.imgflip.com/1h7in3.jpg",
+        "keywords": ["2018", "палец у виска", "умный парень", "roll safe", "подумай"],
+        "default_setup": "Враги не смогут оторвать тебе оружие...",
+        "default_punchline": "Если ты взорвешься на своем же Газгене в первую секунду!"
     }
 ]
+CURATED_TEMPLATES = MEMES_2020_2022
+
+
+
 
 # ----------------- WEB IMAGE FETCHER & SCRAPER -----------------
 
@@ -555,7 +599,8 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     clean_theme = clean_user_theme(theme)
     theme_lower = clean_theme.lower()
 
-    # 1. Специфический запрос на мемы 2020-2022
+    # 1. Специфический запрос на мемы определенных эпох
+    is_era_2018 = "2018" in theme_lower
     is_era_2020_2022 = any(y in theme_lower for y in ["2020", "2021", "2022"])
     
     # Check if Mahoraga
@@ -566,18 +611,26 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     curated_match = None
 
     if is_mahoraga:
-        for m in MEMES_2020_2022:
+        for m in CURATED_TEMPLATES:
             if m["name"] == "mahoraga":
                 curated_match = m
                 break
+    elif is_era_2018:
+        # Случайный легендарный мем 2018 года! (Uganda Knuckles, Change My Mind, Gru Plan, Pigeon, Roll Safe)
+        candidates_2018 = [m for m in CURATED_TEMPLATES if "2018" in m.get("keywords", [])]
+        if candidates_2018:
+            curated_match = random.choice(candidates_2018)
     elif is_era_2020_2022:
-        # Выбираем случайный легендарный мем того периода!
-        curated_match = random.choice([m for m in MEMES_2020_2022 if m["name"] != "mahoraga"])
+        # Случайный легендарный мем 2020-2022 периода!
+        candidates_era = [m for m in CURATED_TEMPLATES if any(y in m.get("keywords", []) for y in ["2020", "2021", "2022"]) and m["name"] != "mahoraga"]
+        if candidates_era:
+            curated_match = random.choice(candidates_era)
     else:
-        for m in MEMES_2020_2022:
+        for m in CURATED_TEMPLATES:
             if any(kw in theme_lower for kw in m["keywords"]):
                 curated_match = m
                 break
+
 
     if curated_match:
         cached_tpl = os.path.join(TEMPLATES_DIR, f"{curated_match['name']}.jpg")
