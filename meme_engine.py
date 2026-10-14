@@ -86,9 +86,29 @@ def wrap_text(draw, text, font, max_width):
         lines.append(" ".join(cur_line))
     return lines
 
+def clean_canvas_text(text):
+    if not text:
+        return ""
+    # Strip emojis and non-renderable unicode characters
+    emoji_pattern = re.compile(
+        "["
+        "\U00010000-\U0010ffff"
+        "\u2600-\u27bf"
+        "\u2300-\u23ff"
+        "\u2b50-\u2b55"
+        "\u3030\u303d\u3297\u3299\ufe0f"
+        "]+",
+        flags=re.UNICODE
+    )
+    t = emoji_pattern.sub("", str(text))
+    t = re.sub(r"[🔴⚡💀🚜💥☸️👍🔥🎮🎯⭐❗❌✅⚠️]", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
 def draw_outlined_text(draw, pos, text, font, fill="white", stroke_fill="black", stroke_width=4):
     x, y = pos
-    draw.text((x, y), text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
+    safe_text = clean_canvas_text(text)
+    draw.text((x, y), safe_text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
 
 # ----------------- CURATED POPULAR MEMES (2020-2022 & TIMELESS) -----------------
 
@@ -348,7 +368,8 @@ def render_caption_meme(base_img, text_top, text_bottom=None, sound_text=None):
     lines = wrap_text(dummy_draw, text_top, font_header, W - 100)
     line_h = 46
     header_h = max(160, len(lines) * line_h + 80)
-    sound_margin = 80 if sound_text else 0
+    sound_lines = wrap_text(dummy_draw, sound_text, font_sound, W - 60) if sound_text else []
+    sound_margin = max(70, len(sound_lines) * 40 + 20) if sound_text else 0
 
     canvas_h = H + header_h + sound_margin
     canvas = Image.new("RGB", (W, canvas_h), (0, 0, 0))
@@ -372,9 +393,12 @@ def render_caption_meme(base_img, text_top, text_bottom=None, sound_text=None):
 
     # Draw sound text if present
     if sound_text:
-        sb = draw.textbbox((0, 0), sound_text, font=font_sound)
-        sw = sb[2] - sb[0]
-        draw_outlined_text(draw, ((W - sw) // 2, header_h + 20), sound_text, font_sound, fill="#FFD700", stroke_fill="#000000", stroke_width=4)
+        y_sound = header_h + 12
+        for sl in sound_lines:
+            sb = draw.textbbox((0, 0), sl, font=font_sound)
+            sw = sb[2] - sb[0]
+            draw_outlined_text(draw, ((W - sw) // 2, y_sound), sl, font=font_sound, fill="#FFD700", stroke_fill="#000000", stroke_width=4)
+            y_sound += 38
 
     # Draw bottom punchline if present
     if text_bottom:
@@ -474,6 +498,9 @@ def render_breaking_news(base_img, title, news_text):
     """
     СТИЛЬ 4: Телевизионный выпуск «СРОЧНЫЕ НОВОСТИ / BREAKING NEWS».
     """
+    title = clean_canvas_text(title)
+    news_text = clean_canvas_text(news_text)
+
     W, H = base_img.size
     target_w = 960
     target_h = int(H * (target_w / W))
@@ -495,8 +522,8 @@ def render_breaking_news(base_img, title, news_text):
     font_main = get_font("bold", 34)
     font_ticker = get_font("regular", 24)
 
-    draw.text((25, banner_y + 8), "🔴 СРОЧНЫЕ НОВОСТИ", font=font_tag, fill="#FFFFFF")
-    draw.text((W - 130, banner_y + 10), "ПРЯМОЙ ЭФИР", font=font_live, fill="#EF4444")
+    draw.text((25, banner_y + 8), "СРОЧНЫЕ НОВОСТИ", font=font_tag, fill="#FFFFFF")
+    draw.text((W - 145, banner_y + 10), "ПРЯМОЙ ЭФИР", font=font_live, fill="#EF4444")
 
     # Main news headline
     lines = wrap_text(draw, title, font_main, W - 60)
@@ -505,8 +532,8 @@ def render_breaking_news(base_img, title, news_text):
 
     # Bottom yellow ticker
     draw.rectangle([(0, H - 38), (W, H)], fill="#FBBF24")
-    ticker_str = f"⚡ В ПУСТОШАХ: {news_text} ⚡ ПОДРОБНОСТИ В СЛЕДУЮЩЕМ ВЫПУСКЕ..."
-    draw.text((20, H - 32), ticker_str[:70], font=font_ticker, fill="#111827")
+    ticker_str = f"В ПУСТОШАХ: {news_text} | ПОДРОБНОСТИ В СЛЕДУЮЩЕМ ВЫПУСКЕ..."
+    draw.text((20, H - 32), ticker_str[:75], font=font_ticker, fill="#111827")
 
     return canvas
 
@@ -514,6 +541,9 @@ def render_tweet_post(base_img, author, text, likes_str="14.8K"):
     """
     СТИЛЬ 5: Твит / пост из соцсети с аватаркой, галочкой и прикрепленным мемом.
     """
+    author = clean_canvas_text(author)
+    text = clean_canvas_text(text)
+
     W, H = base_img.size
     target_w = 880
     target_h = int(H * (target_w / W))
@@ -535,9 +565,9 @@ def render_tweet_post(base_img, author, text, likes_str="14.8K"):
 
     draw = ImageDraw.Draw(canvas)
 
-    # Avatar circle
+    # Avatar circle with text badge
     draw.ellipse([(30, 25), (95, 90)], fill="#38BDF8")
-    draw.text((48, 38), "🚜", font=get_font("russo", 34), fill="#FFFFFF")
+    draw.text((45, 38), "CR", font=get_font("russo", 34), fill="#FFFFFF")
 
     # Author & badge
     draw.text((115, 30), author, font=font_author, fill="#FFFFFF")
@@ -555,7 +585,8 @@ def render_tweet_post(base_img, author, text, likes_str="14.8K"):
 
     # Footer metrics
     footer_y = header_h + H + 25
-    draw.text((35, footer_y), f"💬 421   🔁 1.2K   ❤️ {likes_str}   📊 89.4K", font=font_meta, fill="#8899A6")
+    footer_text = f"Ответов: 421   Репостов: 1.2K   Лайков: {likes_str}"
+    draw.text((35, footer_y), footer_text, font=font_meta, fill="#8899A6")
 
     return canvas
 
@@ -593,10 +624,34 @@ def render_pov_meme(base_img, pov_text):
 
 def clean_user_theme(raw_text):
     if not raw_text:
-        return "Crossout Random"
+        return "Crossout"
     t = raw_text.strip()
-    t = re.sub(r"(?:!бот|!bot|бот,|бот|пожалуйста|найди|скинь|сделай|сгенерируй|создай|покажи|мем|мэм|мемов|мэмов|про|с|на тему)\s*", "", t, flags=re.I).strip()
-    return t or "Crossout Пустоши"
+
+    # Strip bot call
+    t = re.sub(r"^(?:!бот|!bot|бот[,:]?)\s*", "", t, flags=re.I).strip()
+    t = re.sub(r"^(?:пожалуйста|плиз|эй|ну-ка|давай|слышь)\s*", "", t, flags=re.I).strip()
+    t = re.sub(r"^(?:сделай|скинь|создай|сгенерируй|нарисуй|покажи|выдай|запили|намути|придумай|дай)\s*", "", t, flags=re.I).strip()
+    t = re.sub(r"^(?:мне|нам|ярику|мише|быстро|срочно|еще|один|парочку)\s*", "", t, flags=re.I).strip()
+    t = re.sub(r"^(?:мемчик|мемасик|мем|мэм|мемов|мэмов|картинку|пикчу|шутку|прикол)\s*", "", t, flags=re.I).strip()
+
+    # Strip prepositions & broken fragments
+    t = re.sub(r"^(?:про|с|на тему|по теме|по игре|из|в|о|об)\s*", "", t, flags=re.I).strip()
+    t = re.sub(r"^(?:кросаута|кроссаута|crossout)\s+(?:того\s+что\s+там\s+было\s+в|того\s+что\s+было\s+в|того\s+что\s+было|как\s+было\s+в|в)\s*", "Crossout ", t, flags=re.I).strip()
+    t = re.sub(r"^(?:того\s+что\s+там\s+было\s+в|того\s+что\s+было\s+в|того\s+что\s+было|как\s+было\s+в)\s*", "", t, flags=re.I).strip()
+    t = re.sub(r"^(?:про то как|про то что|как)\s*", "", t, flags=re.I).strip()
+
+    # Normalize year phrasing
+    t = re.sub(r"\b(201[5-9]|202[0-6])\s*году\b", r"\1 года", t, flags=re.I)
+    t = re.sub(r"\s+", " ", t).strip()
+
+    years = re.findall(r"\b(201[5-9]|202[0-6])\b", t)
+    year_str = years[0] if years else None
+
+    if not t or t.lower() in ["того", "там", "было", "что", "это", "как", "года"]:
+        if year_str:
+            return f"Crossout {year_str} года"
+        return "Crossout"
+    return t
 
 def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     """
@@ -611,10 +666,12 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
 
     # 1. Специфический запрос на мемы определенных эпох
     is_era_2018 = "2018" in theme_lower
+    is_era_2019 = "2019" in theme_lower
     is_era_2020_2022 = any(y in theme_lower for y in ["2020", "2021", "2022"])
     
     # Check if Mahoraga
     is_mahoraga = any(w in theme_lower for w in ["махораг", "адаптир", "бог котор", "дхарма", "jujutsu"])
+    is_rainworld = any(w in theme_lower for w in ["рейн", "rain", "слизнец"])
 
     # 2. Поиск картинки
     img_path = None
@@ -688,30 +745,154 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
         pass
 
     if not joke_data:
-        # Fallback jokes depending on topic
-        if curated_match:
+        # Fallback jokes depending on topic - rich, varied, 100% Russian and grammatically sound
+        if curated_match and curated_match.get("default_setup"):
             joke_data = {
                 "style": random.choice(["caption", "demotivator", "impact"]),
                 "title": curated_match["default_setup"],
                 "subtitle": curated_match["default_punchline"],
-                "sound_or_extra": "*ЩЁЛК* ☸️" if curated_match["name"] == "mahoraga" else None
+                "sound_or_extra": "*ЩЁЛК*" if curated_match["name"] == "mahoraga" else None
             }
+        elif is_era_2018:
+            jokes_2018 = [
+                {
+                    "style": "caption",
+                    "title": "Игроки в Crossout в 2018 году:",
+                    "subtitle": "«Ничего, сейчас нафармлю меди, скрафчу бочки и жизнь наладится!»",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "demotivator",
+                    "title": "МЕТА 2018 ГОДА",
+                    "subtitle": "Когда ховеры летали в стратосферу, а утюги ломали законы физики",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "impact",
+                    "title": "ПОМНИШЬ 2018 ГОД В ПУСТОШАХ?",
+                    "subtitle": "КОГДА ОДИН ВАНШОТ РЕШАЛ ИСХОД ВСЕГО БОЯ",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "breaking_news",
+                    "title": "АРХИВЫ ПУСТОШЕЙ 2018 ГОДА",
+                    "subtitle": "Утюги с дробовиками признаны самым опасным явлением",
+                    "sound_or_extra": None
+                }
+            ]
+            joke_data = random.choice(jokes_2018)
+        elif is_era_2019:
+            jokes_2019 = [
+                {
+                    "style": "caption",
+                    "title": "Игроки в Crossout в 2019 году:",
+                    "subtitle": "Когда думал, что познал дзен, но вышел очередной балансный патч",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "demotivator",
+                    "title": "CROSSOUT 2019",
+                    "subtitle": "Каждый бой как последняя битва за выживание в Пустошах",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "impact",
+                    "title": "ВЫЕХАЛ В РАНДОМ 2019 ГОДА",
+                    "subtitle": "ИНЖЕНЕРНАЯ МЫСЛЬ ЗАШЛА СЛИШКОМ ДАЛЕКО",
+                    "sound_or_extra": None
+                }
+            ]
+            joke_data = random.choice(jokes_2019)
         elif is_mahoraga:
-            joke_data = {
-                "style": "caption",
-                "title": "Когда жизнь пытается добить тебя очередным ударом, но забывает, сколько боли ты уже пережил:",
-                "subtitle": "КОЛЕСО МАХОРАГИ СДЕЛАЛО ОБОРОТ. Я АДАПТИРОВАЛСЯ К ЛЮБОЙ БОЛИ.",
-                "sound_or_extra": "*ЩЁЛК* — ЗВУК ВРАЩЕНИЯ КОЛЕСА ☸️"
-            }
+            jokes_mahoraga = [
+                {
+                    "style": "caption",
+                    "title": "Когда рандом пытается сломать меня очередным поражением:",
+                    "subtitle": "КОЛЕСО МАХОРАГИ СДЕЛАЛО ОБОРОТ. Я АДАПТИРОВАЛСЯ К ЛЮБОЙ БОЛИ.",
+                    "sound_or_extra": "*ЩЁЛК* — ЗВУК ВРАЩЕНИЯ КОЛЕСА"
+                },
+                {
+                    "style": "caption",
+                    "title": "Когда вражеский клан взял токсичные мета-сборки:",
+                    "subtitle": "КОЛЕСО УЖЕ ПОВЕРНУЛОСЬ. ТЕПЕРЬ Я ЗНАЮ ВСЕ ИХ СЛАБЫЕ МЕСТА.",
+                    "sound_or_extra": "*ЩЁЛК* — АДАПТАЦИЯ ЗАВЕРШЕНА"
+                },
+                {
+                    "style": "demotivator",
+                    "title": "БОГ АДАПТАЦИИ",
+                    "subtitle": "Любой урон и поражение делают меня только сильнее",
+                    "sound_or_extra": None
+                }
+            ]
+            joke_data = random.choice(jokes_mahoraga)
+        elif is_rainworld:
+            jokes_rw = [
+                {
+                    "style": "caption",
+                    "title": "Слизнец, когда до дождя осталось 10 секунд, а убежище закрыто:",
+                    "subtitle": "Суровые законы выживания в Rain World не знают пощады",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "impact",
+                    "title": "ВЗЯЛ ВЗРЫВНОЕ КОПЬЕ В РУКИ",
+                    "subtitle": "ТЕПЕРЬ СТЕРВЯТНИК САМ ПОЖАЛЕЕТ О СВОЕМ ПРИЛЕТЕ",
+                    "sound_or_extra": None
+                }
+            ]
+            joke_data = random.choice(jokes_rw)
         else:
-            styles_pool = ["demotivator", "caption", "impact", "breaking_news", "tweet", "pov"]
-            chosen_st = random.choice(styles_pool)
-            joke_data = {
-                "style": chosen_st,
-                "title": f"Когда зашел проверить {clean_theme}",
-                "subtitle": "И понял, что к такому рандом тебя не готовил 💀",
-                "sound_or_extra": None
-            }
+            jokes_general = [
+                {
+                    "style": "caption",
+                    "title": "Мой билд в гараже после 3 часов настройки углов стрельбы:",
+                    "subtitle": "В первом же бою Газген сдетонировал от случайной пульки бота",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "demotivator",
+                    "title": "БАЛАНС В ПУСТОШАХ",
+                    "subtitle": "Существует ровно до тех пор, пока ты не нажал кнопку «В бой»",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "impact",
+                    "title": "СОБРАЛ КРАФТ ПО СОВЕТАМ ИЗ ЧАТА",
+                    "subtitle": "ПЕРВЫЙ ЖЕ БОТ С ДРОБОВИКАМИ РАЗОБРАЛ ЕГО НА ВИНТИКИ",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "breaking_news",
+                    "title": "ИНЖЕНЕРЫ В ШОКЕ ОТ НОВОЙ АВТОСБОРКИ",
+                    "subtitle": "Крафт развалился на две части еще на стартовой базе",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "caption",
+                    "title": "Когда тиммейт уверенно кричит в войс: «Я прикрою!»:",
+                    "subtitle": "И через 3 секунды ты наблюдаешь только его горящую кабину",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "demotivator",
+                    "title": "ГЕНЕРАТОР ГАЗГЕН",
+                    "subtitle": "Самое надежное средство быстрой телепортации в ангар",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "pov",
+                    "title": "ЖИЗА: Выехал в бой на красивом неповоротливом крафте",
+                    "subtitle": "А навстречу несутся 4 утюга со скоростью 120 км/ч",
+                    "sound_or_extra": None
+                },
+                {
+                    "style": "tweet",
+                    "title": "Когда случайно нажал кнопку самоуничтожения на старте боя:",
+                    "subtitle": "«Так и было задумано по тактике, вы ничего не понимаете»",
+                    "sound_or_extra": None
+                }
+            ]
+            joke_data = random.choice(jokes_general)
 
     style = joke_data.get("style", "caption").lower()
     t_top = joke_data.get("title", f"МЕМ: {clean_theme.upper()}")
