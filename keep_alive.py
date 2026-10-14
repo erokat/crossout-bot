@@ -529,13 +529,13 @@ def handle_owner_message(msg_data):
 
     if is_owner_stk_req and not is_owner_stk_add and (is_owner_stk_send or "стикерпак" in t_lower or "стикеры" in t_lower):
         prompt_stk = (
-            "Владелец бота попросил скинуть ссылку на наш стикерпак Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
-            "Ответь живо, дружелюбно, по-товарищески (1-2 коротких предложения), мол держи коллекцию, шеф. "
+            "Владелец бота Миша попросил скинуть ссылку на наш стикерпак Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+            "Ответь живо, дружелюбно, по-товарищески (1-2 коротких предложения), мол держи коллекцию, Миша. Обращайся к нему по имени Миша. "
             "Обязательно включи ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat"
         )
         reply = run_antigravity_cli(prompt_stk)
         if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
-            reply = "Держи наш стикерпак, шеф! Раздавай стиль в чатах: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
+            reply = "Держи наш стикерпак, Миша! Раздавай стиль в чатах: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
         cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
         subprocess.run(cmd)
         return
@@ -588,7 +588,7 @@ def handle_owner_message(msg_data):
         elif approved:
             reply = "Действие подтверждено, но не удалось определить ID сообщения для удаления."
         else:
-            reply = "Удаление отменено, шеф!"
+            reply = "Удаление отменено, Миша!"
 
         cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
         subprocess.run(cmd)
@@ -618,22 +618,25 @@ def handle_owner_message(msg_data):
     response = None
     if text:
         prompt = (
-            f"Тебе написал твой близкий друг и создатель (erokat): «{text}». "
+            f"Тебе написал твой близкий друг и создатель МИША (erokat): «{text}». "
             "Отвечай максимально живо, по-человечески, по-пацански и с легким юмором, как реальный живой собеседник и кореш в Telegram! "
-            "СТРОЖАЙШИЙ ЗАПРЕТ: НИКАКИХ 'Принял, шеф', НИКАКИХ 'Задача в работе', 'Все службы на связи', 'Чем займемся', 'шеф' и никаких шаблонных фраз робота! "
-            "Отвечай просто, живо и по делу (1-2 предложения). Выдай ТОЛЬКО чистый текст реплики."
+            "Обращайся к нему по имени: Миша (или Миха, Мишан), по-братски, разговорно и прикольно. "
+            "СТРОЖАЙШИЙ ЗАПРЕТ: НИКАКИХ 'Принял, шеф', НИКАКИХ 'шеф', 'босс', 'командир', 'Задача в работе', 'Все службы на связи', 'Чем займемся' и никаких шаблонных фраз робота! "
+            "Отвечай просто, прикольно, живо и по делу (1-2 предложения). Выдай ТОЛЬКО чистый текст реплики."
         )
         response = run_antigravity_cli(prompt)
 
-    if not response or any(bad in response.lower() for bad in ["принял, шеф", "принял шеф", "задача в работе", "все службы на связи", "шеф"]):
+    if not response or any(bad in response.lower() for bad in ["принял, шеф", "принял шеф", "задача в работе", "все службы на связи", "шеф", "босс"]):
         if any(w in t_lower for w in ["в сети", "тут", "живой", "работаешь"]):
-            response = "Да тут я, на связи! 🚀 Чем помочь или что замутить?"
+            response = "Да тут я, на связи, Миша! 🚀 Чем помочь или что замутить?"
         elif any(w in t_lower for w in ["привет", "хай", "салам", "здорово", "здарова"]):
-            response = "Здорово! Как сам? Что по планам в Crossout или в чате? 🚜"
+            response = "Здорово, Миша! Как сам? Что по планам в Crossout или в чате? 🚜"
         else:
-            response = "На связи! Что замутим или какой мем запилим? 🚜"
+            response = "На связи, Миша! Что замутим или какой мем запилим? 🚜"
 
-    response = re.sub(r"\bшеф[а-я]*\b", "", response, flags=re.I).strip()
+    response = re.sub(r"\bшеф[а-я]*\b", "Миша", response, flags=re.I).strip()
+    response = re.sub(r"\bбосс[а-я]*\b", "Миша", response, flags=re.I).strip()
+    response = re.sub(r"\bкомандир[а-я]*\b", "Миша", response, flags=re.I).strip()
     response = re.sub(r"[\s,]+$", "", response)
 
     # Reply to owner
@@ -710,16 +713,16 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 reply = "Отбой, удаление отменено — сообщение остается на месте 🚜"
             else:
                 prompt_rej = (
-                    f"Ярик просил удалить сообщение ('{text}'), но владелец отказал{reason_str}. "
-                    "Напиши живой, саркастичный и смешной ответ Ярику в чат (без официоза '⚠️ Владелец отклонил', по-дружески подколи его, мол, этот шедевр останется для истории Пустошей). "
+                    f"Ярик просил удалить сообщение ('{text}'), но Миша (владелец) отказал{reason_str}. "
+                    "Напиши живой, саркастичный и смешной ответ Ярику в чат (без официоза, по-дружески подколи его, мол, Миша не разрешил удалять этот шедевр). "
                     "1-2 предложения. Выдай ТОЛЬКО сам текст реплики."
                 )
                 reply = run_antigravity_cli(prompt_rej)
                 if not reply:
                     if reason_str:
-                        reply = f"Не-а, шеф наложил вето: «{owner_comment}» 😂 Так что любуйся своим шедевром."
+                        reply = f"Не-а, Миша наложил вето: «{owner_comment}» 😂 Так что любуйся своим шедевром."
                     else:
-                        reply = "Шеф сказал оставить для потомков 😂 Этот легендарный высер останется в истории Пустошей!"
+                        reply = "Миша сказал оставить для потомков 😂 Этот легендарный высер останется в истории Пустошей!"
 
         send_cmd = [
             sys.executable,
@@ -732,7 +735,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         return
 
     # 2. Запрос на мем / картинку
-    is_meme_word = any(w in t_lower for w in ["мем", "пикч", "картинк", "гиф", "сделай", "склепай", "запили", "нарисуй"])
+    is_meme_word = any(w in t_lower for w in ["мем", "мэм", "пикч", "картинк", "гиф", "сделай", "склепай", "запили", "нарисуй"])
     is_another_word = any(w in t_lower for w in ["другое", "другой", "следующ", "новеньк", "переделай", "еще", "ещё"]) and any(w in t_lower for w in ["скинь", "давай", "дай", "покажи", "кинь", "сделай", "ботик", "бот", "выдай"])
     is_reply_to_media = bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["скинь", "давай", "другое", "другой", "еще", "ещё", "переделай", "не то", "фигня", "хуйня", "говно", "заново", "повтори"])
 
@@ -747,26 +750,30 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
 
             if is_owner_sender:
                 prompt_cap = (
-                    f"Ты генератор мемов по игре Crossout. Твой ВЛАДЕЛЕЦ и создатель (шеф) запросил мем{num_suffix} по теме: «{text}». "
-                    "Придумай одну смешную, угарную подпись к сгенерированному мему в стиле игроков Crossout. "
-                    "Обращайся к шефу/владельцу по-свойски (на «ты», можно 'шеф', 'босс'). "
-                    "СТРОЖАЙШЕ ЗАПРЕЩЕНО НАЗЫВАТЬ ЕГО ЯРИКОМ! Автор этого сообщения — твой создатель/владелец. "
+                    f"Ты генератор мемов по игре Crossout. Твой создатель и владелец МИША запросил мем{num_suffix} по теме: «{text}». "
+                    "Придумай одну смешную, угарную, прикольную подпись к сгенерированному мему в стиле игроков Crossout. "
+                    "Обращайся к Мише по имени (Миша, Миха, Мишан), по-братски, разговорно, живо и прикольно. "
+                    "СТРОЖАЙШИЙ ЗАПРЕТ: НИКАКИХ 'шеф', 'босс', 'командир'! И НЕ называй его Яриком (Ярик — его друг в чате)! "
                     "Без кавычек, 1 короткое сочное предложение с эмодзи."
                 )
-                fallback_cap = f"Свежак{num_suffix} из гаража готов, шеф! Зацени этот шедевр 🚜💥"
+                fallback_cap = f"Свежак{num_suffix} из гаража готов, Миша! Зацени этот шедевр 🚜💥"
             else:
                 prompt_cap = (
                     f"Ты генератор мемов по игре Crossout. Твой кореш Ярик запросил мем{num_suffix} по теме: «{text}». "
                     "Придумай одну смешную, угарную, жизненную подпись к мему в стиле игроков Crossout (с сарказмом про рандом, взрывы, автосборку, детонацию крафтов). "
-                    "Без кавычек, 1 короткое сочное предложение с эмодзи."
+                    "Обращайся к нему Ярик. Без кавычек, 1 короткое сочное предложение с эмодзи."
                 )
                 fallback_cap = f"Когда собрал крафт из говна и палок и поехал тащить рандом 🚜💀{num_suffix}"
 
             caption = run_antigravity_cli(prompt_cap)
             if not caption:
                 caption = fallback_cap
-            if is_owner_sender and any(w in caption.lower() for w in ["ярик", "ярику", "ярика"]):
-                caption = fallback_cap
+            if is_owner_sender:
+                caption = re.sub(r"\bшеф[а-я]*\b", "Миша", caption, flags=re.I)
+                caption = re.sub(r"\bбосс[а-я]*\b", "Миша", caption, flags=re.I)
+                caption = re.sub(r"\bкомандир[а-я]*\b", "Миша", caption, flags=re.I)
+                if any(w in caption.lower() for w in ["ярик", "ярику", "ярика"]):
+                    caption = fallback_cap
 
             send_cmd = [
                 sys.executable,
@@ -794,7 +801,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             if count > 1:
                 stk_reply = f"Закинул всю пачку из {count} шедевров в стикерпак! 🔥"
             else:
-                stk_reply = "Закинул этот угар в стикерпак, шеф! Теперь можно спамить в чатах 🔥💀" if is_owner_sender else "Закинул этот угар в стикерпак! Ярик, теперь можно спамить в чатах 🔥💀"
+                stk_reply = "Закинул этот угар в стикерпак, Миша! Теперь можно спамить в чатах 🔥💀" if is_owner_sender else "Закинул этот угар в стикерпак! Ярик, теперь можно спамить в чатах 🔥💀"
             confirm_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
@@ -813,14 +820,14 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     if is_stk_req and not is_stk_add and (is_stk_send or "стикерпак" in t_lower or "стикеры" in t_lower):
         if is_owner_sender:
             prompt_stk_share = (
-                "Владелец бота (шеф) в чате попросил скинуть ссылку на наш стикерпак по игре Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+                "Владелец бота МИША в чате попросил скинуть ссылку на наш стикерпак по игре Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
                 f"Его сообщение: «{text}»\n"
-                "Напиши бодрый, живой ответ владельцу (1-2 предложения), мол держи коллекцию, шеф. "
-                "СТРОЖАЙШЕ ЗАПРЕЩЕНО НАЗЫВАТЬ ЕГО ЯРИКОМ! "
+                "Напиши бодрый, живой, пацанский ответ Мише (1-2 предложения), мол держи коллекцию, Миша. "
+                "СТРОЖАЙШЕ ЗАПРЕЩЕНО НАЗЫВАТЬ ЕГО ЯРИКОМ, ШЕФОМ ИЛИ БОССОМ! Обращайся по имени: Миша. "
                 "ОБЯЗАТЕЛЬНО включи саму ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
                 "Выдай ТОЛЬКО чистый текст реплики."
             )
-            fallback_stk = "Держи наш склад отборного позора и детонаций, шеф: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
+            fallback_stk = "Держи наш склад отборного позора и детонаций, Миша: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
         else:
             prompt_stk_share = (
                 "Ярик в чате попросил скинуть ссылку на наш стикерпак по игре Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
@@ -836,8 +843,11 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         reply = run_antigravity_cli(prompt_stk_share)
         if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
             reply = fallback_stk
-        if is_owner_sender and any(w in reply.lower() for w in ["ярик", "ярику", "ярика"]):
-            reply = fallback_stk
+        if is_owner_sender:
+            reply = re.sub(r"\bшеф[а-я]*\b", "Миша", reply, flags=re.I)
+            reply = re.sub(r"\bбосс[а-я]*\b", "Миша", reply, flags=re.I)
+            if any(w in reply.lower() for w in ["ярик", "ярику", "ярика"]):
+                reply = fallback_stk
 
         send_cmd = [
             sys.executable,
@@ -864,7 +874,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             ]
             subprocess.run(sticker_cmd)
             if is_owner_sender:
-                stk_reply = "Закинул этот угар в стикерпак, шеф! Шедевр зафиксирован в ангаре 🔥"
+                stk_reply = "Закинул этот угар в стикерпак, Миша! Шедевр зафиксирован в ангаре 🔥"
             else:
                 prompt_stk = "Ты только что добавил последний мем в стикерпак по просьбе Ярика. Напиши живую, короткую фразу (1 предложение) в стиле Crossout про добавление в стикерпак."
                 stk_reply = run_antigravity_cli(prompt_stk) or "Закинул этот угар в стикерпак, шедевр зафиксирован в ангаре! 🔥"
@@ -877,7 +887,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             ]
             subprocess.run(confirm_cmd)
         else:
-            empty_reply = "Так у нас в ангаре пока пусто, шеф! Сначала сгенерируй мем 🚜" if is_owner_sender else "Так у нас в ангаре пусто, Ярик! Сначала сделай мем, а потом уже в стикерпак пихать будем 🚜"
+            empty_reply = "Так у нас в ангаре пока пусто, Миша! Сначала сгенерируй мем 🚜" if is_owner_sender else "Так у нас в ангаре пусто, Ярик! Сначала сделай мем, а потом уже в стикерпак пихать будем 🚜"
             send_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
@@ -891,14 +901,20 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     # 5. Общий живой разговорный ответ по Crossout
     if is_owner_sender:
         prompt = (
-            f"Ты — юзербот в чате Crossout. Твой создатель и ВЛАДЕЛЕЦ (erokat / шеф) написал тебе: «{text}». "
-            "Ответь ему по-товарищески, живо, бодро, с легким юмором Crossout (на «ты», уважительно к создателю: можно 'шеф', 'босс'). "
-            "СТРОЖАЙШИЙ ЗАПРЕТ: НИ В КОЕМ СЛУЧАЕ НЕ НАЗЫВАЙ ЕГО ЯРИКОМ! Ярик — это его друг в чате, а пишет тебе лично сам твой ВЛАДЕЛЕЦ. "
+            f"Ты — юзербот в чате Crossout. Твой создатель и ВЛАДЕЛЕЦ МИША написал тебе: «{text}». "
+            "Ответь ему по-товарищески, живо, бодро, прикольно и по-пацански с легким юмором Crossout. "
+            "Обращайся к нему по имени: Миша (или Миха, Мишан). "
+            "СТРОЖАЙШИЙ ЗАПРЕТ: НИ В КОЕМ СЛУЧАЕ НЕ НАЗЫВАЙ ЕГО 'шеф', 'босс', 'командир'! И НЕ называй его Яриком (Ярик — его друг в чате)! "
             "Без занудства и роботоподобных шаблонов. Выдай ТОЛЬКО чистый текст реплики."
         )
         answer = run_antigravity_cli(prompt)
-        if not answer or any(w in answer.lower() for w in ["ярик", "ярику", "ярика"]):
-            answer = "На связи, шеф! 🚜 Газген заправлен, орудия смазаны. Чем займемся или какой мем запилить?"
+        if not answer:
+            answer = "На связи, Миша! 🚜 Газген заправлен, орудия смазаны. Что замутим или какой мем запилим?"
+        answer = re.sub(r"\bшеф[а-я]*\b", "Миша", answer, flags=re.I)
+        answer = re.sub(r"\bбосс[а-я]*\b", "Миша", answer, flags=re.I)
+        answer = re.sub(r"\bкомандир[а-я]*\b", "Миша", answer, flags=re.I)
+        if any(w in answer.lower() for w in ["ярик", "ярику", "ярика"]):
+            answer = "На связи, Миша! 🚜 Газген заправлен, орудия смазаны. Что замутим или какой мем запилим?"
     else:
         prompt = (
             f"Ты — юзербот и кореш Ярика в чате (играете вместе в Crossout). Твой друг Ярик написал тебе: «{text}». "

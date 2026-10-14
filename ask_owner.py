@@ -76,8 +76,8 @@ def main():
         q_lower = question.lower()
         if "ярик" in q_lower:
             initiator = "Ярик"
-        elif any(w in q_lower for w in ["ты ", "владелец", "шеф", "owner"]):
-            initiator = "Ты (Владелец)"
+        elif any(w in q_lower for w in ["ты ", "владелец", "миша", "шеф", "owner"]):
+            initiator = "Ты (Миша)"
         else:
             initiator = "Ярик"
 
