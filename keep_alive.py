@@ -380,6 +380,22 @@ def get_last_bot_sent_id():
     except Exception:
         return None
 
+def extract_meme_count(text):
+    if not text:
+        return 1
+    t = text.lower()
+    m = re.search(r"(\d+)\s*(?:мем|пикч|картинк|штук)", t)
+    if m:
+        return max(1, min(int(m.group(1)), 10))
+    num_words = {
+        "два": 2, "две": 2, "пару": 2, "три": 3, "четыре": 4, "пять": 5,
+        "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10
+    }
+    for word, val in num_words.items():
+        if re.search(rf"\b{word}\b\s*(?:мем|пикч|картинк|штук)?", t):
+            return val
+    return 1
+
 def handle_owner_message(msg_data):
     text = msg_data.get("text", "").strip()
     photo = msg_data.get("photo")
@@ -390,25 +406,31 @@ def handle_owner_message(msg_data):
     if any(w in t_lower for w in ["ярик", "ярику", "кореш"]):
         if any(w in t_lower for w in ["мем", "пикч", "картинк", "гиф"]):
             is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
-            meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="yarik")
-            prompt_cap = (
-                f"Владелец бота поручил отправить Ярику мем по теме: «{text}». "
-                "Напиши короткую, живую, угарную подпись корешу в чат (1-2 предложения), как реальный заядлый геймер, "
-                "и попроси его дать строгую экспертную оценку этому шедевру. Выдай ТОЛЬКО текст реплики."
-            )
-            caption = run_antigravity_cli(prompt_cap) or "Ярик, зацени этот шедевр! Требуется твоя строгая экспертная оценка от 1 до 10 💥🚜"
+            count = extract_meme_count(text)
+            for idx in range(count):
+                meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="yarik")
+                num_suffix = f" (#{idx + 1})" if count > 1 else ""
+                prompt_cap = (
+                    f"Владелец бота поручил отправить Ярику мем{num_suffix} по теме: «{text}». "
+                    "Напиши короткую, живую, угарную подпись корешу в чат (1-2 предложения), как реальный заядлый геймер, "
+                    "и попроси его дать строгую экспертную оценку этому шедевру. Выдай ТОЛЬКО текст реплики."
+                )
+                caption = run_antigravity_cli(prompt_cap) or f"Ярик, зацени этот шедевр{num_suffix}! Требуется твоя строгая экспертная оценка от 1 до 10 💥🚜"
 
-            # Отправка Ярику через Telethon
-            cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", meme_path, "--text", caption]
-            subprocess.run(cmd_yarik)
+                # Отправка Ярику через Telethon
+                cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", meme_path, "--text", caption]
+                subprocess.run(cmd_yarik)
+                if count > 1 and idx < count - 1:
+                    time.sleep(1.5)
 
             # Отчет владельцу в Control Bot
+            report_text = f"Отправил Ярику пачку из {count} уникальных мемов по теме «{text}»! Запросил его экспертную оценку 🫡" if count > 1 else f"Отправил Ярику мем по теме «{text}»! Запросил его экспертную оценку 🫡"
             cmd_owner = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "owner",
                 "--photo", meme_path,
-                "--text", f"Отправил Ярику мем по теме «{text}»! Запросил его экспертную оценку 🫡"
+                "--text", report_text
             ]
             subprocess.run(cmd_owner)
             return
@@ -426,17 +448,22 @@ def handle_owner_message(msg_data):
             return
 
     # 2. Если владелец просит мем лично для себя ("сделай мем", "новый мем", "сгенерируй", "скинь мем")
-    if any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем"]):
+    if any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем", "мемов", "мема"]):
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
-        meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="owner")
-        cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "owner",
-            "--photo", meme_path,
-            "--text", "Свежий мем готов, шеф! 🚜💥"
-        ]
-        subprocess.run(cmd)
+        count = extract_meme_count(text)
+        for idx in range(count):
+            meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="owner")
+            num_suffix = f" #{idx + 1}" if count > 1 else ""
+            cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--photo", meme_path,
+                "--text", f"Свежий мем{num_suffix} готов, шеф! 🚜💥"
+            ]
+            subprocess.run(cmd)
+            if count > 1 and idx < count - 1:
+                time.sleep(1.5)
         return
 
     # 3. Запрос ссылки на стикерпак от владельца
@@ -649,54 +676,63 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
 
     if is_meme_word or is_another_word or is_reply_to_media:
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "тоже самое"])
+        count = extract_meme_count(text)
         recipient_target = "owner" if is_owner_sender else "yarik"
-        meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient=recipient_target)
 
-        if is_owner_sender:
-            prompt_cap = (
-                f"Ты генератор мемов по игре Crossout. Твой ВЛАДЕЛЕЦ и создатель (шеф) написал в чат запрос: «{text}». "
-                "Придумай одну смешную, угарную подпись к сгенерированному мему в стиле игроков Crossout. "
-                "Обращайся к шефу/владельцу по-свойски (на «ты», можно 'шеф', 'босс'). "
-                "СТРОЖАЙШЕ ЗАПРЕЩЕНО НАЗЫВАТЬ ЕГО ЯРИКОМ! Автор этого сообщения — твой создатель/владелец. "
-                "Без кавычек, 1 короткое сочное предложение с эмодзи."
-            )
-            fallback_cap = "Свежак из гаража готов, шеф! Зацени этот шедевр 🚜💥"
-        else:
-            prompt_cap = (
-                f"Ты генератор мемов по игре Crossout. Твой кореш Ярик написал в чат запрос на мем: «{text}». "
-                "Придумай одну смешную, угарную, жизненную подпись к мему по теме: «{text}». "
-                "В стиле игроков Crossout (с сарказмом про рандом, взрывы, автосборку, детонацию крафтов). Без кавычек, 1 короткое сочное предложение с эмодзи."
-            )
-            fallback_cap = "Когда собрал крафт из говна и палок и поехал тащить рандом 🚜💀"
+        for idx in range(count):
+            meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient=recipient_target)
+            num_suffix = f" (#{idx + 1})" if count > 1 else ""
 
-        caption = run_antigravity_cli(prompt_cap)
-        if not caption:
-            caption = fallback_cap
-        if is_owner_sender and any(w in caption.lower() for w in ["ярик", "ярику", "ярика"]):
-            caption = fallback_cap
-
-        send_cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "yarik",
-            "--photo", meme_path,
-            "--text", caption,
-            "--reply-to", str(msg_id)
-        ]
-        subprocess.run(send_cmd)
-
-        # Если просили добавить в стикерпак
-        if any(w in t_lower for w in ["стикер", "пак"]) and any(w in t_lower for w in ["добавь", "закинь", "в стикерпак", "в пак"]):
-            sticker_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "add_to_sticker_pack.py"),
-                "--image", meme_path
-            ]
-            subprocess.run(sticker_cmd)
             if is_owner_sender:
-                stk_reply = "Закинул этот угар в стикерпак, шеф! Теперь можно спамить в чатах 🔥💀"
+                prompt_cap = (
+                    f"Ты генератор мемов по игре Crossout. Твой ВЛАДЕЛЕЦ и создатель (шеф) запросил мем{num_suffix} по теме: «{text}». "
+                    "Придумай одну смешную, угарную подпись к сгенерированному мему в стиле игроков Crossout. "
+                    "Обращайся к шефу/владельцу по-свойски (на «ты», можно 'шеф', 'босс'). "
+                    "СТРОЖАЙШЕ ЗАПРЕЩЕНО НАЗЫВАТЬ ЕГО ЯРИКОМ! Автор этого сообщения — твой создатель/владелец. "
+                    "Без кавычек, 1 короткое сочное предложение с эмодзи."
+                )
+                fallback_cap = f"Свежак{num_suffix} из гаража готов, шеф! Зацени этот шедевр 🚜💥"
             else:
-                stk_reply = "Закинул этот угар в стикерпак! Ярик, теперь можно спамить в чатах 🔥💀"
+                prompt_cap = (
+                    f"Ты генератор мемов по игре Crossout. Твой кореш Ярик запросил мем{num_suffix} по теме: «{text}». "
+                    "Придумай одну смешную, угарную, жизненную подпись к мему в стиле игроков Crossout (с сарказмом про рандом, взрывы, автосборку, детонацию крафтов). "
+                    "Без кавычек, 1 короткое сочное предложение с эмодзи."
+                )
+                fallback_cap = f"Когда собрал крафт из говна и палок и поехал тащить рандом 🚜💀{num_suffix}"
+
+            caption = run_antigravity_cli(prompt_cap)
+            if not caption:
+                caption = fallback_cap
+            if is_owner_sender and any(w in caption.lower() for w in ["ярик", "ярику", "ярика"]):
+                caption = fallback_cap
+
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--photo", meme_path,
+                "--text", caption,
+                "--reply-to", str(msg_id)
+            ]
+            subprocess.run(send_cmd)
+
+            # Если просили добавить в стикерпак
+            if any(w in t_lower for w in ["стикер", "пак"]) and any(w in t_lower for w in ["добавь", "закинь", "в стикерпак", "в пак"]):
+                sticker_cmd = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "add_to_sticker_pack.py"),
+                    "--image", meme_path
+                ]
+                subprocess.run(sticker_cmd)
+
+            if count > 1 and idx < count - 1:
+                time.sleep(1.5)
+
+        if any(w in t_lower for w in ["стикер", "пак"]) and any(w in t_lower for w in ["добавь", "закинь", "в стикерпак", "в пак"]):
+            if count > 1:
+                stk_reply = f"Закинул всю пачку из {count} шедевров в стикерпак! 🔥"
+            else:
+                stk_reply = "Закинул этот угар в стикерпак, шеф! Теперь можно спамить в чатах 🔥💀" if is_owner_sender else "Закинул этот угар в стикерпак! Ярик, теперь можно спамить в чатах 🔥💀"
             confirm_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
