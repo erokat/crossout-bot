@@ -389,7 +389,8 @@ def handle_owner_message(msg_data):
     # 1. Поручение отправить что-то Ярику (мем или сообщение)
     if any(w in t_lower for w in ["ярик", "ярику", "кореш"]):
         if any(w in t_lower for w in ["мем", "пикч", "картинк", "гиф"]):
-            meme_path = generate_crossout_meme(theme=text)
+            is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
+            meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="yarik")
             prompt_cap = (
                 f"Владелец бота поручил отправить Ярику мем по теме: «{text}». "
                 "Напиши короткую, живую, угарную подпись корешу в чат (1-2 предложения), как реальный заядлый геймер, "
@@ -426,7 +427,8 @@ def handle_owner_message(msg_data):
 
     # 2. Если владелец просит мем лично для себя ("сделай мем", "новый мем", "сгенерируй", "скинь мем")
     if any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем"]):
-        meme_path = generate_crossout_meme(theme=text)
+        is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
+        meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="owner")
         cmd = [
             sys.executable,
             os.path.join(BASE_DIR, "send.py"),
@@ -640,7 +642,8 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
 
     # 2. Запрос на мем / картинку
     if any(w in t_lower for w in ["мем", "пикч", "картинк", "гиф", "сделай"]):
-        meme_path = generate_crossout_meme(theme=text)
+        is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
+        meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="yarik")
         prompt_cap = (
             f"Ты генератор мемов по игре Crossout. Придумай одну смешную, угарную, жизненную подпись к мему по теме: «{text}». "
             "В стиле игроков Crossout (с сарказмом про рандом, взрывы, автосборку, детонацию крафтов). Без кавычек, 1 короткое сочное предложение с эмодзи."

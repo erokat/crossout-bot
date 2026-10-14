@@ -57,6 +57,20 @@ def init_db():
                 pass
 
         conn.execute("""
+        CREATE TABLE IF NOT EXISTS sent_memes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            meme_hash TEXT UNIQUE,
+            template_name TEXT,
+            headline TEXT,
+            file_path TEXT,
+            sent_to TEXT,
+            created_at REAL
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sent_memes_hash ON sent_memes(meme_hash)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sent_memes_headline ON sent_memes(headline)")
+
+        conn.execute("""
         CREATE TABLE IF NOT EXISTS kv_store (
             key TEXT PRIMARY KEY,
             value TEXT
@@ -138,6 +152,37 @@ def get_kv(key, default=None):
 def set_kv(key, value):
     with get_db() as conn:
         conn.execute("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
+
+def is_meme_already_sent(meme_hash=None, headline=None):
+    if not meme_hash and not headline:
+        return False
+    with get_db() as conn:
+        if meme_hash:
+            cur = conn.execute("SELECT 1 FROM sent_memes WHERE meme_hash = ?", (meme_hash,))
+            if cur.fetchone():
+                return True
+        if headline:
+            cur = conn.execute("SELECT 1 FROM sent_memes WHERE LOWER(TRIM(headline)) = LOWER(TRIM(?))", (headline,))
+            if cur.fetchone():
+                return True
+    return False
+
+def record_sent_meme(meme_hash, template_name, headline, file_path, sent_to=""):
+    with get_db() as conn:
+        conn.execute("""
+        INSERT INTO sent_memes (meme_hash, template_name, headline, file_path, sent_to, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(meme_hash) DO NOTHING
+        """, (meme_hash, template_name, headline, file_path, sent_to, time.time()))
+
+def get_last_sent_meme(sent_to=None):
+    with get_db() as conn:
+        if sent_to:
+            cur = conn.execute("SELECT file_path, headline FROM sent_memes WHERE sent_to = ? ORDER BY id DESC LIMIT 1", (sent_to,))
+        else:
+            cur = conn.execute("SELECT file_path, headline FROM sent_memes ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+        return {"file_path": row[0], "headline": row[1]} if row else None
 
 if __name__ == "__main__":
     init_db()
