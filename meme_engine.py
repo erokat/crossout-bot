@@ -318,7 +318,23 @@ def search_internet_for_meme_image(query):
             if fetch_image_from_url(item["url"], cached_file):
                 return cached_file
 
-    # 2. Wallhaven API with normalized English query
+    # 2. Universal Yandex Image Search (supports ANY Russian or English query, finds exact memes, characters, games)
+    try:
+        yandex_q = f"{clean_q} мем шаблон" if "мем" not in clean_q.lower() else clean_q
+        y_url = f"https://yandex.ru/images/search?text={urllib.parse.quote(yandex_q)}"
+        req = urllib.request.Request(y_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=7) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            raw_imgs = re.findall(r"img_url=([^\x26\s\"<>]+)", html)
+            for raw_u in raw_imgs[:6]:
+                unq = urllib.parse.unquote(raw_u)
+                if any(ext in unq.lower() for ext in [".jpg", ".png", ".jpeg"]):
+                    if fetch_image_from_url(unq, cached_file):
+                        return cached_file
+    except Exception as e:
+        print(f"[MEME SEARCH] Yandex search error: {e}")
+
+    # 3. Wallhaven API with normalized English query
     en_query = normalize_search_query_en(clean_q)
     try:
         wh_url = f"https://wallhaven.cc/api/v1/search?q={urllib.parse.quote(en_query)}"
@@ -333,7 +349,7 @@ def search_internet_for_meme_image(query):
     except Exception as e:
         print(f"[MEME SEARCH] Wallhaven error: {e}")
 
-    # 3. Imgflip Meme Search
+    # 4. Imgflip Meme Search
     try:
         url = f"https://imgflip.com/memesearch?q={urllib.parse.quote(en_query)}"
         req = urllib.request.Request(url, headers=headers)
@@ -890,57 +906,80 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
             ]
             joke_data = random.choice(jokes_rw)
         else:
-            jokes_general = [
-                {
-                    "style": "caption",
-                    "title": "Мой билд в гараже после 3 часов настройки углов стрельбы:",
-                    "subtitle": "В первом же бою Газген сдетонировал от случайной пульки бота",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "demotivator",
-                    "title": "БАЛАНС В ПУСТОШАХ",
-                    "subtitle": "Существует ровно до тех пор, пока ты не нажал кнопку «В бой»",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "impact",
-                    "title": "СОБРАЛ КРАФТ ПО СОВЕТАМ ИЗ ЧАТА",
-                    "subtitle": "ПЕРВЫЙ ЖЕ БОТ С ДРОБОВИКАМИ РАЗОБРАЛ ЕГО НА ВИНТИКИ",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "breaking_news",
-                    "title": "ИНЖЕНЕРЫ В ШОКЕ ОТ НОВОЙ АВТОСБОРКИ",
-                    "subtitle": "Крафт развалился на две части еще на стартовой базе",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "caption",
-                    "title": "Когда тиммейт уверенно кричит в войс: «Я прикрою!»:",
-                    "subtitle": "И через 3 секунды ты наблюдаешь только его горящую кабину",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "demotivator",
-                    "title": "ГЕНЕРАТОР ГАЗГЕН",
-                    "subtitle": "Самое надежное средство быстрой телепортации в ангар",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "pov",
-                    "title": "ЖИЗА: Выехал в бой на красивом неповоротливом крафте",
-                    "subtitle": "А навстречу несутся 4 утюга со скоростью 120 км/ч",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "tweet",
-                    "title": "Когда случайно нажал кнопку самоуничтожения на старте боя:",
-                    "subtitle": "«Так и было задумано по тактике, вы ничего не понимаете»",
-                    "sound_or_extra": None
-                }
-            ]
-            joke_data = random.choice(jokes_general)
+            is_xo_topic = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер", "крафт", "бочки", "рандом", "пустош"])
+            if is_xo_topic:
+                jokes_target = [
+                    {
+                        "style": "caption",
+                        "title": "Мой билд в гараже после 3 часов настройки углов стрельбы:",
+                        "subtitle": "В первом же бою Газген сдетонировал от случайной пульки бота",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "demotivator",
+                        "title": "БАЛАНС В ПУСТОШАХ",
+                        "subtitle": "Существует ровно до тех пор, пока ты не нажал кнопку «В бой»",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "impact",
+                        "title": "СОБРАЛ КРАФТ ПО СОВЕТАМ ИЗ ЧАТА",
+                        "subtitle": "ПЕРВЫЙ ЖЕ БОТ С ДРОБОВИКАМИ РАЗОБРАЛ ЕГО НА ВИНТИКИ",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "caption",
+                        "title": "Когда тиммейт уверенно кричит в войс: «Я прикрою!»:",
+                        "subtitle": "И через 3 секунды ты наблюдаешь только его горящую кабину",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "demotivator",
+                        "title": "ГЕНЕРАТОР ГАЗГЕН",
+                        "subtitle": "Самое надежное средство быстрой телепортации в ангар",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "pov",
+                        "title": "ЖИЗА: Выехал в бой на красивом неповоротливом крафте",
+                        "subtitle": "А навстречу несутся 4 утюга со скоростью 120 км/ч",
+                        "sound_or_extra": None
+                    }
+                ]
+            else:
+                jokes_target = [
+                    {
+                        "style": "caption",
+                        "title": f"Когда думал, что {clean_theme} — это просто и понятно:",
+                        "subtitle": "Реальность через 5 минут: полное непонимание происходящего 💀",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "demotivator",
+                        "title": clean_theme.upper(),
+                        "subtitle": "То, к чему жизнь определенно тебя не готовила",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "pov",
+                        "title": f"ЖИЗА: Мое лицо в любой ситуации, когда речь заходит про {clean_theme}",
+                        "subtitle": "",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "caption",
+                        "title": f"План на день: идеально разобраться с темой «{clean_theme}»",
+                        "subtitle": "Суровая реальность: ничего не понял, но очень интересно 🔥",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "impact",
+                        "title": f"ЗАШЕЛ ИЗУЧИТЬ {clean_theme.upper()}",
+                        "subtitle": "ВЫШЕЛ С НОВОЙ ПСИХОЛОГИЧЕСКОЙ ТРАВМОЙ",
+                        "sound_or_extra": None
+                    }
+                ]
+            joke_data = random.choice(jokes_target)
 
     style = joke_data.get("style", "caption").lower()
     t_top = joke_data.get("title", f"МЕМ: {clean_theme.upper()}")
