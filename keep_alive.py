@@ -357,26 +357,14 @@ def run_periodic_media_cleaner():
             print(f"[CLEANUP EXCEPTION] Error in periodic cleaner: {e}")
 
 def run_antigravity_cli(prompt):
-    conv_id = "de5ca636-4ede-4348-a756-2b4d4f01194a"
-    conv_db = os.path.expanduser(f"~/.gemini/antigravity-cli/conversations/{conv_id}.db")
-
-    # If historical conversation session is loaded, continue it!
-    if os.path.exists(conv_db):
-        cmd = ["agy", "--dangerously-skip-permissions", f"--conversation={conv_id}", "-p", prompt]
-    else:
-        cmd = ["agy", "--dangerously-skip-permissions", "-p", prompt]
-
+    cmd = ["agy", "--dangerously-skip-permissions", "-p", prompt]
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
-        if res.returncode == 0:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
+        if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
         else:
-            print(f"[AGY WARNING] Error running agy: {res.stderr}")
-            if f"--conversation={conv_id}" in cmd:
-                fb_cmd = ["agy", "--dangerously-skip-permissions", "-p", prompt]
-                fb_res = subprocess.run(fb_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
-                if fb_res.returncode == 0:
-                    return fb_res.stdout.strip()
+            if res.stderr:
+                print(f"[AGY WARNING] Error running agy: {res.stderr[:200]}")
             return None
     except Exception as e:
         print(f"[AGY EXCEPTION] Failed to execute agy: {e}")
@@ -398,20 +386,58 @@ def handle_owner_message(msg_data):
     t_lower = text.lower()
     print(f"[ORCHESTRATOR] Handling OWNER task: {text!r} (photo={photo})")
 
-    # If owner asks for a meme
-    if any(w in t_lower for w in ["мем", "пикч", "картинк", "гиф"]):
+    # 1. Поручение отправить что-то Ярику (мем или сообщение)
+    if any(w in t_lower for w in ["ярик", "ярику", "кореш"]):
+        if any(w in t_lower for w in ["мем", "пикч", "картинк", "гиф"]):
+            meme_path = generate_crossout_meme(theme=text)
+            prompt_cap = (
+                f"Владелец бота поручил отправить Ярику мем по теме: «{text}». "
+                "Напиши короткую, живую, угарную подпись корешу в чат (1-2 предложения), как реальный заядлый геймер, "
+                "и попроси его дать строгую экспертную оценку этому шедевру. Выдай ТОЛЬКО текст реплики."
+            )
+            caption = run_antigravity_cli(prompt_cap) or "Ярик, зацени этот шедевр! Требуется твоя строгая экспертная оценка от 1 до 10 💥🚜"
+
+            # Отправка Ярику через Telethon
+            cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", meme_path, "--text", caption]
+            subprocess.run(cmd_yarik)
+
+            # Отчет владельцу в Control Bot
+            cmd_owner = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--photo", meme_path,
+                "--text", f"Отправил Ярику мем по теме «{text}»! Запросил его экспертную оценку 🫡"
+            ]
+            subprocess.run(cmd_owner)
+            return
+
+        elif any(w in t_lower for w in ["скинь", "отправь", "напиши", "скажи", "передай"]):
+            prompt_msg = (
+                f"Владелец бота поручил передать Ярику следующее: «{text}». "
+                "Сформулируй классное, живое пацанское сообщение Ярику в чат от имени бота/кореша. Выдай ТОЛЬКО текст."
+            )
+            msg_text = run_antigravity_cli(prompt_msg) or text
+            cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", msg_text]
+            subprocess.run(cmd_yarik)
+            cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", f"Передал Ярику: «{msg_text}» 🫡"]
+            subprocess.run(cmd_owner)
+            return
+
+    # 2. Если владелец просит мем лично для себя ("сделай мем", "новый мем", "сгенерируй", "скинь мем")
+    if any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем"]):
         meme_path = generate_crossout_meme(theme=text)
         cmd = [
             sys.executable,
             os.path.join(BASE_DIR, "send.py"),
             "--to", "owner",
             "--photo", meme_path,
-            "--text", "Ваш мем готов, командир! 🚜💥"
+            "--text", "Свежий мем готов, шеф! 🚜💥"
         ]
         subprocess.run(cmd)
         return
 
-    # 1. Запрос ссылки на стикерпак от владельца
+    # 3. Запрос ссылки на стикерпак от владельца
     is_owner_stk_req = any(w in t_lower for w in ["стикерпак", "стикеры", "стикер"]) or "пак" in t_lower
     is_owner_stk_send = any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "покажи", "кинь", "сбрось", "отправь", "поделись"])
     is_owner_stk_add = any(w in t_lower for w in ["добавь", "закинь", "запили", "в пак", "в стикерпак"])
@@ -429,7 +455,7 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # 2. Добавление мема в стикерпак по просьбе владельца
+    # 4. Добавление мема в стикерпак по просьбе владельца
     if is_owner_stk_req and is_owner_stk_add:
         recent_memes = sorted([
             os.path.join(SAVED_MEMES_DIR, f) for f in os.listdir(SAVED_MEMES_DIR)
@@ -449,7 +475,7 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # If owner asks to delete a message in chat with Yarik
+    # 5. Запрос на удаление сообщения в чате
     if any(w in t_lower for w in ["удали", "снеси", "сотри", "delete"]):
         target_id = get_last_bot_sent_id()
         num_match = re.search(r"#?(\d{4,})", text)
@@ -483,14 +509,14 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # If owner asks for status or health
+    # 6. Статус
     if any(w in t_lower for w in ["статус", "status", "пинг", "ping", "инфо"]):
         reply = "🟢 Сервер Render активен 24/7! Все службы юзербота, Bot API и Telethon на дежурстве."
         cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
         subprocess.run(cmd)
         return
 
-    # If owner asks for Google Drive connection
+    # 7. Подключение Google Диска
     if any(w in t_lower for w in ["диск", "drive", "gdrive"]):
         connect_url = "https://yarik-crossout-userbot.onrender.com/gdrive/connect"
         reply = (
@@ -503,14 +529,21 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # Run Antigravity CLI or smart helper
+    # 8. Живой разговорный ответ владельцу (Antigravity AI)
     response = None
     if text:
-        prompt = f"Ты умный и преданный помощник владельца (erokat). Владелец написал тебе в личку: «{text}». Ответь четко, по делу, дружелюбно и живо, без шаблонных канцеляризмов."
+        prompt = (
+            f"Ты умный, преданный и сообразительный ассистент владельца (erokat). Владелец написал тебе в личку: «{text}». "
+            "Ответь четко, по делу, дружелюбно и живо, на «ты», с легким юмором, без шаблонных фраз робота и без канцеляризмов. "
+            "Никогда не используй фразы 'Принял, шеф! Задача в работе'. Выдай ТОЛЬКО текст живого ответа."
+        )
         response = run_antigravity_cli(prompt)
 
     if not response:
-        response = f"Принял, шеф! Задача по «{text}» в работе. Все службы на связи 🫡"
+        if any(w in t_lower for w in ["в сети", "тут", "живой", "работаешь"]):
+            response = "Да, шеф, я на связи и готов к работе! 🚀 Чем займемся?"
+        else:
+            response = "На связи, шеф! Готов выполнить любую задачу по чату или мемам 🚜"
 
     # Reply to owner
     cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", response]
