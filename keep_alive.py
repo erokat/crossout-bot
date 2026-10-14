@@ -389,8 +389,26 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # If owner asks to add to sticker pack
-    if any(w in t_lower for w in ["стикер", "пак"]):
+    # 1. Запрос ссылки на стикерпак от владельца
+    is_owner_stk_req = any(w in t_lower for w in ["стикерпак", "стикеры", "стикер"]) or "пак" in t_lower
+    is_owner_stk_send = any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "покажи", "кинь", "сбрось", "отправь", "поделись"])
+    is_owner_stk_add = any(w in t_lower for w in ["добавь", "закинь", "запили", "в пак", "в стикерпак"])
+
+    if is_owner_stk_req and not is_owner_stk_add and (is_owner_stk_send or "стикерпак" in t_lower or "стикеры" in t_lower):
+        prompt_stk = (
+            "Владелец бота попросил скинуть ссылку на наш стикерпак Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+            "Ответь живо, дружелюбно, по-товарищески (1-2 коротких предложения), мол держи коллекцию, шеф. "
+            "Обязательно включи ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat"
+        )
+        reply = run_antigravity_cli(prompt_stk)
+        if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
+            reply = "Держи наш стикерпак, шеф! Раздавай стиль в чатах: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
+        cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
+        subprocess.run(cmd)
+        return
+
+    # 2. Добавление мема в стикерпак по просьбе владельца
+    if is_owner_stk_req and is_owner_stk_add:
         recent_memes = sorted([
             os.path.join(SAVED_MEMES_DIR, f) for f in os.listdir(SAVED_MEMES_DIR)
             if f.endswith((".png", ".jpg"))
@@ -530,7 +548,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
 
         # Если просили добавить в стикерпак
-        if any(w in t_lower for w in ["стикер", "пак"]):
+        if any(w in t_lower for w in ["стикер", "пак"]) and any(w in t_lower for w in ["добавь", "закинь", "в стикерпак", "в пак"]):
             sticker_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "add_to_sticker_pack.py"),
@@ -549,8 +567,37 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             subprocess.run(confirm_cmd)
         return
 
-    # 3. Добавление в стикерпак отдельной командой
-    if "стикер" in t_lower:
+    # 3. Запрос на отправку ссылки на стикерпак (живой разговорный ответ)
+    is_stk_req = any(w in t_lower for w in ["стикерпак", "стикеры", "стикер"]) or ("пак" in t_lower and any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "кинь"]))
+    is_stk_send = any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "покажи", "кинь", "сбрось", "отправь", "поделись", "кидай", "скидывай"])
+    is_stk_add = any(w in t_lower for w in ["добавь", "закинь", "запили", "засунь", "в пак", "в стикерпак"])
+
+    if is_stk_req and not is_stk_add and (is_stk_send or "стикерпак" in t_lower or "стикеры" in t_lower):
+        prompt_stk_share = (
+            "Ярик в чате попросил скинуть ссылку на наш стикерпак по игре Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+            f"Его сообщение: «{text}»\n"
+            "Напиши угарный, живой, пацанский ответ корешу в чат (1-2 предложения), как реальный заядлый игрок в Crossout "
+            "(с юмором, сарказмом и иронией про взрывы Газгенов, рандомных раков, позор Пустошей, мол держи святой артефакт и спамь на здоровье). "
+            "Категорически без официоза, без шаблонных фраз роботов (типа 'Вот ваша ссылка' или 'Вот ссылка на стикерпак'). "
+            "ОБЯЗАТЕЛЬНО включи саму ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+            "Выдай ТОЛЬКО чистый текст реплики в чат."
+        )
+        reply = run_antigravity_cli(prompt_stk_share)
+        if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
+            reply = "Держи наш склад отборного позора и детонаций, спамь пока раму не оторвало: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
+
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--text", reply,
+            "--reply-to", str(msg_id)
+        ]
+        subprocess.run(send_cmd)
+        return
+
+    # 4. Добавление в стикерпак отдельной командой (добавь в стикерпак)
+    if is_stk_req and is_stk_add:
         recent_memes = sorted([
             os.path.join(SAVED_MEMES_DIR, f) for f in os.listdir(SAVED_MEMES_DIR)
             if f.endswith((".png", ".jpg"))
@@ -563,8 +610,8 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 "--image", recent_memes[0]
             ]
             subprocess.run(sticker_cmd)
-            prompt_stk = "Ты только что добавил последний мем в стикерпак по просьбе Ярика. Напиши живую, короткую фразу (1 предложение) про добавление в стикерпак."
-            stk_reply = run_antigravity_cli(prompt_stk) or "Добавил в стикерпак, шедевр зафиксирован! 🔥"
+            prompt_stk = "Ты только что добавил последний мем в стикерпак по просьбе Ярика. Напиши живую, короткую фразу (1 предложение) в стиле Crossout про добавление в стикерпак."
+            stk_reply = run_antigravity_cli(prompt_stk) or "Закинул этот угар в стикерпак, шедевр зафиксирован в ангаре! 🔥"
             confirm_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
@@ -573,9 +620,18 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 "--reply-to", str(msg_id)
             ]
             subprocess.run(confirm_cmd)
+        else:
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--text", "Так у нас в ангаре пусто, Ярик! Сначала сделай мем, а потом уже в стикерпак пихать будем 🚜",
+                "--reply-to", str(msg_id)
+            ]
+            subprocess.run(send_cmd)
         return
 
-    # 4. Общий живой разговорный ответ по Crossout
+    # 5. Общий живой разговорный ответ по Crossout
     prompt = (
         f"Ты — юзербот и кореш Ярика в чате (играете вместе в Crossout). Ярик написал тебе: «{text}». "
         "Ответь ему как живой пацан-геймер, с юмором, сарказмом и сленгом Crossout (газгены, ховеры, утюги, рандом, крафты), а не как робот-помощник! "

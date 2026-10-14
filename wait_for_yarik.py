@@ -23,7 +23,7 @@ def is_bot_mention(text):
     if not text:
         return False
     t = text.lower().strip()
-    triggers = ["!бот", "!bot", "/бот", "/bot", "бот ответь", "бот,", "ботяра", "ботик", "робот"]
+    triggers = ["!бот", "!bot", "/бот", "/bot", "бот ответь", "бот,", "ботяра", "ботик", "робот", "стикерпак", "стикеры"]
     if any(tr in t for tr in triggers):
         return True
     if re.search(r"\bбот\b", t):
