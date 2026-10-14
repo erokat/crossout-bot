@@ -394,6 +394,11 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         try:
             saved_copy = os.path.join(SAVED_MEMES_DIR, out_name)
             shutil.copy2(out_path, saved_copy)
+            try:
+                from gdrive import upload_file_to_drive
+                upload_file_to_drive(saved_copy)
+            except Exception:
+                pass
         except Exception:
             pass
 

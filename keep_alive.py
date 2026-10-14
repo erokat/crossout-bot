@@ -402,6 +402,46 @@ def handle_owner_message(msg_data):
     t_lower = text.lower()
     print(f"[ORCHESTRATOR] Handling OWNER task: {text!r} (photo={photo})")
 
+    # 0. Команда отправить текущий / последний созданный мем Ярику ("отправляй ему", "скинь ему", "кидай", "шли", "отправь")
+    is_forward_to_yarik = any(w in t_lower for w in [
+        "отправляй ему", "отпраляй ему", "отправь ему", "скинь ему", "кидай ему", "кинь ему",
+        "перешли ему", "закинь ему", "шли ему", "запули ему", "давай ему", "отправь ярику",
+        "скинь ярику", "кинь ярику", "отправляй", "отпраляй", "шли", "засылай", "кидай в чат",
+        "отправь в чат", "скинь в чат", "отправляй мем", "кидай мем"
+    ]) or (bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["отправляй", "отпраляй", "отправь", "скинь", "кинь", "шли", "давай", "норм"]))
+
+    if is_forward_to_yarik:
+        recent_memes = sorted([
+            os.path.join(SAVED_MEMES_DIR, f) for f in os.listdir(SAVED_MEMES_DIR)
+            if f.endswith((".png", ".jpg"))
+        ], key=os.path.getmtime, reverse=True) if os.path.exists(SAVED_MEMES_DIR) else []
+
+        if recent_memes:
+            meme_path = recent_memes[0]
+            prompt_cap = "Ты отправляешь свежий мем Ярику в чат по поручению своего друга (создателя). Напиши короткую живую пацанскую реплику Ярику (1 предложение) в стиле игроков Crossout про рандом и крафты. Выдай ТОЛЬКО текст."
+            caption = run_antigravity_cli(prompt_cap) or "Ярик, зацени этот шедевр! Требуется твоя строгая экспертная оценка от 1 до 10 💥🚜"
+
+            cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", meme_path, "--text", caption]
+            subprocess.run(cmd_yarik)
+
+            cmd_owner = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--text", "Всё, запулил этот мем Ярику в чат! Ждем реакцию 🔥🚜"
+            ]
+            subprocess.run(cmd_owner)
+            return
+        else:
+            cmd_owner = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--text", "Так у меня пока нет готового мема в памяти, напиши тему — я быстро склепаю!"
+            ]
+            subprocess.run(cmd_owner)
+            return
+
     # 1. Поручение отправить что-то Ярику (мем или сообщение)
     if any(w in t_lower for w in ["ярик", "ярику", "кореш"]):
         if any(w in t_lower for w in ["мем", "пикч", "картинк", "гиф"]):
@@ -562,17 +602,21 @@ def handle_owner_message(msg_data):
     response = None
     if text:
         prompt = (
-            f"Ты умный, преданный и сообразительный ассистент владельца (erokat). Владелец написал тебе в личку: «{text}». "
-            "Ответь четко, по делу, дружелюбно и живо, на «ты», с легким юмором, без шаблонных фраз робота и без канцеляризмов. "
-            "Никогда не используй фразы 'Принял, шеф! Задача в работе'. Выдай ТОЛЬКО текст живого ответа."
+            f"Тебе написал твой близкий друг и создатель (erokat): «{text}». "
+            "Отвечай максимально живо, по-человечески, по-пацански и с легким юмором, как реальный живой собеседник и кореш в Telegram! "
+            "СТРОЖАЙШИЙ ЗАПРЕТ: НИКАКИХ 'Принял, шеф', НИКАКИХ 'Задача в работе', 'Все службы на связи', 'Чем займемся', 'шеф' и никаких шаблонных фраз робота! "
+            "Отвечай просто, живо и по делу (1-2 предложения). Выдай ТОЛЬКО чистый текст реплики."
         )
         response = run_antigravity_cli(prompt)
 
-    if not response:
+    if not response or any(bad in response.lower() for bad in ["принял, шеф", "принял шеф", "задача в работе", "все службы на связи", "шеф"]):
         if any(w in t_lower for w in ["в сети", "тут", "живой", "работаешь"]):
-            response = "Да, шеф, я на связи и готов к работе! 🚀 Чем займемся?"
+            response = "Да тут я, на связи! 🚀 Чем помочь или что замутить?"
         else:
-            response = "На связи, шеф! Готов выполнить любую задачу по чату или мемам 🚜"
+            response = "Я тут, слушаю тебя! Что надо сделать? 🚜"
+
+    response = re.sub(r"\bшеф[а-я]*\b", "", response, flags=re.I).strip()
+    response = re.sub(r"[\s,]+$", "", response)
 
     # Reply to owner
     cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", response]
