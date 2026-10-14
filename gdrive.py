@@ -132,9 +132,21 @@ def get_valid_access_token():
     if access_token and time.time() < expires_at:
         return access_token
 
+    # 2. Check refresh token in KV, file, or ENV
+    refresh_token = get_kv("gdrive_refresh_token") or os.environ.get("GDRIVE_REFRESH_TOKEN", "").strip()
+
+    if not refresh_token and os.path.exists(TOKEN_FILE):
+        try:
+            with open(TOKEN_FILE, "r", encoding="utf-8") as tf:
+                td = json.load(tf)
+                refresh_token = td.get("refresh_token", "").strip()
+        except Exception:
+            pass
+
     if not refresh_token and RENDER_API_KEY and RENDER_SERVICE_ID:
         try:
             req = urllib.request.Request(
+
                 f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
                 headers={"Authorization": f"Bearer {RENDER_API_KEY}", "Accept": "application/json"}
             )

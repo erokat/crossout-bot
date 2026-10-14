@@ -561,28 +561,28 @@ def extract_meme_count(text):
     if not text:
         return 1
     t = text.lower()
-    # 1. Number before meme word: "3 мема", "3 мэмасика", "5 картинок"
-    m = re.search(r"(\d+)\s*(?:мем|мэм|пикч|картинк|штук)", t)
-    if m:
-        return max(1, min(int(m.group(1)), 10))
-    # 2. Number after meme word (e.g. "мемов по кросауту 3", "мэмасиков 3", "пикчи 2")
-    m = re.search(r"(?:мем[а-я]*|мэм[а-я]*|пикч[а-я]*|картинк[а-я]*|штук[а-я]*)\D*?(\d+)", t)
-    if m:
-        return max(1, min(int(m.group(1)), 10))
-    # 3. Any standalone number in text if meme keyword is present
-    if any(w in t for w in ["мем", "мэм", "пикч", "картинк", "гиф"]):
-        m = re.search(r"\b(\d+)\b", t)
-        if m:
-            return max(1, min(int(m.group(1)), 10))
-    # 4. Words for numbers
+
+    # Сначала проверяем словесные числа
     num_words = {
-        "два": 2, "две": 2, "пару": 2, "три": 3, "четыре": 4, "пять": 5,
-        "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10
+        "два": 2, "две": 2, "пару": 2, "три": 3, "четыре": 4, "пять": 5
     }
     for word, val in num_words.items():
-        if re.search(rf"\b{word}\b", t):
+        if re.search(rf"\b{word}\s*(?:мем|мэм|пикч|картинк|штук)", t):
             return val
+
+    # 1. Число СТРОГО перед словом мем/картинка (например "2 мема", "3 картинки", "4 штуки")
+    m = re.search(r"\b([1-5])\s*(?:мем[а-я]*|мэм[а-я]*|пикч[а-я]*|картинк[а-я]*|штук[а-я]*)", t)
+    if m:
+        return max(1, min(int(m.group(1)), 5))
+
+    # 2. Число СТРОГО после слова "пачку из N" / "сделай N"
+    m = re.search(r"(?:пачк[а-я]* из|сделай|скинь|дай)\s+([1-5])\s*(?:мем[а-я]*|мэм[а-я]*|пикч[а-я]*)", t)
+    if m:
+        return max(1, min(int(m.group(1)), 5))
+
+    # По умолчанию ВСЕГДА ровно 1 мем! Любые года (2018, 2026 и т.д.) или ОМ/уровни игнорируются!
     return 1
+
 
 def handle_owner_message(msg_data):
     text = msg_data.get("text", "").strip()
