@@ -184,6 +184,12 @@ def get_last_sent_meme(sent_to=None):
         row = cur.fetchone()
         return {"file_path": row[0], "headline": row[1]} if row else None
 
+# Initialize tables on import
+try:
+    init_db()
+except Exception:
+    pass
+
 if __name__ == "__main__":
     init_db()
     print("Database initialized at", DB_PATH)

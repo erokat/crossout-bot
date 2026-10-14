@@ -384,16 +384,16 @@ def extract_meme_count(text):
     if not text:
         return 1
     t = text.lower()
-    # 1. Number before meme word: "3 мема", "5 картинок"
-    m = re.search(r"(\d+)\s*(?:мем|пикч|картинк|штук)", t)
+    # 1. Number before meme word: "3 мема", "3 мэмасика", "5 картинок"
+    m = re.search(r"(\d+)\s*(?:мем|мэм|пикч|картинк|штук)", t)
     if m:
         return max(1, min(int(m.group(1)), 10))
-    # 2. Number after meme word (e.g. "мемов по кросауту 3", "мемов 3", "пикчи 2")
-    m = re.search(r"(?:мем[а-я]*|пикч[а-я]*|картинк[а-я]*|штук[а-я]*)\D*?(\d+)", t)
+    # 2. Number after meme word (e.g. "мемов по кросауту 3", "мэмасиков 3", "пикчи 2")
+    m = re.search(r"(?:мем[а-я]*|мэм[а-я]*|пикч[а-я]*|картинк[а-я]*|штук[а-я]*)\D*?(\d+)", t)
     if m:
         return max(1, min(int(m.group(1)), 10))
     # 3. Any standalone number in text if meme keyword is present
-    if any(w in t for w in ["мем", "пикч", "картинк", "гиф"]):
+    if any(w in t for w in ["мем", "мэм", "пикч", "картинк", "гиф"]):
         m = re.search(r"\b(\d+)\b", t)
         if m:
             return max(1, min(int(m.group(1)), 10))
@@ -413,13 +413,20 @@ def handle_owner_message(msg_data):
     t_lower = text.lower()
     print(f"[ORCHESTRATOR] Handling OWNER task: {text!r} (photo={photo})")
 
-    # 0. Команда отправить текущий / последний созданный мем Ярику ("отправляй ему", "скинь ему", "кидай", "шли", "отправь")
-    is_forward_to_yarik = any(w in t_lower for w in [
+    meme_words = ["мем", "мэм", "пикч", "картинк", "гиф"]
+    is_meme_theme_req = any(w in t_lower for w in ["выбирай сам", "сам придумай", "на твой вкус", "на свой вкус", "на свой выбор", "на твое усмотрение"])
+    has_meme_mention = any(w in t_lower for w in meme_words) or is_meme_theme_req
+
+    # 0. Команда отправить текущий / последний созданный мем Ярику
+    # Срабатывает ТОЛЬКО если это явная команда отправить УЖЕ показанный мем (например, "отправляй ему", "кидай ему", или реплай "отправляй", "скинь")
+    # И НЕ содержит запрос на создание новых мемов ("отправь ярику 3 мема" — это создание!)
+    is_reply_forward = bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["отправляй", "отпраляй", "отправь", "скинь", "кинь", "шли", "давай", "норм", "пойдет", "годится"])
+    is_explicit_forward = any(w in t_lower for w in [
         "отправляй ему", "отпраляй ему", "отправь ему", "скинь ему", "кидай ему", "кинь ему",
-        "перешли ему", "закинь ему", "шли ему", "запули ему", "давай ему", "отправь ярику",
-        "скинь ярику", "кинь ярику", "отправляй", "отпраляй", "шли", "засылай", "кидай в чат",
-        "отправь в чат", "скинь в чат", "отправляй мем", "кидай мем"
-    ]) or (bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["отправляй", "отпраляй", "отправь", "скинь", "кинь", "шли", "давай", "норм"]))
+        "перешли ему", "закинь ему", "шли ему", "запули ему", "давай ему", "отправляй это ярику",
+        "скинь это ярику", "кидай это ярику"
+    ])
+    is_forward_to_yarik = (is_reply_forward or is_explicit_forward) and not any(w in t_lower for w in ["новый", "новых", "свеж", "3", "2", "4", "5", "три", "два", "пять"])
 
     if is_forward_to_yarik:
         recent_memes = sorted([
@@ -429,37 +436,35 @@ def handle_owner_message(msg_data):
 
         if recent_memes:
             meme_path = recent_memes[0]
-            prompt_cap = "Ты отправляешь свежий мем Ярику в чат по поручению своего друга (создателя). Напиши короткую живую пацанскую реплику Ярику (1 предложение) в стиле игроков Crossout про рандом и крафты. Выдай ТОЛЬКО текст."
-            caption = run_antigravity_cli(prompt_cap) or "Ярик, зацени этот шедевр! Требуется твоя строгая экспертная оценка от 1 до 10 💥🚜"
-
-            cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", meme_path, "--text", caption]
-            subprocess.run(cmd_yarik)
-
-            cmd_owner = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "owner",
-                "--text", "Всё, запулил этот мем Ярику в чат! Ждем реакцию 🔥🚜"
-            ]
-            subprocess.run(cmd_owner)
-            return
         else:
-            cmd_owner = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "owner",
-                "--text", "Так у меня пока нет готового мема в памяти, напиши тему — я быстро склепаю!"
-            ]
-            subprocess.run(cmd_owner)
-            return
+            # Если мемов в памяти нет — автоматически генерируем новый и не отказываем!
+            meme_path = generate_crossout_meme(theme="Crossout random madness", allow_repeat=False, recipient="yarik")
+
+        prompt_cap = "Ты отправляешь свежий мем Ярику в чат по поручению своего друга (создателя). Напиши короткую живую пацанскую реплику Ярику (1 предложение) в стиле игроков Crossout про рандом и крафты. Выдай ТОЛЬКО текст."
+        caption = run_antigravity_cli(prompt_cap) or "Ярик, зацени этот шедевр! Требуется твоя строгая экспертная оценка от 1 до 10 💥🚜"
+
+        cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", meme_path, "--text", caption]
+        subprocess.run(cmd_yarik)
+
+        cmd_owner = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "owner",
+            "--text", "Всё, запулил этот мем Ярику в чат! Ждем реакцию 🔥🚜"
+        ]
+        subprocess.run(cmd_owner)
+        return
 
     # 1. Поручение отправить что-то Ярику (мем или сообщение)
-    if any(w in t_lower for w in ["ярик", "ярику", "кореш"]):
-        if any(w in t_lower for w in ["мем", "пикч", "картинк", "гиф"]):
+    is_yarik_dest = any(w in t_lower for w in ["ярик", "ярику", "кореш"]) or is_meme_theme_req
+    if is_yarik_dest:
+        if has_meme_mention:
             is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
             count = extract_meme_count(text)
+            last_meme = None
             for idx in range(count):
                 meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="yarik")
+                last_meme = meme_path
                 num_suffix = f" (#{idx + 1})" if count > 1 else ""
                 prompt_cap = (
                     f"Владелец бота поручил отправить Ярику мем{num_suffix} по теме: «{text}». "
@@ -475,12 +480,12 @@ def handle_owner_message(msg_data):
                     time.sleep(1.5)
 
             # Отчет владельцу в Control Bot
-            report_text = f"Отправил Ярику пачку из {count} уникальных мемов по теме «{text}»! Запросил его экспертную оценку 🫡" if count > 1 else f"Отправил Ярику мем по теме «{text}»! Запросил его экспертную оценку 🫡"
+            report_text = f"Отправил Ярику пачку из {count} уникальных мемов! Попросил его строгую экспертную оценку 🔥🚜" if count > 1 else "Отправил Ярику свежий мем в чат! Ждем экспертную оценку 🔥🚜"
             cmd_owner = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "owner",
-                "--photo", meme_path,
+                "--photo", last_meme,
                 "--text", report_text
             ]
             subprocess.run(cmd_owner)
@@ -499,7 +504,7 @@ def handle_owner_message(msg_data):
             return
 
     # 2. Если владелец просит мем лично для себя ("сделай мем", "новый мем", "сгенерируй", "скинь мем")
-    if any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем", "мемов", "мема"]):
+    if any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем", "мемов", "мема", "мэмов", "мэма", "мэмасик", "мемасик", "мемы", "мэмы"]):
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
         count = extract_meme_count(text)
         for idx in range(count):
@@ -510,7 +515,7 @@ def handle_owner_message(msg_data):
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "owner",
                 "--photo", meme_path,
-                "--text", f"Свежий мем{num_suffix} готов, шеф! 🚜💥"
+                "--text", f"Свежий мем{num_suffix} готов! 🚜💥"
             ]
             subprocess.run(cmd)
             if count > 1 and idx < count - 1:
@@ -623,8 +628,10 @@ def handle_owner_message(msg_data):
     if not response or any(bad in response.lower() for bad in ["принял, шеф", "принял шеф", "задача в работе", "все службы на связи", "шеф"]):
         if any(w in t_lower for w in ["в сети", "тут", "живой", "работаешь"]):
             response = "Да тут я, на связи! 🚀 Чем помочь или что замутить?"
+        elif any(w in t_lower for w in ["привет", "хай", "салам", "здорово", "здарова"]):
+            response = "Здорово! Как сам? Что по планам в Crossout или в чате? 🚜"
         else:
-            response = "Я тут, слушаю тебя! Что надо сделать? 🚜"
+            response = "На связи! Что замутим или какой мем запилим? 🚜"
 
     response = re.sub(r"\bшеф[а-я]*\b", "", response, flags=re.I).strip()
     response = re.sub(r"[\s,]+$", "", response)
