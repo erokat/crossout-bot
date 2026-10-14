@@ -122,12 +122,12 @@ MEMES_2020_2022 = [
         "default_punchline": "Как ты догадался?"
     },
     {
-        "name": "trade_offer",
-        "title": "Trade Offer",
-        "url": "https://i.imgflip.com/54hjww.jpg",
-        "keywords": ["сделка", "trade offer", "обмен", "предложение"],
-        "default_setup": "ВЫГОДНОЕ ПРЕДЛОЖЕНИЕ ОБМЕНА:",
-        "default_punchline": "Я получаю: твою победу\nТы получаешь: 8 копий в лоб"
+        "name": "rain_world_slugcat",
+        "title": "Rain World Slugcat",
+        "url": "https://w.wallhaven.cc/full/3q/wallhaven-3qw86v.jpg",
+        "keywords": ["рейн", "реин", "rain", "ворлд", "слизнец", "слизн", "вотчер", "watcher", "искусник", "артифисер"],
+        "default_setup": "Когда в Rain World начался дождь, а ты застрял в трубе с ящерицей:",
+        "default_punchline": "Конец очередного цикла выживания."
     },
     {
         "name": "think_mark",
@@ -276,6 +276,25 @@ def fetch_image_from_url(url, dest_path, timeout=12):
             except Exception: pass
         return False
 
+def normalize_search_query_en(query):
+    q = (query or "").lower().strip()
+    if any(w in q for w in ["рейн", "реин", "rain", "ворлд", "слизн", "вотчер", "watcher", "искусник", "артифисер"]):
+        return "rain world"
+    if any(w in q for w in ["махораг", "адаптир", "дхарм"]):
+        return "mahoraga jujutsu kaisen"
+    if any(w in q for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер"]):
+        return "crossout"
+    if any(w in q for w in ["2018", "2019"]):
+        return "crossout"
+    if any(w in q for w in ["гигачад", "сигма", "gigachad"]):
+        return "gigachad"
+    if any(w in q for w in ["доге", "чимс", "doge", "cheems"]):
+        return "doge cheems"
+    if any(w in q for w in ["учеб", "сесси", "школ", "экзамен"]):
+        return "tired student meme"
+    clean_en = re.sub(r"[^\x00-\x7F]+", " ", q).strip()
+    return clean_en if len(clean_en) > 3 else "gaming meme"
+
 def search_internet_for_meme_image(query):
     """
     Ищет изображение для мема в интернете через Imgflip Memesearch, Wallhaven и DuckDuckGo.
@@ -299,9 +318,24 @@ def search_internet_for_meme_image(query):
             if fetch_image_from_url(item["url"], cached_file):
                 return cached_file
 
-    # 2. Imgflip Meme Search
+    # 2. Wallhaven API with normalized English query
+    en_query = normalize_search_query_en(clean_q)
     try:
-        url = f"https://imgflip.com/memesearch?q={urllib.parse.quote(clean_q)}"
+        wh_url = f"https://wallhaven.cc/api/v1/search?q={urllib.parse.quote(en_query)}"
+        req = urllib.request.Request(wh_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            items = data.get("data", [])
+            if items:
+                img_url = items[0].get("path")
+                if img_url and fetch_image_from_url(img_url, cached_file):
+                    return cached_file
+    except Exception as e:
+        print(f"[MEME SEARCH] Wallhaven error: {e}")
+
+    # 3. Imgflip Meme Search
+    try:
+        url = f"https://imgflip.com/memesearch?q={urllib.parse.quote(en_query)}"
         req = urllib.request.Request(url, headers=headers)
         html = urllib.request.urlopen(req, timeout=8).read().decode("utf-8", errors="ignore")
         matches = re.findall(r"src=[\x27\"]([^\x27\"]+\.jpg)[\x27\"]", html)
@@ -314,23 +348,9 @@ def search_internet_for_meme_image(query):
     except Exception as e:
         print(f"[MEME SEARCH] Imgflip search error: {e}")
 
-    # 3. Wallhaven API (для артов, игр, персонажей, Махораги, Rain World, Crossout)
-    try:
-        wh_url = f"https://wallhaven.cc/api/v1/search?q={urllib.parse.quote(clean_q)}"
-        req = urllib.request.Request(wh_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode())
-            items = data.get("data", [])
-            if items:
-                img_url = items[0].get("path")
-                if img_url and fetch_image_from_url(img_url, cached_file):
-                    return cached_file
-    except Exception as e:
-        print(f"[MEME SEARCH] Wallhaven error: {e}")
-
     # 4. DuckDuckGo Image scrape
     try:
-        ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(clean_q + ' meme template high quality')}"
+        ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(en_query + ' meme template high quality')}"
         req = urllib.request.Request(ddg_url, headers=headers)
         html = urllib.request.urlopen(req, timeout=8).read().decode("utf-8", errors="ignore")
         imgs = re.findall(r"(https?://[^\s\"<>]+\.(?:jpg|jpeg|png))", html)
@@ -340,10 +360,27 @@ def search_internet_for_meme_image(query):
     except Exception as e:
         print(f"[MEME SEARCH] DDG error: {e}")
 
-    # 5. Fallback on any curated popular template
-    fallback_tpl = random.choice(MEMES_2020_2022)
-    if fetch_image_from_url(fallback_tpl["url"], cached_file):
-        return cached_file
+    # 5. Topic-Specific Local or Curated Fallbacks
+    if any(w in q_lower for w in ["рейн", "реин", "rain", "ворлд", "слизн", "вотчер", "watcher", "искусник"]):
+        rw_candidates = ["artificer.png", "scav_large.png"]
+        for c in rw_candidates:
+            p = os.path.join(MEDIA_DIR, c)
+            if os.path.exists(p):
+                return p
+        if fetch_image_from_url("https://w.wallhaven.cc/full/3q/wallhaven-3qw86v.jpg", cached_file):
+            return cached_file
+
+    if any(w in q_lower for w in ["махораг", "адаптир", "дхарм"]):
+        mh_path = os.path.join(TEMPLATES_DIR, "mahoraga.jpg")
+        if os.path.exists(mh_path):
+            return mh_path
+
+    # Clean curated list without trade_offer
+    clean_templates = [m for m in MEMES_2020_2022 if m["name"] not in ["trade_offer"]]
+    if clean_templates:
+        fallback_tpl = random.choice(clean_templates)
+        if fetch_image_from_url(fallback_tpl["url"], cached_file):
+            return cached_file
 
     return None
 

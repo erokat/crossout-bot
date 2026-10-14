@@ -87,13 +87,18 @@ def setup_environment():
         settings_path = os.path.join(gemini_dir, "settings.json")
         settings_data = {
             "modelProvider": "gemini",
+            "model": "Gemini 3.8 Flash (Medium)",
             "allowNonWorkspaceAccess": True,
             "toolPermission": "always-proceed",
             "artifactReviewPolicy": "always-proceed"
         }
         with open(settings_path, "w", encoding="utf-8") as f:
             json.dump(settings_data, f, indent=2)
-        print(f"[INIT] settings.json configured at {settings_path}")
+        inst_path = os.path.join(gemini_dir, "installation_id")
+        if not os.path.exists(inst_path):
+            with open(inst_path, "w", encoding="utf-8") as f:
+                f.write("34b32c25-9450-483f-9a3e-f10612cbe265")
+        print(f"[INIT] settings.json and installation_id configured at {gemini_dir}")
     except Exception as e:
         print(f"[INIT ERROR] Failed to write settings.json: {e}")
 
@@ -443,10 +448,10 @@ def run_antigravity_cli(prompt):
             return res.stdout.strip()
         else:
             if res.stderr:
-                print(f"[AGY WARNING] Error running {agy_bin}: {res.stderr[:200]}")
+                log_event(f"[AGY WARNING] Error running {agy_bin}: {res.stderr[:200]}")
             return None
     except Exception as e:
-        print(f"[AGY EXCEPTION] Failed to execute {agy_bin}: {e}")
+        log_event(f"[AGY EXCEPTION] Failed to execute {agy_bin}: {e}")
         return None
 
 def ask_ai(prompt, photo_path=None, system_instruction=None):
