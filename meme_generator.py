@@ -564,26 +564,37 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
             print(f"[MEME] Repeat allowed and requested. Returning last meme: {last['file_path']}")
             return last["file_path"]
 
+    # 1. ALWAYS route requests for memes of specific years, Mahoraga, adaptive, custom, or general themes through the multi-style meme engine!
+    is_era_topic = any(w in theme_lower for w in ["2020", "2021", "2022", "эпох", "год", "лет", "старые мемы"])
+    is_mahoraga_topic = any(w in theme_lower for w in ["махораг", "адаптир", "бог котор", "дхарма", "jujutsu"])
+    is_custom_topic = any(w in theme_lower for w in ["тикток", "tiktok", "тт", "дота", "dota", "кс", "cs", "майнкрафт", "minecraft", "аниме", "сталкер", "stalker", "кот", "школ", "сесси", "дз", "домашк"]) or (theme and len(theme) > 10)
+
+    # If specific internet topic or era or Mahoraga, use meme_engine directly
+    if is_era_topic or is_mahoraga_topic or is_custom_topic or random.random() < 0.75:
+        try:
+            from meme_engine import generate_universal_meme
+            out_path, headline = generate_universal_meme(theme=theme, allow_repeat=allow_repeat, recipient=recipient)
+            h = hashlib.sha256(headline.encode("utf-8") + str(time.time()).encode()).hexdigest()
+            record_sent_meme(h, "universal_engine", headline, out_path, sent_to=recipient)
+            print(f"[MEME ENGINE] Successfully generated diverse meme: {out_path} ({headline})")
+            return out_path
+        except Exception as e:
+            print(f"[MEME ENGINE] Universal engine error: {e}, falling back to local pool")
+
+    # 2. Local Crossout/Rain World templates pool with high diversity
     is_crossout_topic = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "ховер", "автосборк", "птур", "скорп", "мамонт", "жнец"])
     is_rw_topic = any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
     is_crossover_topic = is_crossout_topic and is_rw_topic
-    is_custom_topic = any(w in theme_lower for w in ["тикток", "tiktok", "тт", "дота", "dota", "кс", "cs", "майнкрафт", "minecraft", "аниме", "сталкер", "stalker"]) or (theme and not is_crossout_topic and not is_rw_topic and len(theme) > 5)
 
     candidates = []
-
     if is_crossover_topic:
         cands = [func for _, func in CROSSOVER_GENERATORS]
         random.shuffle(cands)
         candidates = cands
     elif is_rw_topic and not is_crossout_topic:
-        # ЧИСТЫЙ ЗАПРОС ПО RAIN WORLD: НИКАКОГО КРОССАУТА!
         cands = [func for _, func in RW_GENERATORS]
         random.shuffle(cands)
-        cands.append(lambda: gen_dynamic_meme(theme or "Rain World"))
         candidates = cands
-    elif is_custom_topic:
-        # КАСТОМНАЯ ТЕМА (ТикТок / другая игра / прикол)
-        candidates = [lambda: gen_dynamic_meme(theme)]
     elif "автосборк" in theme_lower:
         candidates = [gen_autobuild]
     elif any(w in theme_lower for w in ["газген", "взрыв", "детонац"]):
@@ -603,7 +614,6 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
     elif any(w in theme_lower for w in ["доге", "дог", "сравнен"]):
         candidates = [gen_doge_comparison]
     else:
-        # Общий пул Crossout
         cands = [func for _, func in CROSSOUT_GENERATORS]
         random.shuffle(cands)
         candidates = cands
@@ -617,14 +627,10 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         try:
             img, tpl_name, headline = gen_func()
         except Exception as e:
-            print(f"[MEME ERROR] Generator failed: {e}")
             continue
 
         h = hashlib.sha256(headline.encode("utf-8") + img.tobytes()).hexdigest()
-
-        # Check if already sent!
         if not allow_repeat and is_meme_already_sent(meme_hash=h, headline=headline):
-            print(f"[MEME FILTER] Skipped repeated meme '{headline}' (hash={h[:8]})")
             continue
 
         chosen_img = img
@@ -633,20 +639,10 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         chosen_hash = h
         break
 
-    # If all templates were exhausted, generate a dynamic meme matching the requested theme
     if not chosen_img:
-        if is_rw_topic:
-            chosen_img, chosen_tpl, chosen_hl = gen_dynamic_meme("Rain World выживание и карма")
-        elif is_custom_topic:
-            chosen_img, chosen_tpl, chosen_hl = gen_dynamic_meme(theme)
-        else:
-            chosen_img, chosen_tpl, chosen_hl = gen_dynamic_meme("Crossout Пустоши")
-
-        salt_text = f"№ {int(time.time() * 1000) % 100000}"
-        draw = ImageDraw.Draw(chosen_img)
-        draw.text((750, 915), salt_text, fill=(80, 80, 80), font=get_font(16))
-        chosen_hl = f"{chosen_hl} ({salt_text})"
-        chosen_hash = hashlib.sha256(chosen_hl.encode("utf-8") + chosen_img.tobytes()).hexdigest()
+        from meme_engine import generate_universal_meme
+        out_path, headline = generate_universal_meme(theme=theme or "Crossout Пустоши", allow_repeat=allow_repeat, recipient=recipient)
+        return out_path
 
     # Save to media and saved_memes
     out_name = f"meme_{int(time.time())}_{random.randint(1000, 9999)}.png"
@@ -665,11 +661,9 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         except Exception:
             pass
 
-    # Record in database so it can NEVER be repeated!
     record_sent_meme(chosen_hash, chosen_tpl, chosen_hl, out_path, sent_to=recipient)
-    print(f"[MEME RECORDED] Successfully registered new unique meme '{chosen_hl}' (hash={chosen_hash[:8]}) for {recipient}")
-
     return out_path
 
 # Alias for universal meme generation
 generate_meme = generate_crossout_meme
+

@@ -15,3 +15,8 @@ saved_memes/
 session/
 session.session
 bot_sent_ids.txt
+media/meme_*.jpg
+media/meme_*.png
+media/test_*.png
+media/cached_*.jpg
+
