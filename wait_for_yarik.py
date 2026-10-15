@@ -201,17 +201,17 @@ async def poll_control_bot(cfg, exit_event, result_box):
                     text = msg.get("text") or msg.get("caption") or ""
                     date_str = str(msg.get("date", int(time.time())))
 
-                    # Check if this message resolves an active pending confirmation
+                    # Check if this message resolves an active pending confirmation (within 180s timeout)
                     pending_conf = get_latest_pending_confirmation()
-                    if pending_conf and text:
+                    if pending_conf and text and (time.time() - float(pending_conf.get("created_at") or 0) <= 180):
                         t_lower = text.strip().lower()
                         reply_to = msg.get("reply_to_message", {})
                         is_reply_to_prompt = bool(reply_to and pending_conf.get("message_id") and reply_to.get("message_id") == pending_conf.get("message_id"))
-                        is_approval = any(w in t_lower for w in ["да", "разреш", "ок", "удаляй", "подтвержд", "yes", "+"])
-                        is_rejection = any(w in t_lower for w in ["нет", "отказ", "не ", "нельзя", "отмен", "reject", "-"])
+                        is_rejection = bool(re.search(r"(?:\b(?:нет|отказ[а-я]*|нельзя|отмен[а-я]*|отбой|reject)\b|(?<!\S)-(?!\S))", t_lower) or re.search(r"\bне\s+(?:удаляй|надо|трогай|делай|разрешай)", t_lower))
+                        is_approval = bool(not is_rejection and re.search(r"(?:\b(?:да|разреш[а-я]*|ок|удаляй|сноси|подтвержд[а-я]*|yes)\b|(?<!\S)\+(?!\S))", t_lower))
 
                         if is_reply_to_prompt or is_approval or is_rejection:
-                            status = "approved" if is_approval or (not is_rejection and is_reply_to_prompt) else "rejected"
+                            status = "rejected" if is_rejection else ("approved" if (is_approval or is_reply_to_prompt) else "rejected")
                             resolve_confirmation(pending_conf["req_id"], status, comment=f"Текст владельца: {text}")
                             p_msg_id = pending_conf.get("message_id")
                             if p_msg_id:

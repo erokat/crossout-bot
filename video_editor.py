@@ -272,17 +272,27 @@ def process_video_command(video_path, command_text):
 
         # 2. Ускорить / замедлить
         elif any(w in t for w in ["ускорь", "быстрее"]):
-            # Проверим множитель (например 2x, 2х, в 2 раза, 3x, на 1.5x)
-            # Не парсить годы (2024) или номера файлов без явного указания множителя
-            m = re.search(r"(?:(?:в|на)\s+)?(\d+(?:[.,]\d+)?)\s*(?:[xх]|раз[а-я]*)", t) or re.search(r"\b(?:в|на)\s+(\d+(?:[.,]\d+)?)\b", t)
+            # Проверим множитель (например 2x, 2х, в 2 раза, 3x, на 1.5x, вдвое, втрое)
+            # Не парсить годы (2024), таймкоды или длительности (на 5 минут) без явного указания множителя
             speed = 2.0
-            if m:
-                try:
-                    val = float(m.group(1).replace(",", "."))
-                    if 1.0 <= val <= 10.0:
-                        speed = min(4.0, max(1.2, val))
-                except ValueError:
-                    speed = 2.0
+            if "втрое" in t:
+                speed = 3.0
+            elif "вчетверо" in t:
+                speed = 4.0
+            elif "вдвое" in t:
+                speed = 2.0
+            else:
+                m = re.search(r"(?:(?:в|на)\s+)?(\d+(?:[.,]\d+)?)\s*(?:[xх]|раз[а-я]*)\b", t)
+                if not m:
+                    # Match "в N" or "на N" only if NOT followed by time or calendar units (минут, секунд, часов, года, лет, дня)
+                    m = re.search(r"\b(?:в|на)\s+(\d+(?:[.,]\d+)?)(?!\s*(?:год[а-я]*|мин[а-я]*|сек[а-я]*|час[а-я]*|дн[а-я]*|лет|мес[а-я]*))\b", t)
+                if m:
+                    try:
+                        val = float(m.group(1).replace(",", "."))
+                        if 1.0 <= val <= 10.0:
+                            speed = min(4.0, max(1.2, val))
+                    except ValueError:
+                        speed = 2.0
             out_file = change_video_speed(video_path, speed=speed)
             reply_cap = f"Ускорил видео в {speed}x! 🏎️💨"
 
