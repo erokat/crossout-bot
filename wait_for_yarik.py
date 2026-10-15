@@ -45,8 +45,43 @@ def is_bot_mention(text):
         return True
     if re.search(r"х+у+е+с+о+с+", t):
         return True
-    if any(m in t for m in ["музык", "трек", "песн", "гиф", "gif", "видос", "видео"]) and any(a in t for a in ["скинь", "найди", "скачай", "включи", "поставь", "сгенерируй"]):
+    if any(m in t for m in ["музык", "трек", "песн", "гиф", "gif", "видос", "видео"]) and any(a in t for a in ["скинь", "найди", "скачай", "включи", "поставь", "сгенерируй", "пришли", "вруби", "скидывай"]):
         return True
+    return False
+
+def check_is_mention_or_proposal(text, reply_to_id=None, sender_uid=None, yarik_chat_id=None, bot_sent=None):
+    if not text and not reply_to_id:
+        return False
+
+    # 1. Прямое упоминание бота
+    if is_bot_mention(text):
+        return True
+
+    # 2. Ответ (reply) на любое сообщение, отправленное ботом
+    all_bot_ids = get_bot_sent_ids()
+    if bot_sent:
+        all_bot_ids = all_bot_ids | bot_sent
+    if reply_to_id and reply_to_id in all_bot_ids:
+        return True
+
+    # 3. Подтверждение или отказ при наличии активного предложения создать навык/дополнение
+    t = (text or "").lower().strip()
+    is_confirm_or_reject = bool(re.search(r"^(?:да|делай|давай|сделай|го|ок|ага|да делай|да сгенерируй|да создай|делай давай|конечно|генерируй|создавай|пилим|нет|не надо|отмена|отбой|не делай|забей|yes|no)\b", t))
+    if is_confirm_or_reject:
+        try:
+            from dynamic_agent import get_pending_proposal
+            keys = ["yarik", "owner"]
+            if sender_uid:
+                keys.append(str(sender_uid))
+            if yarik_chat_id:
+                keys.append(str(yarik_chat_id))
+            for k in keys:
+                p = get_pending_proposal(k)
+                if p and p.get("task_text"):
+                    return True
+        except Exception:
+            pass
+
     return False
 
 
@@ -465,7 +500,8 @@ async def main():
                     sender_uid = m.sender_id or (getattr(m.from_id, 'user_id', None) if getattr(m, 'from_id', None) else None)
                     is_owner = getattr(m, 'out', False) or (sender_uid == owner_id) or (sender_uid is not None and sender_uid != yarik_chat_id)
                     is_from_yarik = not is_owner
-                    is_mention = is_bot_mention(m.message)
+                    reply_to_id = getattr(m, "reply_to_msg_id", None) or (m.reply_to.reply_to_msg_id if getattr(m, "reply_to", None) else None)
+                    is_mention = check_is_mention_or_proposal(m.message, reply_to_id=reply_to_id, sender_uid=sender_uid, yarik_chat_id=yarik_chat_id, bot_sent=bot_sent)
 
                     if not is_mention:
                         add_handled_id(m.id, yarik_chat_id)
@@ -569,7 +605,8 @@ async def main():
                     sender_uid = msg.sender_id or (getattr(msg.from_id, 'user_id', None) if getattr(msg, 'from_id', None) else None)
                     is_owner = getattr(msg, 'out', False) or (sender_uid == owner_id) or (sender_uid is not None and sender_uid != yarik_chat_id)
                     is_from_yarik = not is_owner
-                    is_mention = is_bot_mention(msg.message)
+                    reply_to_id = getattr(msg, "reply_to_msg_id", None) or (msg.reply_to.reply_to_msg_id if getattr(msg, "reply_to", None) else None)
+                    is_mention = check_is_mention_or_proposal(msg.message, reply_to_id=reply_to_id, sender_uid=sender_uid, yarik_chat_id=yarik_chat_id, bot_sent=get_bot_sent_ids())
 
                     if not is_mention:
                         add_handled_id(msg.id, yarik_chat_id)

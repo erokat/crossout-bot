@@ -612,8 +612,30 @@ def process_universal_photo_command(photo_path, command_text):
         img = add_speech_bubble(img, bubble_text)
         reply_cap = "Прилепил облачко с текстом, как в комиксе! 💬✨"
 
-    # 2. Добавление стикера / предмета / ассета на фото
-    elif any(w in t_low for w in ["добавь на фото", "прилепи на фото", "вставь на фото", "наложи на фото", "прилепи", "наложи картинку", "добавь картинку", "вставь картинку", "на лицо", "добавь", "прифотошопь", "слизнекот"]):
+    # 2. Демотиватор
+    elif "демотиватор" in t_low:
+        out_p, _ = edit_photo_with_caption(photo_path, command_text, style="demotivator")
+        return out_p, "Держи классический демотиватор! 🖤🖼️"
+
+    # 3. Текстовая надпись на фото (ПРИОРИТЕТ над стикерами!)
+    elif any(w in t_low for w in ["надпись", "подпись", "текст", "титры", "напиши", "подпиши", "допиши"]):
+        out_p, _ = edit_photo_with_caption(photo_path, command_text)
+        return out_p, "Лови готовое фото с надписью! 📸🔥"
+
+    # 4. Визуальные фильтры
+    elif any(w in t_low for w in ["чб", "ч/б", "черно-бел", "сепия", "негатив", "инверт", "размой", "блюр", "резкость", "зашакаль", "пережарь", "deepfry", "ярче", "темнее", "поверни", "квадрат"]):
+        img = apply_visual_filter(img, command_text)
+        if any(w in t_low for w in ["зашакаль", "пережарь", "deepfry"]):
+            reply_cap = "Зашакалил фото по высшему разряду, хрустит как свежий Газген! 💀🔥"
+        elif any(w in t_low for w in ["чб", "черно-бел"]):
+            reply_cap = "Сделал стильное черно-белое фото! 🎞️🖤"
+        elif any(w in t_low for w in ["размой", "блюр"]):
+            reply_cap = "Наложил мягкое размытие (blur)! 🌫️📸"
+        else:
+            reply_cap = "Применил визуальный эффект к фото! ✨🎨"
+
+    # 5. Добавление стикера / предмета / ассета на фото
+    elif any(w in t_low for w in ["добавь на фото", "прилепи на фото", "вставь на фото", "наложи на фото", "прилепи", "наложи картинку", "добавь картинку", "вставь картинку", "на лицо", "прифотошопь", "стикер"]) or any(kw in t_low for kw in STICKER_LOCAL_ASSETS):
         # Извлекаем название предмета/стикера
         m_stk = re.search(r"(?i)(?:добавь|прилепи|наложи|вставь|прифотошопь)(?:\s+(?:на\s+фото|на\s+картинку|на\s+лицо(?:\s+[а-я]+)?))?\s+(.+?)(?:\s+(?:сверху|снизу|на голову|на лицо|по центру|слева|справа)|$)", command_text)
         sticker_q = m_stk.group(1).strip() if m_stk else ""
@@ -640,27 +662,10 @@ def process_universal_photo_command(photo_path, command_text):
         img = overlay_sticker_on_image(img, sticker_q, pos_name=pos)
         reply_cap = f"Прилепил {sticker_q} прямо на фото! 🚜🔥"
 
-    # 3. Визуальные фильтры
-    elif any(w in t_low for w in ["чб", "ч/б", "черно-бел", "сепия", "негатив", "инверт", "размой", "блюр", "резкость", "зашакаль", "пережарь", "deepfry", "ярче", "темнее", "поверни", "квадрат"]):
-        img = apply_visual_filter(img, command_text)
-        if any(w in t_low for w in ["зашакаль", "пережарь", "deepfry"]):
-            reply_cap = "Зашакалил фото по высшему разряду, хрустит как свежий Газген! 💀🔥"
-        elif any(w in t_low for w in ["чб", "черно-бел"]):
-            reply_cap = "Сделал стильное черно-белое фото! 🎞️🖤"
-        elif any(w in t_low for w in ["размой", "блюр"]):
-            reply_cap = "Наложил мягкое размытие (blur)! 🌫️📸"
-        else:
-            reply_cap = "Применил визуальный эффект к фото! ✨🎨"
-
-    # 4. Демотиватор
-    elif "демотиватор" in t_low:
-        out_p, _ = edit_photo_with_caption(photo_path, command_text, style="demotivator")
-        return out_p, "Держи классический демотиватор! 🖤🖼️"
-
-    # 5. Текстовая надпись на фото
+    # 6. Fallback к текстовой надписи
     else:
-        out_p, cap = edit_photo_with_caption(photo_path, command_text)
-        return out_p, f"Держи готовое фото с надписью! 📸🔥"
+        out_p, _ = edit_photo_with_caption(photo_path, command_text)
+        return out_p, "Держи готовое фото с надписью! 📸🔥"
 
     # Сохраняем результат
     ts = int(time.time())

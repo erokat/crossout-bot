@@ -881,13 +881,16 @@ def handle_owner_message(msg_data):
             clear_pending_proposal("owner")
             orig_task = pending.get("task_text", "")
             prop_msg_id = pending.get("proposal_msg_id")
+            task_msg_id = pending.get("bot_msg_id") or msg_id
 
             ack_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "owner",
-                "--text", "Принял, делаю! 🛠️⏳"
+                "--text", "Сгенерировал дополнение! ⚡🛠️ Сейчас приступаю к выполнению задачи..."
             ]
+            if task_msg_id:
+                ack_cmd.extend(["--reply-to", str(task_msg_id)])
             ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             ack_msg_id = extract_sent_msg_id(ack_res.stdout)
 
@@ -905,6 +908,7 @@ def handle_owner_message(msg_data):
                 sender_key="owner",
                 retry_context=pending,
                 recipient="owner",
+                reply_to_msg_id=task_msg_id,
                 ack_msg_id=ack_msg_id,
                 is_owner_sender=True
             )
@@ -968,7 +972,7 @@ def handle_owner_message(msg_data):
         return
     # 0.4. Скачивание и отправка музыки / треков / песен / симфоний для владельца
     music_kws = ["музык", "песн", "трек", "песен", "симфони", "мелоди", "бит", "саунд", "оркестр", "бетховен", "моцарт", "баха", "чайковск", "music", "song", "symphony", "melody", "beat", "soundtrack", "mp3"]
-    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "сочини", "сыграй", "сделай", "сгенерируй", "запили", "вруби"]
+    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "пришли", "сочини", "сыграй", "сделай", "сгенерируй", "запили", "вруби", "врубай", "запусти", "скидывай"]
     is_music_owner = (any(w in t_lower for w in music_kws) and any(w in t_lower for w in music_verbs)) or any(p in t_lower for p in ["сочини симфонию", "сочини музыку", "сыграй симфонию", "включи симфонию", "скинь симфонию", "скинь трек", "поставь музыку"]) or any(w in t_lower for w in ["сыграй", "вруби"])
     if is_music_owner:
         from media_finder import find_and_download_music
@@ -1422,14 +1426,15 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             clear_pending_proposal("owner")
             orig_task = pending.get("task_text", "")
             prop_msg_id = pending.get("proposal_msg_id")
+            task_msg_id = pending.get("bot_msg_id") or msg_id
 
             ack_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "yarik",
                 "--no-copy",
-                "--reply-to", str(msg_id),
-                "--text", "Принял, делаю! 🛠️⏳"
+                "--reply-to", str(task_msg_id),
+                "--text", "Сгенерировал дополнение! ⚡🛠️ Сейчас приступаю к выполнению задачи..."
             ]
             ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             ack_msg_id = extract_sent_msg_id(ack_res.stdout)
@@ -1451,7 +1456,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 sender_key=sender_key,
                 retry_context=pending,
                 recipient="yarik",
-                reply_to_msg_id=msg_id,
+                reply_to_msg_id=task_msg_id,
                 ack_msg_id=ack_msg_id,
                 is_owner_sender=is_owner_sender
             )
@@ -1571,7 +1576,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
 
     # 1.4. Скачивание и отправка музыки / треков / песен / симфоний в чат
     music_kws = ["музык", "песн", "трек", "песен", "симфони", "мелоди", "бит", "саунд", "оркестр", "бетховен", "моцарт", "баха", "чайковск", "music", "song", "symphony", "melody", "beat", "soundtrack", "mp3"]
-    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "сочини", "сыграй", "сделай", "сгенерируй", "запили", "вруби"]
+    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "пришли", "сочини", "сыграй", "сделай", "сгенерируй", "запили", "вруби", "врубай", "запусти", "скидывай"]
     is_music_chat = (any(w in t_lower for w in music_kws) and any(w in t_lower for w in music_verbs)) or any(p in t_lower for p in ["сочини симфонию", "сочини музыку", "сыграй симфонию", "включи симфонию", "скинь симфонию", "скинь трек", "поставь музыку"]) or any(w in t_lower for w in ["сыграй", "вруби"])
     if is_music_chat:
         from media_finder import find_and_download_music
@@ -1694,13 +1699,12 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     is_stk_send = any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "покажи", "кинь", "сбрось", "отправь", "поделись", "кидай", "скидывай"])
     is_stk_add = (
         any(w in t_lower for w in ["добавь", "закинь", "запили", "засунь", "сохрани", "вставь", "пихни", "пули", "залей"])
-        and any(w in t_lower for w in ["стикерпак", "стикер пак", "в пак", "в стикерпак", "в стикеры", "в стикер", "стикер", "картин"])
+        and any(w in t_lower for w in ["стикерпак", "стикер пак", "в пак", "в стикерпак", "в стикеры", "в стикер"])
     ) or any(w in t_lower for w in [
         "добавь в стикер", "закинь в стикер", "добавь в пак", "закинь в пак", "в стикерпак", "в стикер пак", "добавь в стикерпак", "закинь в стикерпак"
     ]) or (
         bool(photo_file) and any(w in t_lower for w in [
-            "добавь эту картинку", "добавь это фото", "добавь эту фотку", "добавь именно эту",
-            "закинь эту картинку", "закинь это фото", "сохрани эту картинку", "добавь в стикеры"
+            "добавь в стикеры", "закинь в стикеры", "добавь в стикерпак", "закинь в стикерпак"
         ])
     )
 
@@ -2151,9 +2155,9 @@ def main():
                         d = json.loads(line.strip())
                         if "latest_id" in d and d["latest_id"] > 0:
                             latest_id = int(d["latest_id"])
-                            last_processed_id = latest_id
+                            last_processed_id = max(0, latest_id - 1)
                             set_kv("last_processed_id", str(last_processed_id))
-                            log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id} on cold start.")
+                            log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id} (offset from latest {latest_id}) on cold start.")
                             break
                     except Exception:
                         continue

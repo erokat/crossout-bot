@@ -213,13 +213,18 @@ def main():
     parser.add_argument("--chat", type=int, default=None, help="Прямой ID чата")
     parser.add_argument("--text", type=str, default=None, help="Текст сообщения")
     parser.add_argument("--photo", type=str, default=None, help="Путь к фото или анимации")
+    parser.add_argument("--audio", type=str, default=None, help="Путь к аудиофайлу")
+    parser.add_argument("--video", type=str, default=None, help="Путь к видеофайлу")
+    parser.add_argument("--file", type=str, default=None, help="Путь к произвольному файлу")
     parser.add_argument("--reply-to", type=int, default=None, help="ID сообщения для ответа")
     parser.add_argument("--delete", type=int, nargs="+", default=None, help="ID сообщений для удаления")
     parser.add_argument("--no-copy", action="store_true", default=False, help="Не отправлять копию в бот-чат владельца")
     args = parser.parse_args()
 
-    if not args.text and not args.photo and not args.delete:
-        sys.stderr.write("Error: --text, --photo, or --delete must be specified\n")
+    media_file = args.photo or args.audio or args.video or args.file
+
+    if not args.text and not media_file and not args.delete:
+        sys.stderr.write("Error: --text, --photo/--audio/--video/--file, or --delete must be specified\n")
         sys.exit(1)
 
     cfg = load_config()
@@ -246,7 +251,7 @@ def main():
             bot_token=cfg["bot_token"],
             chat_id=cfg["owner_id"],
             text=args.text,
-            file_path=args.photo,
+            file_path=media_file,
             reply_to=args.reply_to
         )
         msg_id = res.get("result", {}).get("message_id") if (res and res.get("ok")) else None
@@ -257,7 +262,7 @@ def main():
             cfg=cfg,
             chat_id=chat_id,
             text=args.text,
-            photo_path=args.photo,
+            photo_path=media_file,
             reply_to=args.reply_to,
             no_copy=args.no_copy
         ))
