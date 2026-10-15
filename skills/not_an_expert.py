@@ -47,10 +47,6 @@ def get_font(font_name_or_path, size):
 
 def draw_text_with_outline(draw, pos, text, font, fill="white", outline="black", outline_width=2, anchor=None):
     x, y = pos
-    if anchor:
-        bbox = draw.textbbox((x, y), text, font=font, anchor=anchor)
-    else:
-        bbox = draw.textbbox((x, y), text, font=font)
     for dx in range(-outline_width, outline_width + 1):
         for dy in range(-outline_width, outline_width + 1):
             if dx != 0 or dy != 0:
@@ -159,9 +155,7 @@ def generate_expert_meme(task_text="", input_photo=None):
     # Hazard stripes on top and bottom borders
     stripe_w = 28
     for i in range(-50, width + 50, stripe_w * 2):
-        # Top hazard stripe
         draw.polygon([(i, 0), (i + stripe_w, 0), (i + stripe_w - 20, 24), (i - 20, 24)], fill=(235, 140, 20))
-        # Bottom hazard stripe
         draw.polygon([(i, height - 24), (i + stripe_w, height - 24), (i + stripe_w - 20, height), (i - 20, height)], fill=(235, 140, 20))
 
     # Fonts
@@ -175,7 +169,7 @@ def generate_expert_meme(task_text="", input_photo=None):
     font_stat_val = get_font("Montserrat.ttf", 22)
     font_footer = get_font("RussoOne-Regular.ttf", 18)
 
-    # Header Panel (Dark steel card with neon orange border)
+    # Header Panel
     draw.rectangle([(40, 45), (width - 40, 165)], fill=(25, 29, 36, 245), outline=(240, 100, 25), width=3)
     
     # Corner tactical accents
@@ -196,12 +190,12 @@ def generate_expert_meme(task_text="", input_photo=None):
     if not matched:
         matched = random.choice(VERDICTS)
 
-    # Center card area (600 px high)
+    # Center card area
     card_x0, card_y0 = 40, 190
     card_x1, card_y1 = width - 40, 890
     draw.rectangle([(card_x0, card_y0), (card_x1, card_y1)], fill=(20, 23, 29, 230), outline=(50, 56, 68), width=2)
 
-    # If input photo is provided, embed it with an industrial viewfinder HUD
+    # If input photo is provided, embed it
     asset_img_loaded = False
     if input_photo and os.path.exists(input_photo):
         try:
@@ -210,7 +204,6 @@ def generate_expert_meme(task_text="", input_photo=None):
             uw, uh = user_pic.size
             ux = (width - uw) // 2
             uy = card_y0 + 35
-            # Glow / border behind photo
             draw.rectangle([(ux - 6, uy - 6), (ux + uw + 6, uy + uh + 6)], fill=(10, 12, 15), outline=(235, 120, 20), width=2)
             bg_img.paste(user_pic, (ux, uy), user_pic)
             asset_img_loaded = True
@@ -219,7 +212,6 @@ def generate_expert_meme(task_text="", input_photo=None):
             asset_img_loaded = False
 
     if not asset_img_loaded:
-        # Load Crossout icon asset
         asset_file = os.path.join(MEDIA_DIR, matched["asset"])
         if os.path.exists(asset_file):
             try:
@@ -228,7 +220,6 @@ def generate_expert_meme(task_text="", input_photo=None):
                 iw, ih = icon.size
                 ix = (width - iw) // 2
                 iy = card_y0 + 25
-                # Glowing circle behind icon
                 glow_box = [(ix - 25, iy - 10), (ix + iw + 25, iy + ih + 10)]
                 draw.ellipse(glow_box, fill=(40, 35, 25, 180), outline=(245, 140, 20, 120), width=2)
                 bg_img.paste(icon, (ix, iy), icon)
@@ -264,7 +255,7 @@ def generate_expert_meme(task_text="", input_photo=None):
     draw.text((80, stat_box_y + 12), f"{matched['stat_title']} ", font=font_stat_lbl, fill="#FFA500")
     draw.text((80 + draw.textbbox((0, 0), f"{matched['stat_title']} ", font=font_stat_lbl)[2], stat_box_y + 11), matched['stat_val'], font=font_stat_val, fill="#FFFFFF")
 
-    # Stat 2 (right aligned)
+    # Stat 2
     r_text = matched['grade']
     r_bbox = draw.textbbox((0, 0), r_text, font=font_stat_lbl)
     r_w = r_bbox[2] - r_bbox[0]
@@ -279,7 +270,7 @@ def generate_expert_meme(task_text="", input_photo=None):
     except Exception:
         count = random.randint(100, 999)
 
-    # Stamp: «ОДОБРЕНО СВАРОЧНЫМ АППАРАТОМ»
+    # Stamp
     stamp_txt = f"ЗАКЛЮЧЕНИЕ ЭКСПЕРТА #{count} // ПРИНЯТО ЕДИНОГЛАСНО"
     draw_text_with_outline(draw, (width // 2, height - 55), stamp_txt, font_footer, fill="#94A3B8", outline="#000000", outline_width=1, anchor="mm")
 
@@ -289,7 +280,7 @@ def generate_expert_meme(task_text="", input_photo=None):
     out_path = os.path.join(MEDIA_DIR, out_filename)
     bg_img.convert("RGB").save(out_path, "PNG", quality=95)
 
-    # Also save a copy to saved_memes/
+    # Save a copy to saved_memes/
     saved_copy = os.path.join(SAVED_MEMES_DIR, out_filename)
     try:
         bg_img.convert("RGB").save(saved_copy, "PNG")
