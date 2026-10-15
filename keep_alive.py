@@ -669,7 +669,7 @@ def handle_owner_message(msg_data):
     text = msg_data.get("text", "").strip()
     photo = msg_data.get("photo")
     t_lower = text.lower()
-    print(f"[ORCHESTRATOR] Handling OWNER task: {text!r} (photo={photo})")
+    log_event(f"[ORCHESTRATOR] Handling OWNER task: {text!r} (photo={photo})")
 
     # 0.0. Проверка ответа на предложение создать дополнение
     pending = get_pending_proposal("owner")
@@ -817,7 +817,9 @@ def handle_owner_message(msg_data):
 
     # 0.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
     if check_or_classify_autonomous_task(text, has_media=bool(photo), ask_ai_fn=ask_ai):
+        log_event(f"[ORCHESTRATOR] Executing autonomous task for Owner: {text!r}")
         res_text, res_media = execute_autonomous_task(text, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai)
+        log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
 
         cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
         if res_media and os.path.exists(res_media):
@@ -1038,7 +1040,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     sender_name = msg_data.get("sender_name", "")
     is_owner_sender = (sender == "owner") or (sender_id == 5067025016) or ("Владелец" in sender_name)
     initiator_label = "Ты (Владелец)" if is_owner_sender else "Ярик"
-    print(f"[ORCHESTRATOR] Handling YARIK summon from {initiator_label}: {text!r} (msg_id={msg_id})")
+    log_event(f"[ORCHESTRATOR] Handling YARIK summon from {initiator_label}: {text!r} (msg_id={msg_id})")
 
     # 0.0. Проверка ответа на предложение создать дополнение
     sender_key = "owner" if is_owner_sender else str(sender_id or YARIK_CHAT_ID)
@@ -1258,10 +1260,10 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     # 1.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
     is_auto_task = check_or_classify_autonomous_task(text, has_media=bool(photo_file), ask_ai_fn=ask_ai)
     if is_auto_task:
-
-
         target_name = "Миша" if is_owner_sender else "Ярик"
+        log_event(f"[ORCHESTRATOR] Executing autonomous task for {target_name}: {text!r}")
         res_text, res_media = execute_autonomous_task(text, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai)
+        log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
         send_cmd = [
             sys.executable,
             os.path.join(BASE_DIR, "send.py"),
