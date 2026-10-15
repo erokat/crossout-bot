@@ -33,12 +33,13 @@ def save_registry(data):
     except Exception as e:
         print(f"[DYNAMIC AGENT] Failed to save registry: {e}")
 
-def register_extension(slug, filename, description, triggers):
+def register_extension(slug, filename, description, triggers, produces_media=False):
     reg = load_registry()
     reg[slug] = {
         "filename": filename,
         "description": description,
         "triggers": triggers,
+        "produces_media": bool(produces_media),
         "updated_at": time.time()
     }
     save_registry(reg)
@@ -240,31 +241,94 @@ def run_script(script_path, input_file=None, task_text=None, timeout=60):
     except Exception as e:
         return -1, "", str(e)
 
-def find_newest_media(before_files, stdout="", min_mtime=0):
+def is_pure_text_task(task_text, script_path=None):
+    t_lower = (task_text or "").lower()
+    text_keywords = [
+        "погода", "погоду", "погоде", "погодой", "температур", "градус", "прогноз",
+        "тираспол", "курс", "валют", "доллар", "евро", "калькулятор", "посчитай",
+        "сколько будет", "переведи", "перевод", "расписание", "вики", "инфо", "новости"
+    ]
+    if any(k in t_lower for k in text_keywords):
+        return True
+    if script_path:
+        base = os.path.basename(script_path).lower()
+        if any(marker in base for marker in ["weather", "calc", "currency", "translate", "text", "info"]):
+            return True
+def is_media_task(task_text):
+    t = (task_text or "").lower()
+    media_words = [
+        "график", "диаграмм", "плот", "plot", "chart", "рисун", "нарисуй", "начерти",
+        "картинк", "пикч", "мем", "мэм", "фото", "qr", "куар", "видео", "клип",
+        "аудио", "песн", "трек", "mp3", "mp4", "gif", "гиф", "файл", "pdf", "пдф",
+        "excel", "эксель", "таблиц", "сгенерируй изображение", "сгенерируй картинку"
+    ]
+    return any(w in t for w in media_words)
+
+MEDIA_BLACKLIST_NAMES = {"harvester.png", "tpl_clown.png", "tpl_skeleton.png", "tpl_dr_livesey.png", "test_yandex.jpg", "sine_wave.png"}
+MEDIA_BLACKLIST_DIRS = {"meme_templates", "mahoraga_temp", "__pycache__", "fonts"}
+
+def is_blacklisted_media(fp):
+    base = os.path.basename(fp).lower()
+    if base in MEDIA_BLACKLIST_NAMES:
+        return True
+    if base.startswith(("tpl_", "harvester", "cached_", "test_", "placeholder_", "default_")):
+        return True
+    if base.endswith((".ttf", ".otf", ".py", ".pyc", ".json", ".db", ".session", ".txt", ".csv")):
+        return True
+    for part in fp.replace("\\", "/").split("/"):
+        if part.lower() in MEDIA_BLACKLIST_DIRS:
+            return True
+    return False
+
+def get_all_media_snapshot():
+    snapshot = set()
+    search_dirs = [MEDIA_DIR, os.path.join(MEDIA_DIR, "videos"), os.path.join(MEDIA_DIR, "music"), os.path.join(EXTENSIONS_DIR, "media"), EXTENSIONS_DIR]
+    for d in search_dirs:
+        if os.path.exists(d):
+            for root, _, files in os.walk(d):
+                for f in files:
+                    snapshot.add(os.path.join(root, f))
+    return snapshot
+
+def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script_path=None):
+    # 0. Если задача чисто текстовая (погода, расчеты, курсы и т.д.) — медиафайл исключен!
+    if is_pure_text_task(task_text, script_path):
+        return None
+
     # 1. Проверяем явный путь в stdout
     if stdout:
-        m = re.findall(r"([/\w.-]+\.(?:png|jpg|jpeg|gif|webp|mp4|webm|mov|mp3|ogg|wav|csv|xlsx|txt|pdf))", stdout, re.IGNORECASE)
+        m = re.findall(r"([/\w.-]+\.(?:png|jpg|jpeg|gif|webp|mp4|webm|mov|mp3|ogg|wav|xlsx|pdf))", stdout, re.IGNORECASE)
         for cand in reversed(m):
+            if is_blacklisted_media(cand):
+                continue
             if os.path.exists(cand) and os.path.isfile(cand) and cand not in before_files:
-                return cand
+                if min_mtime <= 0 or os.path.getmtime(cand) >= min_mtime:
+                    return cand
             full_cand = os.path.join(BASE_DIR, cand.lstrip("/"))
+            if is_blacklisted_media(full_cand):
+                continue
             if os.path.exists(full_cand) and os.path.isfile(full_cand) and full_cand not in before_files:
-                return full_cand
+                if min_mtime <= 0 or os.path.getmtime(full_cand) >= min_mtime:
+                    return full_cand
 
-    # 2. Проверяем папки media/ и extensions/
-    search_dirs = [MEDIA_DIR, os.path.join(MEDIA_DIR, "videos"), os.path.join(MEDIA_DIR, "music"), os.path.join(EXTENSIONS_DIR, "media"), EXTENSIONS_DIR]
+    # 2. Если в stdout путь не был напечатан, ищем в папках ТОЛЬКО если задача явно просила файл/медиа
+    if not is_media_task(task_text):
+        return None
+
+    # 3. Проверяем папки media/ и extensions/
+    search_dirs = [MEDIA_DIR, os.path.join(MEDIA_DIR, "videos"), os.path.join(MEDIA_DIR, "music"), os.path.join(EXTENSIONS_DIR, "media")]
     all_candidates = []
     for d in search_dirs:
         if os.path.exists(d):
             for root, _, files in os.walk(d):
                 for f in files:
-                    if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".webm", ".mov", ".mp3", ".ogg", ".wav", ".csv", ".xlsx", ".txt", ".pdf")):
+                    if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".webm", ".mov", ".mp3", ".ogg", ".wav", ".xlsx", ".pdf")):
                         fp = os.path.join(root, f)
+                        if is_blacklisted_media(fp):
+                            continue
                         if os.path.isfile(fp) and fp not in before_files:
                             mtime = os.path.getmtime(fp)
-                            if min_mtime > 0 and mtime >= (min_mtime - 1.0):
-                                all_candidates.append(fp)
-                            elif min_mtime == 0 and (time.time() - mtime < 60):
+                            if min_mtime > 0 and mtime >= min_mtime and os.path.getsize(fp) > 0:
                                 all_candidates.append(fp)
 
     if all_candidates:
@@ -285,15 +349,16 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     # 1. Проверяем, есть ли уже готовое дополнение для этой задачи (не требует AI!)
     existing_script, ext_info = find_existing_extension(task_text)
     if existing_script:
-        before_files = set()
-        for root, _, files in os.walk(MEDIA_DIR):
-            for f in files:
-                before_files.add(os.path.join(root, f))
+        ext_produces_media = ext_info.get("produces_media", True)
+        before_files = get_all_media_snapshot() if ext_produces_media else set()
         start_time = time.time()
         print(f"[DYNAMIC AGENT] Reusing existing extension: {existing_script}")
         code_rc, stdout, stderr = run_script(existing_script, input_file=photo_path, task_text=task_text)
         if code_rc == 0:
-            new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time)
+            if not ext_produces_media or is_pure_text_task(task_text, existing_script):
+                new_media = None
+            else:
+                new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=existing_script)
             if any(marker in stdout for marker in ["📍", "🌡️", "📊", "☀️", "🌤️", "☁️"]):
                 report = stdout
             else:
@@ -370,10 +435,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         f.write(f"# Auto-generated Antigravity Extension: {ext_desc}\n\n")
         f.write(code)
 
-    before_files = set()
-    for root, _, files in os.walk(MEDIA_DIR):
-        for f in files:
-            before_files.add(os.path.join(root, f))
+    before_files = get_all_media_snapshot()
     start_time = time.time()
 
     # Первый запуск
@@ -405,6 +467,9 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 if auto_install_missing_packages(stderr):
                     code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
 
+    # Ищем созданный медиафайл (если задача не чисто текстовая)
+    new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=script_path)
+
     # Если скрипт успешно отработал — регистрируем его как постоянное дополнение к боту!
     if code_rc == 0:
         stopwords = {"бот", "пожалуйста", "скинь", "сделай", "напиши", "сгенерируй", "создай", "дополнение", "чтобы", "можешь", "умеешь", "давай", "хочу"}
@@ -413,11 +478,8 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         for part in re.split(r"[_-]", ext_slug):
             if len(part) >= 3 and part.lower() not in words:
                 words.append(part.lower())
-        register_extension(ext_slug, script_filename, ext_desc, words[:7])
-        print(f"[DYNAMIC AGENT] Successfully registered new extension: {ext_slug} (triggers: {words[:7]})")
-
-    # Ищем созданный медиафайл
-    new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time)
+        register_extension(ext_slug, script_filename, ext_desc, words[:7], produces_media=bool(new_media))
+        print(f"[DYNAMIC AGENT] Successfully registered new extension: {ext_slug} (triggers: {words[:7]}, produces_media={bool(new_media)})")
 
     final_text_parts = []
     final_text_parts.append(f"🧩 **Сгенерировано новое дополнение к боту:** `{script_filename}`")

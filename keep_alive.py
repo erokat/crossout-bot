@@ -1076,6 +1076,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "yarik",
+                "--no-copy",
                 "--reply-to", str(msg_id)
             ]
             if res_media and os.path.exists(res_media):
@@ -1268,6 +1269,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             sys.executable,
             os.path.join(BASE_DIR, "send.py"),
             "--to", "yarik",
+            "--no-copy",
             "--reply-to", str(msg_id)
         ]
         if res_media and os.path.exists(res_media):

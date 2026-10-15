@@ -130,7 +130,7 @@ async def delete_via_telethon(cfg, chat_id, message_ids):
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
         lock_file.close()
 
-async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=None):
+async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=None, no_copy=False):
     lock_file = open(LOCK_PATH, "w")
     fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 
@@ -167,8 +167,11 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
             )
             print(f"Telethon file sent (msg_id={msg.id})")
 
-            # 2. Automatically forward a copy to Owner via Control Bot
-            if cfg.get("bot_token") and cfg.get("owner_id"):
+            # 2. Forward copy to Owner only if allowed (never for weather, tasks, or utilities)
+            is_task_or_weather = any(m in (text or "").lower() for m in [
+                "погода", "метеостанция", "дополнение", "результат:", "тираспол", "прогноз", "градус"
+            ])
+            if not no_copy and not is_task_or_weather and cfg.get("bot_token") and cfg.get("owner_id"):
                 caption = f"🚀 Копия отправленного Ярику медиа:\n{text or ''}".strip()
                 send_via_bot_api(
                     cfg["bot_token"],
@@ -222,6 +225,7 @@ def main():
     parser.add_argument("--photo", type=str, default=None, help="Путь к фото или анимации")
     parser.add_argument("--reply-to", type=int, default=None, help="ID сообщения для ответа")
     parser.add_argument("--delete", type=int, nargs="+", default=None, help="ID сообщений для удаления")
+    parser.add_argument("--no-copy", action="store_true", default=False, help="Не отправлять копию в бот-чат владельца")
     args = parser.parse_args()
 
     if not args.text and not args.photo and not args.delete:
@@ -263,7 +267,8 @@ def main():
             chat_id=chat_id,
             text=args.text,
             photo_path=args.photo,
-            reply_to=args.reply_to
+            reply_to=args.reply_to,
+            no_copy=args.no_copy
         ))
 
 if __name__ == "__main__":
