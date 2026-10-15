@@ -32,7 +32,17 @@ PROTECTED_CORE_FILES = {
     "config.json",
     "Dockerfile",
     "main.py",
-    "requirements.txt"
+    "requirements.txt",
+    "github_sync.py",
+    "dynamic_agent.py",
+    "add_to_sticker_pack.py",
+    "ask_owner.py",
+    "media_finder.py",
+    "meme_engine.py",
+    "meme_generator.py",
+    "photo_editor.py",
+    "video_editor.py",
+    "gdrive.py"
 }
 
 def is_safe_skill_path(filepath):
@@ -183,6 +193,8 @@ def find_existing_skill(task_text):
         fn = info.get("filename")
         fp = os.path.join(SKILLS_DIR, fn) if os.path.exists(os.path.join(SKILLS_DIR, fn)) else os.path.join(EXTENSIONS_DIR, fn)
         if os.path.exists(fp):
+            if isinstance(info, dict) and "skill_name" not in info:
+                info["skill_name"] = slug
             return fp, info
 
     return None, None
@@ -612,6 +624,106 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 if stdout:
                     report += f"📊 **Результат:**\n```\n{stdout[:2000]}\n```\n"
             return report, None
+
+        elif ask_ai_fn and os.path.exists(existing_script):
+            # Attempt self-healing directly on the existing failing skill!
+            print(f"[DYNAMIC AGENT] Existing extension {existing_script} failed (rc={code_rc}). Initiating self-healing...")
+            script_path = existing_script
+            script_filename = os.path.basename(existing_script)
+            skill_name = ext_info.get("skill_name") or os.path.splitext(script_filename)[0]
+            skill_desc = ext_info.get("description") or f"Навык {skill_name}"
+            triggers = ext_info.get("triggers") or []
+            requirements = ext_info.get("requirements") or []
+            try:
+                with open(existing_script, "r", encoding="utf-8") as f:
+                    code = f.read()
+            except Exception:
+                code = None
+
+            if code:
+                if "ModuleNotFoundError" in stderr or "No module named" in stderr:
+                    installed = auto_install_missing_packages(stderr)
+                    if installed:
+                        code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+
+                if code_rc != 0:
+                    for attempt in range(1, 4):
+                        print(f"[DYNAMIC SKILL ENGINE] Self-healing attempt {attempt}/3 for existing skill {skill_name} (rc={code_rc})...")
+                        err_details = stderr if stderr else (stdout if stdout else f"Скрипт завершился с кодом ошибки {code_rc}")
+                        fix_prompt = (
+                            f"Скрипт навыка '{skill_name}' для задачи «{task_text}» упал с кодом {code_rc}.\n"
+                            f"Ошибка / Traceback:\n```\n{err_details[:1500]}\n```\n\n"
+                            f"Исходный код:\n```python\n{code}\n```\n\n"
+                            "Инструкции по исправлению:\n"
+                            "1. Проанализируй причину ошибки и устрани её.\n"
+                            "2. Сохрани комментарии с метаданными (# SKILL_NAME, # DESCRIPTION, # TRIGGERS, # REQUIREMENTS).\n"
+                            "3. Не изменяй файлы системного ядра бота.\n"
+                            "4. Верни исправленный, полностью работающий Python-код строго внутри ```python ... ```."
+                        )
+                        fixed_reply = ask_ai_fn(fix_prompt)
+                        fixed_code = extract_python_code(fixed_reply)
+                        if fixed_code and is_safe_skill_path(script_path):
+                            if not fixed_code.startswith("# -*- coding: utf-8 -*-"):
+                                fixed_code = "# -*- coding: utf-8 -*-\n" + fixed_code
+                            with open(script_path, "w", encoding="utf-8") as f:
+                                f.write(fixed_code)
+                            code = fixed_code
+                            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+                            if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
+                                if auto_install_missing_packages(stderr):
+                                    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+                            if code_rc == 0:
+                                print(f"[DYNAMIC SKILL ENGINE] Self-healing succeeded on attempt {attempt}/3 for existing skill!")
+                                try:
+                                    from db import parse_skill_metadata_from_code
+                                    s_name_upd, s_desc_upd, s_trig_upd, s_req_upd = parse_skill_metadata_from_code(code, fallback_name=skill_name, fallback_desc=skill_desc)
+                                    skill_name = s_name_upd
+                                    skill_desc = s_desc_upd
+                                    if s_trig_upd:
+                                        triggers = s_trig_upd
+                                    if s_req_upd:
+                                        requirements = s_req_upd
+                                except Exception:
+                                    pass
+                                break
+
+                if code_rc == 0:
+                    try:
+                        from db import save_dynamic_skill
+                        save_dynamic_skill(
+                            skill_name=skill_name,
+                            file_path=script_path,
+                            triggers=triggers,
+                            description=skill_desc,
+                            requirements=requirements,
+                            code=code
+                        )
+                    except Exception as dbe:
+                        print(f"[DYNAMIC SKILL ENGINE] Error saving healed skill to SQLite: {dbe}")
+
+                    try:
+                        from gdrive import upload_file_to_drive
+                        upload_file_to_drive(script_path, folder_type="skills")
+                    except Exception as ge:
+                        print(f"[DYNAMIC SKILL ENGINE] GDrive backup notice: {ge}")
+
+                    try:
+                        from github_sync import push_skill_to_github
+                        push_skill_to_github(skill_name=skill_name, file_path=script_path, code=code)
+                    except Exception as ghe:
+                        print(f"[DYNAMIC SKILL ENGINE] GitHub push notice: {ghe}")
+
+                    new_media = None
+                    if ext_produces_media:
+                        new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=existing_script)
+
+                    register_extension(skill_name, script_filename, skill_desc, triggers[:7], produces_media=bool(new_media))
+
+                    if new_media and os.path.exists(new_media):
+                        return f"Готово, {sender_name}! Исправил и выполнил 🔥", new_media
+
+                    clean_out = "\n".join([l for l in stdout.splitlines() if not l.startswith("/") and not l.endswith((".png", ".jpg", ".mp4", ".mp3"))])
+                    return f"⚡ **Навык `{script_filename}` успешно самоисправлен:**\n\n```\n{clean_out[:2000]}\n```", None
 
     # 2. Если дополнения еще нет — требуется AI для генерации нового модуля
     if not ask_ai_fn:

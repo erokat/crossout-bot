@@ -317,24 +317,24 @@ def parse_skill_metadata_from_code(code, fallback_name="skill", fallback_desc="D
     if not code:
         return fallback_name, fallback_desc, [], []
 
-    slug_match = re.search(r"#\s*(?:SKILL_NAME|EXTENSION):\s*([a-zA-Z0-9_-]+)", code)
+    slug_match = re.search(r'(?:#|"""|\'\'\'|\b)(?:SKILL_NAME|EXTENSION):\s*([a-zA-Z0-9_-]+)', code)
     skill_name = slug_match.group(1).strip() if slug_match else fallback_name
 
-    desc_match = re.search(r"#\s*DESCRIPTION:\s*(.+)", code)
+    desc_match = re.search(r'(?:#|"""|\'\'\'|\b)DESCRIPTION:\s*(.+)', code)
     if desc_match:
-        skill_desc = desc_match.group(1).strip()
+        skill_desc = desc_match.group(1).strip().splitlines()[0]
     else:
-        slug_pipe = re.search(r"#\s*(?:SKILL_NAME|EXTENSION):\s*[a-zA-Z0-9_-]+\s*\|\s*(.+)", code)
-        skill_desc = slug_pipe.group(1).strip() if slug_pipe else fallback_desc
+        slug_pipe = re.search(r'(?:#|"""|\'\'\'|\b)(?:SKILL_NAME|EXTENSION):\s*[a-zA-Z0-9_-]+\s*\|\s*(.+)', code)
+        skill_desc = slug_pipe.group(1).strip().splitlines()[0] if slug_pipe else fallback_desc
 
-    trig_match = re.search(r"#\s*TRIGGERS:\s*(.+)", code)
+    trig_match = re.search(r'(?:#|"""|\'\'\'|\b)TRIGGERS:\s*(.+)', code)
     if trig_match:
-        triggers = [t.strip().lower() for t in trig_match.group(1).split(",") if t.strip()]
+        triggers = [t.strip().lower() for t in trig_match.group(1).splitlines()[0].split(",") if t.strip()]
     else:
         triggers = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", skill_desc.lower()) if len(w) >= 4]
 
-    req_match = re.search(r"#\s*REQUIREMENTS:\s*(.+)", code)
-    requirements = [r.strip() for r in req_match.group(1).split(",") if r.strip()] if req_match else []
+    req_match = re.search(r'(?:#|"""|\'\'\'|\b)REQUIREMENTS:\s*(.+)', code)
+    requirements = [r.strip() for r in req_match.group(1).splitlines()[0].split(",") if r.strip()] if req_match else []
 
     return skill_name, skill_desc, triggers, requirements
 
@@ -359,7 +359,7 @@ def restore_dynamic_skills(skills_dir=None, install_requirements=True):
     # 0. Sync missing skills from GitHub repository
     try:
         from github_sync import sync_skills_from_github
-        gh_synced = sync_skills_from_github(skills_dir=s_dir, install_requirements=False, timeout=10)
+        gh_synced = sync_skills_from_github(skills_dir=s_dir, install_requirements=install_requirements, timeout=10)
         if gh_synced > 0:
             print(f"[DYNAMIC SKILLS] Synced {gh_synced} skill(s) from GitHub repository.")
     except Exception as ghe:
@@ -377,7 +377,7 @@ def restore_dynamic_skills(skills_dir=None, install_requirements=True):
                     s_name, s_desc, s_trig, s_req = parse_skill_metadata_from_code(file_code, fallback_name=default_slug)
                     existing_entry = get_dynamic_skill(s_name)
                     if not existing_entry:
-                        rel_path = os.path.relpath(fp, base_dir)
+                        rel_path = os.path.relpath(fp, base_dir) if fp.startswith(base_dir) else f"skills/{fname}"
                         save_dynamic_skill(
                             skill_name=s_name,
                             file_path=rel_path,
