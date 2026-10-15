@@ -480,6 +480,17 @@ def mark_message_handled(msg_id, chat_id=0):
 
 add_handled_id = mark_message_handled
 
+def unmark_message_handled(msg_id, chat_id=0):
+    if not msg_id:
+        return
+    try:
+        cid = int(chat_id) if chat_id is not None else 0
+        with get_db() as conn:
+            conn.execute("DELETE FROM handled_messages WHERE chat_id = ? AND message_id = ?", (cid, int(msg_id)))
+    except Exception:
+        pass
+
+
 def configure_session_sqlite(session_path=None):
     """Ensure WAL journal mode, autocommit, and busy_timeout=10000 for Telethon SQLite session."""
     try:

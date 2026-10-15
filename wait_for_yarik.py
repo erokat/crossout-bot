@@ -197,7 +197,6 @@ async def poll_control_bot(cfg, exit_event, result_box):
                     msg_id = msg.get("message_id")
                     if is_handled(msg_id, owner_id) or is_message_handled(msg_id, owner_id) or msg_id in get_handled_ids(owner_id):
                         continue
-                    add_handled_id(msg_id, owner_id)
                     text = msg.get("text") or msg.get("caption") or ""
                     date_str = str(msg.get("date", int(time.time())))
 
@@ -213,6 +212,8 @@ async def poll_control_bot(cfg, exit_event, result_box):
                         if is_reply_to_prompt or is_approval or is_rejection:
                             status = "rejected" if is_rejection else ("approved" if (is_approval or is_reply_to_prompt) else "rejected")
                             resolve_confirmation(pending_conf["req_id"], status, comment=f"Текст владельца: {text}")
+                            add_handled_id(msg_id, owner_id)
+                            mark_message_handled(msg_id, owner_id)
                             p_msg_id = pending_conf.get("message_id")
                             if p_msg_id:
                                 try:
@@ -484,8 +485,6 @@ async def main():
                             )
                         continue
 
-                    add_handled_id(m.id, yarik_chat_id)
-
                     # Triggered by mention
                     media_path = None
                     has_media = 0
@@ -589,8 +588,6 @@ async def main():
                                 media_path=None
                             )
                         return
-
-                    add_handled_id(msg.id, yarik_chat_id)
 
                     media_path = None
                     has_media = 0

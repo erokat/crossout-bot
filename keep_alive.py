@@ -2138,30 +2138,30 @@ def main():
     stored_last_id = get_kv("last_processed_id")
     if stored_last_id and stored_last_id.isdigit():
         last_processed_id = int(stored_last_id)
+        log_event(f"[ORCHESTRATOR] Restored last_processed_id from DB: {last_processed_id}")
 
-    log_event("[ORCHESTRATOR] Initializing latest message ID from chat on startup...")
-    for attempt in range(5):
-        try:
-            cmd_latest = [sys.executable, os.path.join(BASE_DIR, "wait_for_yarik.py"), "--get-latest-id"]
-            res_latest = subprocess.run(cmd_latest, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
-            for line in res_latest.stdout.splitlines():
-                try:
-                    d = json.loads(line.strip())
-                    if "latest_id" in d and d["latest_id"] > 0:
-                        latest_id = int(d["latest_id"])
-                        if last_processed_id is None or latest_id > last_processed_id:
+    if last_processed_id is None:
+        log_event("[ORCHESTRATOR] Initializing latest message ID from chat on cold startup...")
+        for attempt in range(5):
+            try:
+                cmd_latest = [sys.executable, os.path.join(BASE_DIR, "wait_for_yarik.py"), "--get-latest-id"]
+                res_latest = subprocess.run(cmd_latest, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+                for line in res_latest.stdout.splitlines():
+                    try:
+                        d = json.loads(line.strip())
+                        if "latest_id" in d and d["latest_id"] > 0:
+                            latest_id = int(d["latest_id"])
                             last_processed_id = latest_id
-                        mark_message_handled(last_processed_id, YARIK_CHAT_ID)
-                        set_kv("last_processed_id", str(last_processed_id))
-                        log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id}. Ignoring prior messages.")
-                        break
-                except Exception:
-                    continue
-            if last_processed_id is not None:
-                break
-        except Exception as e:
-            log_event(f"[ORCHESTRATOR WARNING] Could not fetch latest message ID on startup (attempt {attempt+1}): {e}")
-            time.sleep(2)
+                            set_kv("last_processed_id", str(last_processed_id))
+                            log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id} on cold start.")
+                            break
+                    except Exception:
+                        continue
+                if last_processed_id is not None:
+                    break
+            except Exception as e:
+                log_event(f"[ORCHESTRATOR WARNING] Could not fetch latest message ID on startup (attempt {attempt+1}): {e}")
+                time.sleep(2)
 
     while True:
         try:

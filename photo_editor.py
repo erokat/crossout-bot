@@ -59,6 +59,7 @@ def is_photo_editor_request(text, has_photo=False):
         "наложи текст", "сделай демотиватор", "вставь текст", "допиши",
         "добавь на фото", "прилепи на фото", "вставь на фото", "наложи на фото",
         "прилепи", "наложи картинку", "добавь картинку на фото", "вставь картинку на фото",
+        "на лицо", "добавь на лицо", "прилепи на лицо", "вставь на лицо", "прифотошопь",
         "черно-бел", "черно бел", "ч/б", "чб", "сепия", "негатив", "инвертируй",
         "размой", "размыть", "заблюрь", "блюр", "резкость", "зашакаль", "пережарь",
         "deepfry", "дипфрай", "поверни", "переверни", "обрежь", "квадрат",
@@ -74,7 +75,10 @@ def is_photo_editor_request(text, has_photo=False):
     if has_photo:
         if any(w in t for w in ["надпись", "подпись", "текст", "напиши", "титры"]):
             return True
-        if any(w in t for w in ["фильтр", "эффект", "наложи на фото", "вставь на фото", "поверни", "обрежь", "заблюрь", "чб"]):
+        if any(w in t for w in [
+            "фильтр", "эффект", "наложи на фото", "вставь на фото", "поверни", "обрежь", "заблюрь", "чб",
+            "на лицо", "лицо", "добавь", "прилепи", "наложи", "прифотошопь", "вставь", "замени", "слизнекот", "слизнец"
+        ]):
             return True
 
     return False
@@ -358,7 +362,10 @@ STICKER_LOCAL_ASSETS = {
     "копье": "spear.png",
     "копьё": "spear.png",
     "огонь": "fire_0.png",
-    "пламя": "fire_1.png"
+    "пламя": "fire_1.png",
+    "слизнекот": "slugcat_head_clean.png",
+    "слизнец": "slugcat_head_clean.png",
+    "slugcat": "slugcat_head_clean.png"
 }
 
 def find_or_download_sticker(sticker_query):
@@ -439,8 +446,11 @@ def overlay_sticker_on_image(base_img, sticker_query, pos_name="auto", scale=0.3
         sw, sh = stk_resized.size
 
         # Определяем позицию
-        p_low = pos_name.lower()
-        if "голову" in p_low or "сверху" in p_low or "head" in p_low or "top" in p_low:
+        p_low = (pos_name or "").lower()
+        if "лицо" in p_low or "face" in p_low or "морду" in p_low:
+            x = int(W * 0.42)
+            y = int(H * 0.32)
+        elif "голову" in p_low or "сверху" in p_low or "head" in p_low or "top" in p_low:
             x = (W - sw) // 2
             y = max(10, int(H * 0.08))
         elif "снизу справа" in p_low or "bottom-right" in p_low:
@@ -603,12 +613,22 @@ def process_universal_photo_command(photo_path, command_text):
         reply_cap = "Прилепил облачко с текстом, как в комиксе! 💬✨"
 
     # 2. Добавление стикера / предмета / ассета на фото
-    elif any(w in t_low for w in ["добавь на фото", "прилепи на фото", "вставь на фото", "наложи на фото", "прилепи", "наложи картинку", "добавь картинку", "вставь картинку"]):
+    elif any(w in t_low for w in ["добавь на фото", "прилепи на фото", "вставь на фото", "наложи на фото", "прилепи", "наложи картинку", "добавь картинку", "вставь картинку", "на лицо", "добавь", "прифотошопь", "слизнекот"]):
         # Извлекаем название предмета/стикера
-        m_stk = re.search(r"(?i)(?:добавь\s+(?:на\s+фото|на\s+картинку)?|прилепи\s+(?:на\s+фото|на\s+картинку)?|наложи\s+(?:на\s+фото|на\s+картинку)?|вставь\s+(?:на\s+фото|на\s+картинку)?)\s+(.+?)(?:\s+(?:сверху|снизу|на голову|по центру|слева|справа)|$)", command_text)
-        sticker_q = m_stk.group(1).strip() if m_stk else "газген"
+        m_stk = re.search(r"(?i)(?:добавь|прилепи|наложи|вставь|прифотошопь)(?:\s+(?:на\s+фото|на\s+картинку|на\s+лицо(?:\s+[а-я]+)?))?\s+(.+?)(?:\s+(?:сверху|снизу|на голову|на лицо|по центру|слева|справа)|$)", command_text)
+        sticker_q = m_stk.group(1).strip() if m_stk else ""
+        if not sticker_q or any(w in sticker_q.lower() for w in ["этот", "эту", "фото", "картинку"]):
+            for kw in STICKER_LOCAL_ASSETS:
+                if kw in t_low:
+                    sticker_q = kw
+                    break
+        if not sticker_q:
+            sticker_q = "газген"
+
         pos = "auto"
-        if "голову" in t_low or "сверху" in t_low:
+        if "лицо" in t_low or "морду" in t_low or "face" in t_low:
+            pos = "face"
+        elif "голову" in t_low or "сверху" in t_low:
             pos = "head"
         elif "снизу" in t_low:
             pos = "bottom"
