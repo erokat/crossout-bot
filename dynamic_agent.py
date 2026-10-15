@@ -117,25 +117,41 @@ def calculate_skill_match_score(query_text, skill_name, triggers):
         if tr_clean in COMMON_SKILL_STOPWORDS:
             continue
 
+        # Многословные триггеры («прогноз погоды») имеют наивысший приоритет
         if " " in tr_clean:
             if tr_clean in t:
                 score += 12
                 continue
 
+        # Одиночные слова дают высокий балл ТОЛЬКО если запрос короткий (команда)
+        # В длинных предложениях одно случайное слово не должно вызывать чужой навык
         if tr_clean in words or re.search(r"\b" + re.escape(tr_clean) + r"\b", t):
-            score += 8
+            if len(words) <= 3:
+                score += 8
+            else:
+                score += 2
             continue
 
         if len(tr_clean) >= 4:
             stem = tr_clean[:5] if len(tr_clean) >= 6 else tr_clean[:4]
             if any(w.startswith(stem) for w in words if w not in COMMON_SKILL_STOPWORDS):
-                score += 6
-                continue
-            if stem in t:
-                score += 4
+                score += 3
                 continue
 
     return score
+
+def is_one_off_creative_task(task_text):
+    if not task_text:
+        return False
+    t = task_text.lower().strip()
+    if any(k in t for k in ["добавь команду", "добавь функцию", "добавь навык", "добавь модуль", "научись", "создай команду", "создай плагин", "создай модуль"]):
+        return False
+    creative_markers = [
+        "мем", "мэм", "мемасик", "мемчик", "картинк", "пикч", "нарисуй",
+        "сгенерируй фото", "сгенерируй изображение", "сгенерируй картинку",
+        "доск", "шахмат", "арт", "открытк", "демотиватор", "прикол", "иллюстраци"
+    ]
+    return any(m in t for m in creative_markers)
 
 def find_existing_skill(task_text):
     """
@@ -146,6 +162,8 @@ def find_existing_skill(task_text):
     if not task_text:
         return None, None
     t = task_text.lower().strip()
+    if is_one_off_creative_task(t):
+        return None, None
     if any(w in t for w in ["новый", "нового", "новеньк", "друг", "переделай", "заново", "по-другому", "реалистичн"]):
         return None, None
 
@@ -556,7 +574,9 @@ def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script
 
 def synthesize_meme_extension_code(task_text, ext_slug, ext_desc):
     clean_theme = task_text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
-    return f'''# -*- coding: utf-8 -*-
+    is_crossout = any(w in clean_theme.lower() for w in ["кросаут", "кроссаут", "crossout", "газген", "птур", "ховер", "утюг", "капкан", "мамонт", "скорпион"])
+    if is_crossout:
+        return f'''# -*- coding: utf-8 -*-
 # EXTENSION: {ext_slug} | {ext_desc}
 import os
 import sys
@@ -575,6 +595,65 @@ if meme_file and os.path.exists(meme_file):
     print("Мем успешно сгенерирован по теме:", theme)
 else:
     sys.exit(1)
+'''
+    else:
+        return f'''# -*- coding: utf-8 -*-
+# EXTENSION: {ext_slug} | {ext_desc}
+import os
+import sys
+from PIL import Image, ImageDraw, ImageFont
+
+_cur_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_cur_dir)
+media_dir = os.path.join(_parent_dir, "media")
+os.makedirs(media_dir, exist_ok=True)
+
+theme = "{clean_theme}"
+
+def get_font(size):
+    candidates = [
+        os.path.join(media_dir, "RussoOne-Regular.ttf"),
+        os.path.join(media_dir, "Montserrat.ttf"),
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            try:
+                return ImageFont.truetype(c, size)
+            except Exception:
+                pass
+    return ImageFont.load_default()
+
+width, height = 1000, 1000
+img = Image.new("RGB", (width, height), (18, 20, 26))
+draw = ImageDraw.Draw(img)
+draw.rectangle([(40, 40), (width - 40, height - 40)], fill=(28, 32, 42), outline=(70, 80, 100), width=3)
+
+font_title = get_font(40)
+font_body = get_font(28)
+
+draw.text((width // 2, 100), "МЕМ // ЮМОР", font=font_title, fill="#FFCC00", anchor="mm")
+
+words = theme.split()
+lines = []
+curr = []
+for w in words:
+    curr.append(w)
+    if len(" ".join(curr)) > 35:
+        lines.append(" ".join(curr[:-1]))
+        curr = [w]
+if curr:
+    lines.append(" ".join(curr))
+
+y = 350
+for l in lines:
+    draw.text((width // 2, y), l, font=font_body, fill="#FFFFFF", anchor="mm")
+    y += 45
+
+out_path = os.path.join(media_dir, f"meme_{abs(hash(theme)) % 100000}.png")
+img.save(out_path, "PNG")
+print(out_path)
+print("Держи мем по твоему запросу! 🔥")
 '''
 
 def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=None, sender_key=None, retry_context=None):
@@ -754,38 +833,37 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     # 2. Генерируем новое дополнение с нуля
     # 2. Генерируем новый динамический модуль с нуля через Gemini
     prompt = (
-        f"Ты — автономный генератор динамических навыков (Dynamic Skill Engine) Telegram-бота Crossout на базе Gemini.\n"
+        f"Ты — автономный генератор Python 3 скриптов и медиа (Dynamic Skill Engine) для Telegram-бота.\n"
         f"Пользователь {sender_name} просит выполнить задачу: «{task_text}».\n"
         f"{file_context}{prev_context}\n"
-        "СПЕЦИФИКАЦИЯ ВНУТРЕННЕЙ АРХИТЕКТУРЫ И ОКРУЖЕНИЯ БОТА:\n"
+        "ВАЖНЕЙШЕЕ ПРАВИЛО ТЕМАТИКИ (СТРОЖАЙШИЙ ЗАПРЕТ НА ЛИШНИЙ КРОССАУТ):\n"
+        "1. Создавай изображение/мем/графику/скрипт СТРОГО по теме, которую запросил пользователь!\n"
+        "2. Если запрос про шахматы — делай ТОЛЬКО шахматы (никакого Crossout, никаких скорпионов, кабин и пушек, если о них прямо не просили)!\n"
+        "3. Если запрос про Rain World, котиков, учёбу, CS, Dota, жизненные ситуации, аниме, сессию, программирование — делай СТРОГО по этой теме!\n"
+        "4. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО приплетать элементы Crossout (Газген, ПТУР, Капканы, Пустоши, Скорпион, кабины, ховеры), если в тексте задачи пользователь САМ прямо не упомянул игру Crossout или её детали!\n"
+        "5. Игру Crossout используй ТОЛЬКО тогда, когда пользователь САМ прямо попросил Crossout (или явно упомянул крафты, оружие и детали из Crossout).\n\n"
+        "СПЕЦИФИКАЦИЯ ВНУТРЕННЕЙ АРХИТЕКТУРЫ И ОКРУЖЕНИЯ:\n"
         "1. Корень проекта находится в PYTHONPATH. Тебе доступны модули:\n"
         "   - `from db import get_db, get_kv, set_kv` — чтение и запись в базу данных SQLite.\n"
         "   - `from media_finder import find_and_download_image` — поиск и скачивание артов/изображений.\n"
-        "   - `from meme_generator import generate_crossout_meme` — штатная генерация мемов Crossout.\n"
         "2. Рабочие директории и генерация медиа:\n"
         "   - `./media/` — сохранение любых сгенерированных медиафайлов (картинки, графики, qr, видео, аудио).\n"
-        "   - `./saved_memes/` — сохраненные мемы Crossout.\n"
-        "   - `./skills/` — директория динамических навыков бота.\n"
-        "   - ДЛЯ ГЕНЕРАЦИИ КАРТИНОК, ГРАФИКИ, МЕМОВ, АРТОВ И СХЕМ: используй библиотеку `PIL` (`Pillow`) или `matplotlib`. Шрифты лежат в `./media/` (`RussoOne-Regular.ttf`, `Montserrat.ttf`, `Comfortaa.ttf`). Рисуй все запрошенные пользователем сцены, детали, персонажей и надписи качественно! Готовый файл сохраняй в `./media/<filename>.png` и печатай путь в stdout: `print(out_path)`.\n"
-        "3. Отправка медиа и сообщений:\n"
-        "   - Модуль может напечатать абсолютный путь к готовому медиафайлу в stdout (например: `print('/path/to/media.png')`) и текст сообщения.\n"
-        "   - Также модуль может напрямую вызывать отправку через send.py:\n"
-        "     `python3 send.py --to yarik [--photo <path>] [--text <text>] [--reply-to <id>]`\n"
-        "     `python3 send.py --to owner [--photo <path>] [--text <text>]`\n"
-        "4. Входные аргументы скрипта:\n"
+        "   - ДЛЯ ГЕНЕРАЦИИ КАРТИНОК, ГРАФИКИ, МЕМОВ, АРТОВ И СХЕМ: используй библиотеку `PIL` (`Pillow`) или `matplotlib`. Шрифты лежат в `./media/` (`RussoOne-Regular.ttf`, `Montserrat.ttf`, `Comfortaa.ttf`, `Anton.ttf`). Рисуй все запрошенные пользователем сцены, детали, персонажей и надписи качественно! Готовый файл сохраняй в `./media/<filename>.png` и обязательно печатай путь в stdout: `print(out_path)`.\n"
+        "3. Входные аргументы скрипта:\n"
         "   - Текст запроса: `os.environ.get('TASK_TEXT')` или `sys.argv[1]`.\n"
         "   - Входной файл (если прикреплен): `os.environ.get('INPUT_FILE')`.\n"
         "   - Исполняемый ffmpeg: `os.environ.get('FFMPEG_EXE', 'ffmpeg')`.\n"
-        "5. Библиотеки и зависимости:\n"
-        "   - Если нужны внешние пакеты (requests, beautifulsoup4, pillow, openpyxl, pandas, matplotlib, qrcode, pydub, moviepy, reportlab), свободно импортируй их!\n"
+        "4. Библиотеки и зависимости:\n"
+        "   - Если нужны внешние пакеты (requests, beautifulsoup4, pillow, openpyxl, pandas, matplotlib, qrcode, pydub), свободно импортируй их!\n"
         "   - Движок автоматически установит недостающие пакеты через pip.\n"
-        "6. ЗАЩИТА СИСТЕМНОГО ЯДРА (СТРОГИЙ ЗАПРЕТ):\n"
+        "5. ЗАЩИТА СИСТЕМНОГО ЯДРА (СТРОГИЙ ЗАПРЕТ):\n"
         "   Никогда не изменяй и не перезаписывай файлы ядра бота:\n"
         "   keep_alive.py, wait_for_yarik.py, db.py, send.py, session.session, crossout_session.session, config.py.\n"
-        "7. Метаданные навыка в начале файла:\n"
+        "6. Метаданные навыка в начале файла:\n"
         "   # SKILL_NAME: <slug_латиницей>\n"
         "   # DESCRIPTION: <Краткое описание навыка>\n"
-        "   # TRIGGERS: <триггер1>, <триггер2>, <триггер3>\n"
+        "   # TRIGGERS: <полная_фраза_триггера_1>, <полная_фраза_триггера_2>\n"
+        "   (ЗАПРЕЩЕНО указывать в триггерах одиночные общие слова вроде 'шахматы', 'эксперт', 'мем' — только полные фразы!)\n"
         "   # REQUIREMENTS: <пакет1>, <пакет2>\n\n"
         "Напиши надежный, готовый к запуску Python 3 код.\n"
         "Ответ должен содержать код строго внутри блока ```python ... ```."
@@ -796,8 +874,9 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         # Попытка 2: компактный промпт для защиты от таймаута
         print("[DYNAMIC SKILL ENGINE] Prompt 1 timed out or failed. Retrying with compact prompt...")
         compact_prompt = (
-            f"Напиши надежный автономный Python 3 скрипт в skills/ для задачи Telegram-бота: «{task_text}».\n"
-            f"# SKILL_NAME: skill_mod\n# DESCRIPTION: {task_text[:120]}\n"
+            f"Напиши надежный автономный Python 3 скрипт для задачи: «{task_text}».\n"
+            f"# SKILL_NAME: task_exec\n# DESCRIPTION: {task_text[:120]}\n"
+            "ВАЖНОЕ ПРАВИЛО: Делай СТРОГО по теме задачи пользователя! НЕ приплетай Crossout, если о нем прямо не просили!\n"
             "Если требуется графика/картинка/мем — используй Pillow (PIL) и сохрани результат в media/, напечатав путь в stdout.\n"
             "Код верни строго внутри ```python ... ``` без лишних рассуждений."
         )
@@ -917,36 +996,45 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     # Ищем созданный медиафайл (если задача не чисто текстовая)
     new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=script_path)
 
-    # Если скрипт успешно отработал — персистентно сохраняем в SQLite dynamic_skills и Google Диск!
+    # Если скрипт успешно отработал: персистентно сохраняем в SQLite dynamic_skills и GitHub ТОЛЬКО постоянные навыки!
+    is_one_off = is_one_off_creative_task(task_text)
     if code_rc == 0:
-        try:
-            from db import save_dynamic_skill
-            save_dynamic_skill(
-                skill_name=skill_name,
-                file_path=script_path,
-                triggers=triggers,
-                description=skill_desc,
-                requirements=requirements,
-                code=code
-            )
-            print(f"[DYNAMIC SKILL ENGINE] Persisted skill '{skill_name}' in SQLite dynamic_skills table.")
-        except Exception as dbe:
-            print(f"[DYNAMIC SKILL ENGINE] Error saving skill to SQLite: {dbe}")
+        if not is_one_off:
+            try:
+                from db import save_dynamic_skill
+                save_dynamic_skill(
+                    skill_name=skill_name,
+                    file_path=script_path,
+                    triggers=triggers,
+                    description=skill_desc,
+                    requirements=requirements,
+                    code=code
+                )
+                print(f"[DYNAMIC SKILL ENGINE] Persisted skill '{skill_name}' in SQLite dynamic_skills table.")
+            except Exception as dbe:
+                print(f"[DYNAMIC SKILL ENGINE] Error saving skill to SQLite: {dbe}")
 
-        try:
-            from gdrive import upload_file_to_drive
-            upload_file_to_drive(script_path, folder_type="skills")
-        except Exception as ge:
-            print(f"[DYNAMIC SKILL ENGINE] GDrive backup notice: {ge}")
+            try:
+                from gdrive import upload_file_to_drive
+                upload_file_to_drive(script_path, folder_type="skills")
+            except Exception as ge:
+                print(f"[DYNAMIC SKILL ENGINE] GDrive backup notice: {ge}")
 
-        try:
-            from github_sync import push_skill_to_github
-            push_skill_to_github(skill_name=skill_name, file_path=script_path, code=code)
-        except Exception as ghe:
-            print(f"[DYNAMIC SKILL ENGINE] GitHub push notice: {ghe}")
+            try:
+                from github_sync import push_skill_to_github
+                push_skill_to_github(skill_name=skill_name, file_path=script_path, code=code)
+            except Exception as ghe:
+                print(f"[DYNAMIC SKILL ENGINE] GitHub push notice: {ghe}")
 
-        register_extension(skill_name, script_filename, skill_desc, triggers[:7], produces_media=bool(new_media))
-        print(f"[DYNAMIC SKILL ENGINE] Successfully registered dynamic skill: {skill_name} (triggers: {triggers[:7]}, produces_media={bool(new_media)})")
+            register_extension(skill_name, script_filename, skill_desc, triggers[:7], produces_media=bool(new_media))
+            print(f"[DYNAMIC SKILL ENGINE] Successfully registered dynamic skill: {skill_name} (triggers: {triggers[:7]}, produces_media={bool(new_media)})")
+        else:
+            print(f"[DYNAMIC SKILL ENGINE] One-off creative generation completed. Skipping persistent skill registration.")
+            if os.path.exists(script_path):
+                try:
+                    os.remove(script_path)
+                except Exception:
+                    pass
 
     # Формируем естественный, живой ответ пользователю без технического спама
     if new_media and os.path.exists(new_media):
