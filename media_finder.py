@@ -240,51 +240,64 @@ def find_and_download_music(query, max_filesize="30M"):
                 if download_file_direct(item["url"], out_file):
                     return out_file, item["title"]
 
-    # 2. Попытка через yt-dlp с эмуляцией Android/iOS клиента для обхода 403 на Render
+    # 2. Формируем варианты поисковых запросов для yt-dlp
+    search_queries = [clean_q]
+    q_no_preps = re.sub(r"(?i)\b(?:от|by|автора?|исполнителя?|группы)\b", " ", clean_q).strip()
+    q_no_preps = re.sub(r"\s+", " ", q_no_preps)
+    if q_no_preps and q_no_preps.lower() != clean_q.lower():
+        search_queries.insert(0, q_no_preps)
+
     out_tmpl = os.path.join(MUSIC_DIR, f"{safe_name}.%(ext)s")
-    cmd = [
-        "yt-dlp",
-        "-x",
-        "--audio-format", "mp3",
-        "--default-search", "ytsearch",
-        "--extractor-args", "youtube:player_client=android,ios,web",
-        "--max-filesize", max_filesize,
-        "--no-playlist",
-        "-o", out_tmpl,
-        f"ytsearch1:{clean_q}"
-    ]
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
-        if os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
-            return out_file, clean_q
+    for sq in search_queries:
+        cmd = [
+            "yt-dlp",
+            "-x",
+            "--audio-format", "mp3",
+            "--default-search", "ytsearch",
+            "--extractor-args", "youtube:player_client=android,ios,web",
+            "--max-filesize", max_filesize,
+            "--no-playlist",
+            "--no-simulate",
+            "--print", "%(title)s",
+            "-o", out_tmpl,
+            f"ytsearch1:{sq}"
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=50)
+            extracted_title = ""
+            if res.stdout:
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("[") and not line.startswith("ERROR") and not line.startswith("WARNING"):
+                        extracted_title = line
+                        break
 
-        for f in os.listdir(MUSIC_DIR):
-            if f.startswith(safe_name) and f.endswith(".mp3"):
-                return os.path.join(MUSIC_DIR, f), clean_q
-    except Exception as e:
-        print(f"[MEDIA FINDER] Music download error: {e}")
+            if os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
+                return out_file, extracted_title or clean_q
 
-    # 3. Резервный поиск по Internet Archive (публичный архив без блокировок)
+            for f in os.listdir(MUSIC_DIR):
+                if f.startswith(safe_name) and f.endswith(".mp3"):
+                    fpath = os.path.join(MUSIC_DIR, f)
+                    if os.path.getsize(fpath) > 50000:
+                        return fpath, extracted_title or clean_q
+        except Exception as e:
+            print(f"[MEDIA FINDER] yt-dlp error for query {sq!r}: {e}")
+
+    # 3. Резервный поиск по Internet Archive (публичный архив)
     ia_file, ia_title = search_internet_archive_audio(clean_q, out_file)
     if ia_file:
         return ia_file, ia_title or clean_q
 
-    # 4. Если запрос на симфонию или классику или всё упало — синтезируем авторскую симфонию
+    # 4. СТРОГО ЕСЛИ ЗАПРОШЕНА КЛАССИКА / СИМФОНИЯ — используем классические фоллбэки
     if is_classical_query:
         synth_file, synth_title = synthesize_classical_symphony(clean_q, out_file)
         if synth_file:
             return synth_file, synth_title
+        fallback_classical = CLASSICAL_ARCHIVE[0]
+        if download_file_direct(fallback_classical["url"], out_file):
+            return out_file, fallback_classical["title"]
 
-    # 5. Крайний fallback — проверенный шедевр Бетховена из архива
-    fallback_classical = CLASSICAL_ARCHIVE[0]
-    if download_file_direct(fallback_classical["url"], out_file):
-        return out_file, fallback_classical["title"]
-
-    # 6. Синтез симфонии
-    synth_file, synth_title = synthesize_classical_symphony(clean_q, out_file)
-    if synth_file:
-        return synth_file, synth_title
-
+    # Для обычных песен (не классика) — НИКОГДА не подсовывать Бетховена!
     return None, clean_q
 
 def find_and_download_gif(query):

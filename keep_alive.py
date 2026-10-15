@@ -1128,6 +1128,8 @@ def handle_owner_message(msg_data):
                 cap = f"🎻 Держи симфонию, Миша! Оркестровая мощь: {track_title}"
             else:
                 cap = f"🎵 Держи трек, Миша: {track_title}"
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--audio", track_path, "--text", cap])
+            return
         else:
             log_event(f"[ORCHESTRATOR] Music search didn't find file, delegating to AI music generator for owner: {text!r}")
             ack_cmd = [
@@ -1761,6 +1763,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             else:
                 cap = f"🎵 Держи трек, {target_name}: {track_title}"
             subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--audio", track_path, "--text", cap, "--reply-to", str(msg_id)])
+            return
         else:
             log_event(f"[ORCHESTRATOR] Music search didn't find file, delegating to AI music generator for {target_name}: {text!r}")
             ack_cmd = [
