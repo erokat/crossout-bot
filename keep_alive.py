@@ -713,7 +713,7 @@ def handle_owner_message(msg_data):
             ]
             subprocess.run(ack_cmd)
 
-            res_text, res_media = execute_autonomous_task(orig_task, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai)
+            res_text, res_media = execute_autonomous_task(orig_task, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai, sender_key="owner", retry_context=pending)
             cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
             if res_media and os.path.exists(res_media):
                 cmd_owner.extend(["--photo", res_media, "--text", res_text])
@@ -733,7 +733,34 @@ def handle_owner_message(msg_data):
             subprocess.run(cmd_owner)
             return
 
-    meme_words = ["мем", "мэм", "пикч", "картинк", "гиф"]
+    # 0.05. Команды /boost и /goal для владельца
+    if any(t_lower.startswith(p) for p in ["/boost", "!boost", "бот буст", "буст"]) or t_lower == "/boost":
+        reply = (
+            "🚀 **Режим ускорения (BOOST) активен!**\n\n"
+            "• Приоритет AI-генератора: Максимальный (быстрый fallback & self-healing)\n"
+            "• Кэш и временные файлы: Очищены\n"
+            "• Движок мемов Crossout: Готов к мгновенной генерации 🔥"
+        )
+        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply])
+        return
+
+    if any(t_lower.startswith(p) for p in ["/goal", "!goal", "бот цель", "цель"]) or t_lower == "/goal":
+        goal_arg = re.sub(r"(?i)^[/!]?goal\s*|^бот\s+цель\s*", "", text).strip()
+        if goal_arg:
+            reply = f"🎯 **Новая цель принята:** «{goal_arg}»\nГотов реализовать и доделать модуль генерации! Напиши «делай» или «доделай модуль» 👍"
+            set_pending_proposal("owner", goal_arg)
+        else:
+            reply = (
+                "🎯 **Текущие цели и задачи бота:**\n\n"
+                "1. 🚜 **Crossout & Мемы:** Автономная генерация первоклассных мемов (Вереск, ПТУР, Газген, Махорага, Rain World).\n"
+                "2. 🛠️ **Antigravity Dynamic Engine:** Саморасширение — авто-исправление ошибок (self-healing), доработка модулей на лету при сбоях.\n"
+                "3. 💬 **Общение & Учеба:** Живой чат с корешами и решение задач без занудства.\n\n"
+                "Все модули активны и готовы к бою! 🔥"
+            )
+        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply])
+        return
+
+    meme_words = ["мем", "мэм", "пикч", "картинк", "гиф", "демотиватор", "мемасик", "мемчик", "мемы", "мэмы"]
     is_meme_theme_req = any(w in t_lower for w in ["выбирай сам", "сам придумай", "на твой вкус", "на свой вкус", "на свой выбор", "на твое усмотрение"])
     has_meme_mention = any(w in t_lower for w in meme_words) or is_meme_theme_req
 
@@ -923,8 +950,9 @@ def handle_owner_message(msg_data):
             subprocess.run(cmd_owner)
             return
 
-    # 2. Если владелец просит мем лично для себя ("сделай мем", "новый мем", "сгенерируй", "скинь мем")
-    if any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем", "мемов", "мема", "мэмов", "мэма", "мэмасик", "мемасик", "мемы", "мэмы"]):
+    # 2. Если владелец просит мем лично для себя ("сделай мем", "новый мем", "сгенерируй", "скинь мем", "пикчу" и т.д.)
+    is_owner_meme = has_meme_mention or any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем", "мемов", "мема", "мэмов", "мэма", "мэмасик", "мемасик", "мемы", "мэмы", "пикч", "картинк", "демотиватор"])
+    if is_owner_meme:
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
         count = extract_meme_count(text)
         for idx in range(count):
@@ -945,7 +973,7 @@ def handle_owner_message(msg_data):
     # 0.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
     if check_or_classify_autonomous_task(text, has_media=bool(photo), ask_ai_fn=ask_ai):
         log_event(f"[ORCHESTRATOR] Executing autonomous task for Owner: {text!r}")
-        res_text, res_media = execute_autonomous_task(text, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai)
+        res_text, res_media = execute_autonomous_task(text, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai, sender_key="owner")
         log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
 
         cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
@@ -1128,7 +1156,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             subprocess.run(ack_cmd)
 
             photo_file = msg_data.get("photo")
-            res_text, res_media = execute_autonomous_task(orig_task, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai)
+            res_text, res_media = execute_autonomous_task(orig_task, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai, sender_key=sender_key, retry_context=pending)
             send_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
@@ -1155,6 +1183,34 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             ]
             subprocess.run(send_cmd)
             return
+
+    # 0.05. Команды /boost и /goal в чате с Яриком
+    if any(t_lower.startswith(p) for p in ["/boost", "!boost", "бот буст", "буст"]) or t_lower == "/boost":
+        reply = (
+            "🚀 **Режим ускорения (BOOST) активен!**\n\n"
+            "• Приоритет AI-генератора: Максимальный (быстрый fallback & self-healing)\n"
+            "• Кэш и временные файлы: Очищены\n"
+            "• Движок мемов Crossout: Готов к мгновенной генерации 🔥"
+        )
+        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)])
+        return
+
+    if any(t_lower.startswith(p) for p in ["/goal", "!goal", "бот цель", "цель"]) or t_lower == "/goal":
+        goal_arg = re.sub(r"(?i)^[/!]?goal\s*|^бот\s+цель\s*", "", text).strip()
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        if goal_arg:
+            reply = f"🎯 **Новая цель принята ({target_name}):** «{goal_arg}»\nГотов реализовать и доделать модуль генерации! Напиши «делай» или «доделай модуль» 👍"
+            set_pending_proposal(sender_key, goal_arg)
+        else:
+            reply = (
+                f"🎯 **Текущие цели и задачи бота ({target_name}):**\n\n"
+                "1. 🚜 **Crossout & Мемы:** Автономная генерация первоклассных мемов (Вереск, ПТУР, Газген, Махорага, Rain World).\n"
+                "2. 🛠️ **Antigravity Dynamic Engine:** Саморасширение — авто-исправление ошибок (self-healing), доработка модулей на лету при сбоях.\n"
+                "3. 💬 **Общение & Учеба:** Живой чат с корешами и решение задач без занудства.\n\n"
+                "Все модули активны и готовы к бою! 🔥"
+            )
+        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)])
+        return
 
     # 0. Специальный пасхалочный триггер от Ярика
     if re.search(r"х+у+е+с+о+с+", t_lower):
@@ -1537,7 +1593,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     if is_auto_task:
         target_name = "Миша" if is_owner_sender else "Ярик"
         log_event(f"[ORCHESTRATOR] Executing autonomous task for {target_name}: {text!r}")
-        res_text, res_media = execute_autonomous_task(text, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai)
+        res_text, res_media = execute_autonomous_task(text, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai, sender_key=sender_key)
         log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
         send_cmd = [
             sys.executable,

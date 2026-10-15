@@ -228,12 +228,23 @@ def auto_install_missing_packages(error_output):
         "reportlab": "reportlab"
     }
 
+    local_modules = {
+        "config", "db", "meme_generator", "meme_engine", "dynamic_agent",
+        "photo_editor", "media_finder", "gdrive", "send", "wait_for_yarik", "ask_owner"
+    }
+
     for mod in set(missing_mods):
         base_mod = mod.split(".")[0]
+        if base_mod in local_modules:
+            continue
         pkg_name = module_pkg_map.get(base_mod, base_mod)
         print(f"[DYNAMIC AGENT] Auto-installing missing dependency: {pkg_name} ...")
         try:
-            res = subprocess.run([sys.executable, "-m", "pip", "install", pkg_name], capture_output=True, text=True, timeout=120)
+            cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", pkg_name]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if res.returncode != 0 and "no such option" in res.stderr.lower():
+                cmd = [sys.executable, "-m", "pip", "install", pkg_name]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if res.returncode == 0:
                 print(f"[DYNAMIC AGENT] Successfully auto-installed {pkg_name}!")
                 installed_any = True
@@ -249,6 +260,10 @@ def run_script(script_path, input_file=None, task_text=None, timeout=60):
     env["PYTHONUNBUFFERED"] = "1"
     ffmpeg_exe = get_ffmpeg_binary()
     env["FFMPEG_EXE"] = ffmpeg_exe
+
+    # Ensure parent project root is in PYTHONPATH so extensions can import project modules
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = BASE_DIR + (os.pathsep + existing_pp if existing_pp else "")
 
     if task_text:
         env["TASK_TEXT"] = str(task_text)
@@ -371,7 +386,30 @@ def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script
         return all_candidates[0]
     return None
 
-def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=None):
+def synthesize_meme_extension_code(task_text, ext_slug, ext_desc):
+    clean_theme = task_text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
+    return f'''# -*- coding: utf-8 -*-
+# EXTENSION: {ext_slug} | {ext_desc}
+import os
+import sys
+
+_cur_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_cur_dir)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+
+from meme_generator import generate_crossout_meme
+
+theme = "{clean_theme}"
+meme_file = generate_crossout_meme(theme=theme, allow_repeat=False)
+if meme_file and os.path.exists(meme_file):
+    print(meme_file)
+    print("Мем успешно сгенерирован по теме:", theme)
+else:
+    sys.exit(1)
+'''
+
+def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=None, sender_key=None, retry_context=None):
     """
     Универсальный автономный саморасширяющийся исполнитель Antigravity:
     1. Проверяет реестр существующих дополнений.
@@ -381,6 +419,8 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     5. Регистрирует новое дополнение в extensions/registry.json для постоянного использования.
     6. Возвращает созданный файл и подробный отчет.
     """
+    proposal_user = sender_key or ("owner" if sender_name in ["Миша", "erokat", "Ты (Владелец)"] else str(sender_name))
+
     # 1. Проверяем, есть ли уже готовое дополнение для этой задачи (не требует AI!)
     existing_script, ext_info = find_existing_extension(task_text)
     if existing_script:
@@ -422,11 +462,17 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             f"или `sys.argv[1] if len(sys.argv) > 1 else None`.\n"
         )
 
+    prev_context = ""
+    if retry_context and isinstance(retry_context, dict):
+        last_e = retry_context.get("last_err", "")
+        if last_e:
+            prev_context = f"\nВНИМАНИЕ: Предыдущая попытка упала с ошибкой: {last_e}. Обязательно учти и исправь это!\n"
+
     # 2. Генерируем новое дополнение с нуля
     prompt = (
         f"Ты — автономный саморасширяющийся AI-движок Telegram-бота на базе Google Antigravity.\n"
         f"Пользователь {sender_name} просит выполнить задачу, которой бот еще не умел: «{task_text}».\n"
-        f"{file_context}\n"
+        f"{file_context}{prev_context}\n"
         "Инструкции для создания нового дополнения (модуля):\n"
         "1. Напиши автономный скрипт на Python 3, который добавляет эту новую функцию и выполняет её прямо сейчас.\n"
         "2. В первой строке комментария укажи краткий slug и описание модуля в формате:\n"
@@ -459,31 +505,21 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
 
     code = extract_python_code(ai_reply) if ai_reply else None
 
-    # Если AI вообще не смог сгенерировать код
+    # Если AI не смог сгенерировать код
     if not code:
-        proposal_user = "owner" if sender_name in ["Миша", "erokat", "Ты (Владелец)"] else str(sender_name)
-        set_pending_proposal(proposal_user, task_text)
-
-        # Если это запрос на мем / графику / Crossout — спасаем ситуацию резервным генератором мемов!
+        # Если это запрос на мем / графику / Crossout — спасаем ситуацию через надежный синтез модуля!
         if is_meme_or_media_request(task_text):
-            try:
-                from meme_generator import generate_crossout_meme
-                fallback_meme = generate_crossout_meme(theme=task_text, recipient="owner" if proposal_user == "owner" else "yarik")
-                if fallback_meme and os.path.exists(fallback_meme):
-                    report = (
-                        f"⚠️ Не удалось с первого раза скомпилировать отдельный модуль из-за таймаута AI, "
-                        f"но я перехватил задачу и сгенерировал мем через штатный генератор! 🔥\n\n"
-                        f"💡 Хочешь, чтобы я доделал и закрепил отдельный модуль генерации для этого? Напиши «доделай модуль»!"
-                    )
-                    return report, fallback_meme
-            except Exception as e:
-                print(f"[DYNAMIC AGENT] Fallback meme generation failed: {e}")
-
-        return (
-            f"⚠️ {sender_name}, произошла заминка: AI-движок не успел сформировать код дополнения (таймаут генерации).\n\n"
-            f"Я сохранил задачу «{task_text}». Могу исправить и доделать этот модуль генерации!\n"
-            f"Напиши «доделай модуль» или уточни требования 👍"
-        ), None
+            ext_slug = "ext_meme_" + hashlib.md5(task_text.encode()).hexdigest()[:6]
+            ext_desc = f"Генератор мема: {task_text[:50]}"
+            code = synthesize_meme_extension_code(task_text, ext_slug, ext_desc)
+            print(f"[DYNAMIC AGENT] Synthesized guaranteed meme extension code for: {task_text[:60]}")
+        else:
+            set_pending_proposal(proposal_user, task_text, last_err="Таймаут AI-генератора кода")
+            return (
+                f"⚠️ {sender_name}, произошла заминка: AI-движок не успел сформировать код дополнения (таймаут генерации).\n\n"
+                f"Я сохранил задачу «{task_text}». Могу исправить и доделать этот модуль генерации!\n"
+                f"Напиши «доделай модуль» или уточни требования 👍"
+            ), None
 
     # Извлекаем метаданные дополнения
     slug_match = re.search(r"#\s*EXTENSION:\s*([a-zA-Z0-9_-]+)\s*\|\s*(.+)", code)
@@ -585,67 +621,90 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         return natural_caption, new_media
 
     # Если чисто текстовый результат
-    if stdout and code_rc == 0:
+    if stdout and code_rc == 0 and not is_meme_or_media_request(task_text):
         clean_out = "\n".join([line for line in stdout.splitlines() if not line.startswith("/") and not line.endswith((".png", ".jpg", ".mp4", ".mp3", ".xlsx", ".pdf"))])
         if clean_out.strip():
             return clean_out.strip(), None
 
-    if code_rc == 0:
+    if code_rc == 0 and not is_meme_or_media_request(task_text):
         return f"Готово, {sender_name}! Всё четко сработало 👍", None
-    else:
-        # Обработка ошибки выполнения скрипта: сообщаем суть ошибки и предлагаем доделать модуль
-        err_lines = [l.strip() for l in (stderr or "").strip().splitlines() if l.strip()]
-        last_err = err_lines[-1] if err_lines else f"код {code_rc}"
-        proposal_user = "owner" if sender_name in ["Миша", "erokat", "Ты (Владелец)"] else str(sender_name)
-        set_pending_proposal(proposal_user, task_text)
 
-        if is_meme_or_media_request(task_text):
-            try:
-                from meme_generator import generate_crossout_meme
-                fallback_meme = generate_crossout_meme(theme=task_text, recipient="owner" if proposal_user == "owner" else "yarik")
-                if fallback_meme and os.path.exists(fallback_meme):
-                    report = (
-                        f"⚠️ Модуль генерации завершился с ошибкой: `{last_err}`.\n"
-                        f"Я попытался исправить код автоматически, а пока держи готовый мем через резервный движок! 🔥\n\n"
-                        f"💡 Хочешь, чтобы я доделал и отладил этот модуль? Напиши «доделай модуль»!"
-                    )
-                    return report, fallback_meme
-            except Exception as e:
-                print(f"[DYNAMIC AGENT] Fallback meme generation failed after script error: {e}")
+    # Если скрипт успешно завершился, но медиафайл не был найден (для медиа-запроса)
+    if code_rc == 0 and is_meme_or_media_request(task_text) and not new_media:
+        try:
+            from meme_generator import generate_crossout_meme
+            fallback_meme = generate_crossout_meme(theme=task_text, recipient="owner" if proposal_user == "owner" else "yarik")
+            if fallback_meme and os.path.exists(fallback_meme):
+                return f"Сгенерировал свежий мем по теме «{task_text}», {sender_name}! 🔥", fallback_meme
+        except Exception as e:
+            print(f"[DYNAMIC AGENT] Fallback meme generation failed: {e}")
 
-        return (
-            f"⚠️ Ошибка выполнения модуля для «{task_text}»:\n`{last_err}`\n\n"
-            f"Я попытался исправить скрипт через самоотладку, но требуется доработка.\n"
-            f"Предлагаю доделать этот модуль генерации! Напиши «доделай модуль» или «исправь» 👍"
-        ), None
+    # Обработка ошибки выполнения скрипта: сообщаем суть ошибки и предлагаем доделать модуль
+    err_lines = [l.strip() for l in (stderr or "").strip().splitlines() if l.strip()]
+    last_err = err_lines[-1] if err_lines else f"код {code_rc}"
+    set_pending_proposal(proposal_user, task_text, last_err=last_err, script_path=script_path)
 
-def set_pending_proposal(user_id, task_text, bot_msg_id=None):
+    if is_meme_or_media_request(task_text):
+        try:
+            from meme_generator import generate_crossout_meme
+            fallback_meme = generate_crossout_meme(theme=task_text, recipient="owner" if proposal_user == "owner" else "yarik")
+            if fallback_meme and os.path.exists(fallback_meme):
+                report = (
+                    f"⚠️ Модуль генерации завершился с ошибкой: `{last_err}`.\n"
+                    f"Я попытался исправить код автоматически (2 попытки self-healing), а пока держи готовый мем через штатный генератор! 🔥\n\n"
+                    f"💡 Хочешь, чтобы я доделал и отладил этот модуль? Напиши «доделай модуль»!"
+                )
+                return report, fallback_meme
+        except Exception as e:
+            print(f"[DYNAMIC AGENT] Fallback meme generation failed after script error: {e}")
+
+    return (
+        f"⚠️ Ошибка выполнения модуля для «{task_text}»:\n`{last_err}`\n\n"
+        f"Я попытался исправить скрипт через самоотладку (2 итерации self-healing), но ошибка осталась.\n"
+        f"Предлагаю доделать этот модуль генерации! Напиши «доделай модуль» или «исправь» 👍"
+    ), None
+
+def _normalize_proposal_keys(user_id):
+    uid_str = str(user_id).strip().lower()
+    if uid_str in ["owner", "миша", "миха", "мишан", "5067025016", "erokat", "ты (владелец)"]:
+        return ["owner", "Миша", "5067025016"]
+    if uid_str in ["yarik", "ярик", "6271387044"]:
+        return ["yarik", "Ярик", "6271387044"]
+    return [str(user_id)]
+
+def set_pending_proposal(user_id, task_text, bot_msg_id=None, last_err=None, script_path=None):
     from db import set_kv
     data = {
         "task_text": task_text,
         "bot_msg_id": bot_msg_id,
+        "last_err": last_err,
+        "script_path": script_path,
         "created_at": time.time()
     }
-    set_kv(f"pending_ext_proposal_{user_id}", json.dumps(data, ensure_ascii=False))
+    dumped = json.dumps(data, ensure_ascii=False)
+    for k in _normalize_proposal_keys(user_id):
+        set_kv(f"pending_ext_proposal_{k}", dumped)
 
 def get_pending_proposal(user_id):
     from db import get_kv
-    raw = get_kv(f"pending_ext_proposal_{user_id}")
-    if not raw:
-        return None
-    try:
-        data = json.loads(raw)
-        # 15 minutes TTL
-        if time.time() - data.get("created_at", 0) > 900:
-            clear_pending_proposal(user_id)
-            return None
-        return data
-    except Exception:
-        return None
+    for k in _normalize_proposal_keys(user_id):
+        raw = get_kv(f"pending_ext_proposal_{k}")
+        if raw:
+            try:
+                data = json.loads(raw)
+                # 15 minutes TTL
+                if time.time() - data.get("created_at", 0) > 900:
+                    clear_pending_proposal(user_id)
+                    return None
+                return data
+            except Exception:
+                continue
+    return None
 
 def clear_pending_proposal(user_id):
     from db import set_kv
-    set_kv(f"pending_ext_proposal_{user_id}", "")
+    for k in _normalize_proposal_keys(user_id):
+        set_kv(f"pending_ext_proposal_{k}", "")
 
 def is_pure_chitchat(text):
     if not text:
