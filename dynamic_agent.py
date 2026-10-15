@@ -367,13 +367,13 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             before_files.add(os.path.join(root, f))
 
     # Первый запуск
-    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path)
+    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
 
     # Если не хватило модуля — авто-устанавливаем через pip и перезапускаем
     if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
         installed = auto_install_missing_packages(stderr)
         if installed:
-            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path)
+            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
 
     # Self-healing / самоотладка при ошибках
     if code_rc != 0 and stderr:
@@ -390,21 +390,24 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 f.write("# -*- coding: utf-8 -*-\n")
                 f.write(f"# Auto-fixed Antigravity Extension: {ext_desc}\n\n")
                 f.write(fixed_code)
-            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path)
+            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
             if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
                 if auto_install_missing_packages(stderr):
-                    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path)
+                    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
 
     # Если скрипт успешно отработал — регистрируем его как постоянное дополнение к боту!
     if code_rc == 0:
-        words = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", task_text.lower()) if w not in ["бот", "пожалуйста", "скинь", "сделай"]]
-        register_extension(ext_slug, script_filename, ext_desc, words[:5])
-        print(f"[DYNAMIC AGENT] Successfully registered new extension: {ext_slug}")
+        stopwords = {"бот", "пожалуйста", "скинь", "сделай", "напиши", "сгенерируй", "создай", "дополнение", "чтобы", "можешь", "умеешь", "давай", "хочу"}
+        words = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", task_text.lower()) if w not in stopwords]
+        # Добавляем части slug
+        for part in re.split(r"[_-]", ext_slug):
+            if len(part) >= 3 and part.lower() not in words:
+                words.append(part.lower())
+        register_extension(ext_slug, script_filename, ext_desc, words[:7])
+        print(f"[DYNAMIC AGENT] Successfully registered new extension: {ext_slug} (triggers: {words[:7]})")
 
     # Ищем созданный медиафайл
     new_media = find_newest_media(before_files, stdout=stdout)
-
-    clean_desc = re.sub(r"```[\s\S]*?```", "", ai_reply).strip()
 
     final_text_parts = []
     final_text_parts.append(f"🧩 **Сгенерировано новое дополнение к боту:** `{script_filename}`")
@@ -413,7 +416,10 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     if stdout:
         clean_out = "\n".join([line for line in stdout.splitlines() if not line.startswith("/") and not line.endswith((".png", ".jpg", ".mp4", ".mp3", ".xlsx", ".pdf"))])
         if clean_out.strip():
-            final_text_parts.append(f"📊 **Результат:**\n```\n{clean_out[:1200]}\n```")
+            if any(marker in clean_out for marker in ["📍", "🌡️", "📊", "☀️", "🌤️", "☁️", "#", "*"]):
+                final_text_parts.append(clean_out[:2000])
+            else:
+                final_text_parts.append(f"📊 **Результат:**\n```\n{clean_out[:1200]}\n```")
 
     if code_rc == 0 and not new_media and not stdout:
         final_text_parts.append("✅ Дополнение успешно скомпилировано, зарегистрировано в системе и выполнено!")
@@ -421,6 +427,58 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         final_text_parts.append(f"⚠️ Ошибка при выполнении:\n`{stderr[:300]}`")
 
     if new_media:
-        final_text_parts.append(f"📁 Создан готовый файл: `{os.path.basename(new_media)}`")
+        final_text_parts.append(f"\n📁 Создан готовый файл: `{os.path.basename(new_media)}`")
 
     return "\n".join(final_text_parts), new_media
+
+def set_pending_proposal(user_id, task_text, bot_msg_id=None):
+    from db import set_kv
+    data = {
+        "task_text": task_text,
+        "bot_msg_id": bot_msg_id,
+        "created_at": time.time()
+    }
+    set_kv(f"pending_ext_proposal_{user_id}", json.dumps(data, ensure_ascii=False))
+
+def get_pending_proposal(user_id):
+    from db import get_kv
+    raw = get_kv(f"pending_ext_proposal_{user_id}")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        # 15 minutes TTL
+        if time.time() - data.get("created_at", 0) > 900:
+            clear_pending_proposal(user_id)
+            return None
+        return data
+    except Exception:
+        return None
+
+def clear_pending_proposal(user_id):
+    from db import set_kv
+    set_kv(f"pending_ext_proposal_{user_id}", "")
+
+def is_pure_chitchat(text):
+    if not text:
+        return True
+    t = text.lower().strip()
+    for prefix in ["!бот", "!bot", "бот,", "бот "]:
+        if t.startswith(prefix):
+            t = t[len(prefix):].strip()
+
+    t_clean = re.sub(r"[^\w\s]", "", t).strip()
+    chit_chat_exact = {
+        "привет", "здарова", "здорово", "хай", "ку", "салам", "салют", "добрый день",
+        "добрый вечер", "доброе утро", "как дела", "как жизнь", "че как", "чё как",
+        "что делаешь", "че делаешь", "ты тут", "бот ты тут", "живой", "ты жив",
+        "спасибо", "от души", "благодарю", "пока", "до связи", "до завтра", "споки",
+        "ясно", "понял", "понятно", "ок", "хорошо", "ладно", "лол", "кек",
+        "хаха", "ахах", "красава", "красавчик", "нормас", "норм", "круто", "огонь",
+        "ярик лох", "ярик", "миша"
+    }
+    if t_clean in chit_chat_exact:
+        return True
+    if len(t_clean) < 4 and not any(w in t_clean for w in ["да", "нет", "го", "не"]):
+        return True
+    return False

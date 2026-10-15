@@ -33,8 +33,47 @@ from config import (
 )
 from db import init_db, resolve_confirmation, get_confirmation
 from meme_generator import generate_crossout_meme
-from gdrive import get_auth_url, exchange_code, upload_file_to_drive
-from dynamic_agent import is_autonomous_task, check_or_classify_autonomous_task, execute_autonomous_task
+from dynamic_agent import (
+    is_autonomous_task,
+    check_or_classify_autonomous_task,
+    execute_autonomous_task,
+    find_existing_extension,
+    set_pending_proposal,
+    get_pending_proposal,
+    clear_pending_proposal,
+    is_pure_chitchat
+)
+
+MISHA_CHITCHAT_POOL = [
+    "Здарова, Миша! В ангаре порядок, крафты заправлены. Чем займемся? 🚜🔥",
+    "На связи, Мишан! Рама на месте, Газген пока не сдетонировал. Каковы планы? 💀",
+    "О, Миха! Салют! Чё обсуждаем, или в бой собираемся? 🚀",
+    "Тут я, Миша! На боевом посту в Пустошах. Чё как сам? 🚜",
+    "Привет, Миха! На полигоне всё спокойно, пушки смазаны. Что на уме? 💥",
+    "Да тут я, Миша, куда ж я денусь из этого гаража! Вещай, что замутим? 🛠️",
+    "Здорово, Мишан! Заряжен на максимум. Какая движуха намечается? 🔥",
+    "Привет, Миша! На боевом дежурстве 24/7. Кидай задачу или тему! 🚜⚡",
+    "Салют, Миха! Все системы в норме, генераторы гудят. Чё по каткам? 💣",
+    "Мишан, на связи! Готов к любым раскладам в Пустошах. Что нового? 🏎️",
+    "Привет, Миша! Броня крепка и Газгены наши быстры. Что обсуждаем? 💥",
+    "Здарова, Миха! Смотрю на радар — в Пустошах движ. Ты как сам? 🚜",
+    "На связи, Миша! Пулеметы заряжены, колеса крутятся. О чем базар? 🎮",
+    "О, Мишан! Здорово! Готов к труду и обороне гаража. Чё расскажешь? 🛠️",
+    "Привет, Миха! Тут как тут. Рад слышать, вещай обстановку! 🚀"
+]
+
+YARIK_CHITCHAT_POOL = [
+    "Здарова, Ярик! Как катки в Crossout, раму ещё не оторвали? 🚜💀",
+    "На связи, Ярик! Чё нового в Пустошах, Газген целый? 💥",
+    "Здорово, Ярик! Жив, цел, крафт собран. Ты сам как? 🚜",
+    "Привет, Ярик! Чё там по сборкам и боям в рандоме? 💣",
+    "Тут я, Ярик! Готов к разбору полетов и эпичным каткам. Что на уме? 🔥",
+    "Салют, Ярик! В ангаре движ, металлолом звенит. Каковы планы? 🚜",
+    "Здарова, Ярик! На связи 24/7. Чем порадуешь или на что жалуешься в рандоме? 💀",
+    "О, Ярик! Салют! Готов к бою и к мемам. Вещай! 🚀",
+    "Привет, Ярик! Пушки заряжены, утюги на старте. Чё обсуждаем? 🏎️",
+    "Здорово, Ярик! Все в строю, рандом трещит по швам. Ты как? 💥"
+]
 
 
 
@@ -620,6 +659,51 @@ def handle_owner_message(msg_data):
     t_lower = text.lower()
     print(f"[ORCHESTRATOR] Handling OWNER task: {text!r} (photo={photo})")
 
+    # 0.0. Проверка ответа на предложение создать дополнение
+    pending = get_pending_proposal("owner")
+    if pending and text:
+        t_low = text.lower().strip()
+        is_confirm = any(re.search(p, t_low) for p in [
+            r"\bда\b", r"\bдавай\b", r"\bсгенерируй\b", r"\bделай\b", r"\bсоздай\b",
+            r"\bнапиши\b", r"\bго\b", r"\bок\b", r"\bага\b", r"\bда сгенерируй\b",
+            r"\bда делай\b", r"\bда создай\b", r"\bделай давай\b", r"\bконечно\b",
+            r"\bгенерируй\b", r"\bсделай\b"
+        ])
+        is_reject = any(re.search(p, t_low) for p in [
+            r"\bнет\b", r"\bне надо\b", r"\bне генерируй\b", r"\bотмена\b", r"\bотбой\b",
+            r"\bне делай\b", r"\bзабей\b", r"\bне стоит\b", r"\bне\b"
+        ])
+        if is_confirm:
+            clear_pending_proposal("owner")
+            orig_task = pending.get("task_text", "")
+            ack_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--text", f"Принято, Миша! 🛠️ Приступаю к созданию дополнения под задачу:\n«{orig_task}»\n\nПишу код, настраиваю модули и компилирую..."
+            ]
+            subprocess.run(ack_cmd)
+
+            res_text, res_media = execute_autonomous_task(orig_task, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai)
+            cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
+            if res_media and os.path.exists(res_media):
+                cmd_owner.extend(["--photo", res_media, "--text", res_text])
+            else:
+                cmd_owner.extend(["--text", res_text])
+            subprocess.run(cmd_owner)
+            return
+
+        elif is_reject:
+            clear_pending_proposal("owner")
+            cmd_owner = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--text", "Понял, Миша, отбой! Не генерирую. Если что-то понадобится — обращайся 👍"
+            ]
+            subprocess.run(cmd_owner)
+            return
+
     meme_words = ["мем", "мэм", "пикч", "картинк", "гиф"]
     is_meme_theme_req = any(w in t_lower for w in ["выбирай сам", "сам придумай", "на твой вкус", "на свой вкус", "на свой выбор", "на твое усмотрение"])
     has_meme_mention = any(w in t_lower for w in meme_words) or is_meme_theme_req
@@ -894,7 +978,21 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # 8. Живой разговорный ответ владельцу (Antigravity AI)
+    # 8. Живой разговорный ответ владельцу (Antigravity AI) или предложение создать дополнение
+    if not is_pure_chitchat(text):
+        proposal_text = (
+            f"Миша, я пока такого не умею, но могу сгенерировать дополнение под эту задачу! 🛠️\n\n"
+            f"📌 **Задача:** _{text}_\n\n"
+            "Ответь на это сообщение:\n"
+            "👉 **«Да, сгенерируй»** — и я напишу модуль и выполню\n"
+            "👉 **«Нет, не генерируй»** — если не нужно"
+        )
+        set_pending_proposal("owner", text)
+        cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", proposal_text]
+        subprocess.run(cmd)
+        return
+
+    # Если это чистый разговор / приветствие
     response = None
     if text:
         prompt = (
@@ -907,12 +1005,8 @@ def handle_owner_message(msg_data):
         response = ask_ai(prompt, photo_path=photo)
 
     if not response or any(bad in response.lower() for bad in ["принял, шеф", "принял шеф", "задача в работе", "все службы на связи", "шеф", "босс"]):
-        if any(w in t_lower for w in ["в сети", "тут", "живой", "работаешь"]):
-            response = "Да тут я, на связи, Миша! 🚀 Чем помочь или что замутить?"
-        elif any(w in t_lower for w in ["привет", "хай", "салам", "здорово", "здарова"]):
-            response = "Здорово, Миша! Как сам? Что по планам в Crossout или в чате? 🚜"
-        else:
-            response = "На связи, Миша! Что замутим или какой мем запилим? 🚜"
+        import random
+        response = random.choice(MISHA_CHITCHAT_POOL)
 
     response = re.sub(r"\bшеф[а-я]*\b", "Миша", response, flags=re.I).strip()
     response = re.sub(r"\bбосс[а-я]*\b", "Миша", response, flags=re.I).strip()
@@ -933,6 +1027,62 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     is_owner_sender = (sender == "owner") or (sender_id == 5067025016) or ("Владелец" in sender_name)
     initiator_label = "Ты (Владелец)" if is_owner_sender else "Ярик"
     print(f"[ORCHESTRATOR] Handling YARIK summon from {initiator_label}: {text!r} (msg_id={msg_id})")
+
+    # 0.0. Проверка ответа на предложение создать дополнение
+    sender_key = "owner" if is_owner_sender else str(sender_id or YARIK_CHAT_ID)
+    pending = get_pending_proposal(sender_key)
+    if pending and text:
+        t_low = text.lower().strip()
+        is_confirm = any(re.search(p, t_low) for p in [
+            r"\bда\b", r"\bдавай\b", r"\bсгенерируй\b", r"\bделай\b", r"\bсоздай\b",
+            r"\bнапиши\b", r"\bго\b", r"\bок\b", r"\bага\b", r"\bда сгенерируй\b",
+            r"\bда делай\b", r"\bда создай\b", r"\bделай давай\b", r"\bконечно\b",
+            r"\bгенерируй\b", r"\bсделай\b"
+        ])
+        is_reject = any(re.search(p, t_low) for p in [
+            r"\bнет\b", r"\bне надо\b", r"\bне генерируй\b", r"\bотмена\b", r"\bотбой\b",
+            r"\bне делай\b", r"\bзабей\b", r"\bне стоит\b", r"\bне\b"
+        ])
+        if is_confirm:
+            clear_pending_proposal(sender_key)
+            orig_task = pending.get("task_text", "")
+            target_name = "Миша" if is_owner_sender else "Ярик"
+            ack_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--text", f"Принято, {target_name}! 🛠️ Приступаю к созданию дополнения под задачу:\n«{orig_task}»\n\nПишу код, настраиваю модули и компилирую...",
+                "--reply-to", str(msg_id)
+            ]
+            subprocess.run(ack_cmd)
+
+            photo_file = msg_data.get("photo")
+            res_text, res_media = execute_autonomous_task(orig_task, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai)
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--reply-to", str(msg_id)
+            ]
+            if res_media and os.path.exists(res_media):
+                send_cmd.extend(["--photo", res_media, "--text", res_text])
+            else:
+                send_cmd.extend(["--text", res_text])
+            subprocess.run(send_cmd)
+            return
+
+        elif is_reject:
+            clear_pending_proposal(sender_key)
+            target_name = "Миша" if is_owner_sender else "Ярик"
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--text", f"Понял, {target_name}, отбой! Не генерирую. Если что-то понадобится — обращайся 👍",
+                "--reply-to", str(msg_id)
+            ]
+            subprocess.run(send_cmd)
+            return
 
     # 0. Специальный пасхалочный триггер от Ярика
     if re.search(r"х+у+е+с+о+с+", t_lower):
@@ -1367,7 +1517,29 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             subprocess.run(send_cmd)
         return
 
-    # 5. Общий живой разговорный ответ
+    # 5. Предложение создать дополнение или живой разговорный ответ
+    if not is_pure_chitchat(text):
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        proposal_text = (
+            f"{target_name}, я пока такого не умею, но могу сгенерировать дополнение под эту задачу! 🛠️\n\n"
+            f"📌 **Задача:** _{text}_\n\n"
+            "Ответь на это сообщение:\n"
+            "👉 **«Да, сгенерируй»** — и я напишу модуль и выполню\n"
+            "👉 **«Нет, не генерируй»** — если не нужно"
+        )
+        set_pending_proposal(sender_key, text, bot_msg_id=msg_id)
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--text", proposal_text,
+            "--reply-to", str(msg_id)
+        ]
+        subprocess.run(send_cmd)
+        return
+
+    # Чистый диалог / приветствия
+    import random
     if is_owner_sender:
         prompt = (
             f"Тебе написал твой друг и создатель МИША: «{text}». "
@@ -1378,12 +1550,12 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         )
         answer = ask_ai(prompt, photo_path=photo_file)
         if not answer:
-            answer = "На связи, Миша! 🚀 Чем помочь или что замутим?"
+            answer = random.choice(MISHA_CHITCHAT_POOL)
         answer = re.sub(r"\bшеф[а-я]*\b", "Миша", answer, flags=re.I)
         answer = re.sub(r"\bбосс[а-я]*\b", "Миша", answer, flags=re.I)
         answer = re.sub(r"\bкомандир[а-я]*\b", "Миша", answer, flags=re.I)
         if any(w in answer.lower() for w in ["ярик", "ярику", "ярика"]):
-            answer = "На связи, Миша! 🚀 Чем помочь или что замутим?"
+            answer = random.choice(MISHA_CHITCHAT_POOL)
     else:
         prompt = (
             f"Тебе написал Ярик в чате: «{text}». "
@@ -1393,7 +1565,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         )
         answer = ask_ai(prompt, photo_path=photo_file)
         if not answer:
-            answer = "На связи, Ярик! Чем помочь или что обсудим? Кидай вопрос или тему!"
+            answer = random.choice(YARIK_CHITCHAT_POOL)
 
     send_cmd = [
         sys.executable,
