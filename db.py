@@ -312,13 +312,42 @@ def delete_dynamic_skill(skill_name):
     with get_db() as conn:
         conn.execute("DELETE FROM dynamic_skills WHERE skill_name = ?", (skill_name,))
 
+def parse_skill_metadata_from_code(code, fallback_name="skill", fallback_desc="Dynamic Skill"):
+    import re
+    if not code:
+        return fallback_name, fallback_desc, [], []
+
+    slug_match = re.search(r"#\s*(?:SKILL_NAME|EXTENSION):\s*([a-zA-Z0-9_-]+)", code)
+    skill_name = slug_match.group(1).strip() if slug_match else fallback_name
+
+    desc_match = re.search(r"#\s*DESCRIPTION:\s*(.+)", code)
+    if desc_match:
+        skill_desc = desc_match.group(1).strip()
+    else:
+        slug_pipe = re.search(r"#\s*(?:SKILL_NAME|EXTENSION):\s*[a-zA-Z0-9_-]+\s*\|\s*(.+)", code)
+        skill_desc = slug_pipe.group(1).strip() if slug_pipe else fallback_desc
+
+    trig_match = re.search(r"#\s*TRIGGERS:\s*(.+)", code)
+    if trig_match:
+        triggers = [t.strip().lower() for t in trig_match.group(1).split(",") if t.strip()]
+    else:
+        triggers = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", skill_desc.lower()) if len(w) >= 4]
+
+    req_match = re.search(r"#\s*REQUIREMENTS:\s*(.+)", code)
+    requirements = [r.strip() for r in req_match.group(1).split(",") if r.strip()] if req_match else []
+
+    return skill_name, skill_desc, triggers, requirements
+
 def restore_dynamic_skills(skills_dir=None, install_requirements=True):
     """
-    Restores all dynamic skill .py files from SQLite into the skills/ folder
-    and installs missing pip requirements with strict timeout <= 45s.
+    Two-way synchronization of dynamic skills:
+    1. Scans skills/ folder on disk and seeds any pre-existing or git-tracked .py files into SQLite.
+    2. Restores all dynamic skill .py files from SQLite into the skills/ folder.
+    3. Checks missing pip requirements and installs them with strict timeout <= 45s.
     """
     import subprocess
     import sys
+    import importlib.util
     base_dir = os.path.dirname(os.path.abspath(__file__))
     s_dir = skills_dir or os.path.join(base_dir, "skills")
     os.makedirs(s_dir, exist_ok=True)
@@ -327,6 +356,32 @@ def restore_dynamic_skills(skills_dir=None, install_requirements=True):
         with open(init_file, "w", encoding="utf-8") as f:
             f.write("# -*- coding: utf-8 -*-\n")
 
+    # 1. Seed any local .py skill files from disk into SQLite dynamic_skills table
+    if os.path.exists(s_dir):
+        for fname in os.listdir(s_dir):
+            if fname.endswith(".py") and fname != "__init__.py":
+                fp = os.path.join(s_dir, fname)
+                try:
+                    with open(fp, "r", encoding="utf-8") as f:
+                        file_code = f.read()
+                    default_slug = os.path.splitext(fname)[0]
+                    s_name, s_desc, s_trig, s_req = parse_skill_metadata_from_code(file_code, fallback_name=default_slug)
+                    existing_entry = get_dynamic_skill(s_name)
+                    if not existing_entry:
+                        rel_path = os.path.relpath(fp, base_dir)
+                        save_dynamic_skill(
+                            skill_name=s_name,
+                            file_path=rel_path,
+                            triggers=s_trig,
+                            description=s_desc,
+                            requirements=s_req,
+                            code=file_code
+                        )
+                        print(f"[DYNAMIC SKILLS] Seeded '{s_name}' from disk into SQLite registry.")
+                except Exception as se:
+                    print(f"[DYNAMIC SKILLS] Warning seeding {fname}: {se}")
+
+    # 2. Restore all dynamic skills from SQLite into skills/ directory
     skills = list_dynamic_skills()
     restored_count = 0
     all_requirements = set()
@@ -354,15 +409,28 @@ def restore_dynamic_skills(skills_dir=None, install_requirements=True):
             if req and isinstance(req, str):
                 all_requirements.add(req.strip())
 
+    # 3. Fast dependency installation for missing requirements
     if install_requirements and all_requirements:
         for pkg in all_requirements:
+            base_mod = pkg.split("[")[0].split("=")[0].split("<")[0].split(">")[0].strip().replace("-", "_")
+            # Skip if already importable/installed
             try:
-                print(f"[DYNAMIC SKILLS] Restoring requirement: {pkg}...")
-                subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--break-system-packages", pkg],
-                    capture_output=True,
-                    timeout=45
-                )
+                if importlib.util.find_spec(base_mod) is not None:
+                    continue
+            except Exception:
+                pass
+
+            try:
+                print(f"[DYNAMIC SKILLS] Installing missing requirement: {pkg}...")
+                cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", pkg]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+                if res.returncode != 0 and "no such option" in (res.stderr or "").lower():
+                    cmd = [sys.executable, "-m", "pip", "install", pkg]
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+                if res.returncode == 0:
+                    print(f"[DYNAMIC SKILLS] Successfully installed requirement: {pkg}")
+                else:
+                    print(f"[DYNAMIC SKILLS] Pip warning for {pkg}: {res.stderr[:150]}")
             except Exception as e:
                 print(f"[DYNAMIC SKILLS] Warning: failed to install {pkg}: {e}")
 

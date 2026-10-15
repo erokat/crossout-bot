@@ -79,9 +79,58 @@ def register_extension(slug, filename, description, triggers, produces_media=Fal
     }
     save_registry(reg)
 
+COMMON_SKILL_STOPWORDS = {
+    "бот", "ботяра", "ботик", "робот", "пожалуйста", "пж", "скинь", "кинь", "дай",
+    "сделай", "напиши", "создай", "сгенерируй", "запусти", "покажи", "что", "как",
+    "где", "когда", "какая", "какой", "какое", "какие", "сколько", "будет", "мне",
+    "нам", "ему", "для", "или", "если", "хочу", "можешь", "умеешь", "давай", "это"
+}
+
+def calculate_skill_match_score(query_text, skill_name, triggers):
+    if not query_text:
+        return 0
+    t = query_text.lower().strip()
+    t = re.sub(r"^(?:[!/]?бот[,\s]*|ботик[,\s]*|ботяра[,\s]*|bot[,\s]*)", "", t).strip()
+    words = [w.strip(".,!?:;\"'()[]{}«»") for w in re.split(r"[\s,;]+", t) if w.strip(".,!?:;\"'()[]{}«»")]
+
+    score = 0
+    s_name_clean = (skill_name or "").lower().replace("_", " ")
+
+    if len(skill_name or "") >= 4:
+        if skill_name.lower() in t or s_name_clean in t:
+            score += 15
+
+    for tr in triggers:
+        if not tr or not isinstance(tr, str):
+            continue
+        tr_clean = tr.lower().strip()
+        if tr_clean in COMMON_SKILL_STOPWORDS:
+            continue
+
+        if " " in tr_clean:
+            if tr_clean in t:
+                score += 12
+                continue
+
+        if tr_clean in words or re.search(r"\b" + re.escape(tr_clean) + r"\b", t):
+            score += 8
+            continue
+
+        if len(tr_clean) >= 4:
+            stem = tr_clean[:5] if len(tr_clean) >= 6 else tr_clean[:4]
+            if any(w.startswith(stem) for w in words if w not in COMMON_SKILL_STOPWORDS):
+                score += 6
+                continue
+            if stem in t:
+                score += 4
+                continue
+
+    return score
+
 def find_existing_skill(task_text):
     """
-    Checks the registry of dynamic skills in SQLite (dynamic_skills table).
+    Checks the registry of dynamic skills in SQLite (dynamic_skills table)
+    using intelligent keyword scoring.
     If found, ensures the file is present in skills/ and returns (script_path, skill_info).
     """
     if not task_text:
@@ -90,38 +139,51 @@ def find_existing_skill(task_text):
     if any(w in t for w in ["новый", "нового", "новеньк", "друг", "переделай", "заново", "по-другому", "реалистичн"]):
         return None, None
 
+    best_match = None
+    best_score = 0
+
     try:
         from db import list_dynamic_skills
         skills = list_dynamic_skills()
         for s in skills:
             s_name = s.get("skill_name", "")
             triggers = s.get("triggers", [])
-            matching_count = sum(1 for tr in triggers if tr.lower() in t)
-            if (triggers and matching_count >= min(2, len(triggers))) or (len(s_name) >= 4 and s_name.lower() in t):
-                fn = os.path.basename(s.get("file_path") or f"{s_name}.py")
-                if not fn.endswith(".py"):
-                    fn += ".py"
-                fp = os.path.join(SKILLS_DIR, fn)
-                if not os.path.exists(fp) and s.get("code"):
-                    with open(fp, "w", encoding="utf-8") as f:
-                        f.write(s["code"])
-                if os.path.exists(fp):
-                    return fp, s
+            score = calculate_skill_match_score(t, s_name, triggers)
+            if score >= 6 and score > best_score:
+                best_score = score
+                best_match = s
+
+        if best_match:
+            s_name = best_match.get("skill_name", "")
+            fn = os.path.basename(best_match.get("file_path") or f"{s_name}.py")
+            if not fn.endswith(".py"):
+                fn += ".py"
+            fp = os.path.join(SKILLS_DIR, fn)
+            if not os.path.exists(fp) and best_match.get("code"):
+                with open(fp, "w", encoding="utf-8") as f:
+                    f.write(best_match["code"])
+            if os.path.exists(fp):
+                return fp, best_match
     except Exception as e:
         print(f"[DYNAMIC SKILL ENGINE] Error querying dynamic_skills: {e}")
 
     # Fallback check in legacy registry
     reg = load_registry()
+    best_legacy = None
+    best_leg_score = 0
     for slug, info in reg.items():
         triggers = info.get("triggers", [])
-        if not triggers:
-            continue
-        matching_count = sum(1 for tr in triggers if tr in t)
-        if matching_count >= min(2, len(triggers)) or (len(slug) >= 4 and slug.lower() in t):
-            fn = info.get("filename")
-            fp = os.path.join(SKILLS_DIR, fn) if os.path.exists(os.path.join(SKILLS_DIR, fn)) else os.path.join(EXTENSIONS_DIR, fn)
-            if os.path.exists(fp):
-                return fp, info
+        score = calculate_skill_match_score(t, slug, triggers)
+        if score >= 6 and score > best_leg_score:
+            best_leg_score = score
+            best_legacy = (slug, info)
+
+    if best_legacy:
+        slug, info = best_legacy
+        fn = info.get("filename")
+        fp = os.path.join(SKILLS_DIR, fn) if os.path.exists(os.path.join(SKILLS_DIR, fn)) else os.path.join(EXTENSIONS_DIR, fn)
+        if os.path.exists(fp):
+            return fp, info
 
     return None, None
 
@@ -347,18 +409,32 @@ def run_script(script_path, input_file=None, task_text=None, timeout=60):
         args.append(str(task_text))
 
     try:
-        res = subprocess.run(
+        p = subprocess.Popen(
             args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
             cwd=BASE_DIR,
-            env=env
+            env=env,
+            start_new_session=True
         )
-        return res.returncode, res.stdout.strip(), res.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return -1, "", f"Превышено максимальное время выполнения скрипта (таймаут {timeout}с)."
+        try:
+            stdout, stderr = p.communicate(timeout=timeout)
+            return p.returncode, (stdout or "").strip(), (stderr or "").strip()
+        except subprocess.TimeoutExpired:
+            import signal
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except Exception:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+            try:
+                p.communicate(timeout=2)
+            except Exception:
+                pass
+            return -1, "", f"Превышено максимальное время выполнения скрипта (таймаут {timeout}с)."
     except Exception as e:
         return -1, "", str(e)
 
@@ -660,9 +736,10 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     if not is_safe_skill_path(script_path):
         return f"⚠️ Ошибка безопасности: недопустимый путь для навыка `{script_path}`.", None
 
+    if not code.startswith("# -*- coding: utf-8 -*-"):
+        code = "# -*- coding: utf-8 -*-\n" + code
+
     with open(script_path, "w", encoding="utf-8") as f:
-        f.write("# -*- coding: utf-8 -*-\n")
-        f.write(f"# Auto-generated Dynamic Skill: {skill_desc}\n\n")
         f.write(code)
 
     before_files = get_all_media_snapshot()
@@ -678,12 +755,13 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
 
     # Self-healing / самоотладка при ошибках (до 3 итераций!)
-    if code_rc != 0 and stderr:
+    if code_rc != 0:
         for attempt in range(1, 4):
             print(f"[DYNAMIC SKILL ENGINE] Self-healing attempt {attempt}/3 for {skill_name} (rc={code_rc})...")
+            err_details = stderr if stderr else (stdout if stdout else f"Скрипт завершился с кодом ошибки {code_rc}")
             fix_prompt = (
                 f"Скрипт навыка '{skill_name}' для задачи «{task_text}» упал с кодом {code_rc}.\n"
-                f"Ошибка / Traceback:\n```\n{stderr[:1500]}\n{stdout[:500]}\n```\n\n"
+                f"Ошибка / Traceback:\n```\n{err_details[:1500]}\n```\n\n"
                 f"Исходный код:\n```python\n{code}\n```\n\n"
                 "Инструкции по исправлению:\n"
                 "1. Проанализируй причину ошибки и устрани её.\n"
@@ -694,9 +772,9 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             fixed_reply = ask_ai_fn(fix_prompt)
             fixed_code = extract_python_code(fixed_reply)
             if fixed_code and is_safe_skill_path(script_path):
+                if not fixed_code.startswith("# -*- coding: utf-8 -*-"):
+                    fixed_code = "# -*- coding: utf-8 -*-\n" + fixed_code
                 with open(script_path, "w", encoding="utf-8") as f:
-                    f.write("# -*- coding: utf-8 -*-\n")
-                    f.write(f"# Auto-fixed Dynamic Skill: {skill_desc} (self-healing attempt {attempt})\n\n")
                     f.write(fixed_code)
                 code = fixed_code
                 code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
@@ -705,6 +783,17 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                         code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
                 if code_rc == 0:
                     print(f"[DYNAMIC SKILL ENGINE] Self-healing succeeded on attempt {attempt}/3!")
+                    try:
+                        from db import parse_skill_metadata_from_code
+                        s_name_upd, s_desc_upd, s_trig_upd, s_req_upd = parse_skill_metadata_from_code(code, fallback_name=skill_name, fallback_desc=skill_desc)
+                        skill_name = s_name_upd
+                        skill_desc = s_desc_upd
+                        if s_trig_upd:
+                            triggers = s_trig_upd
+                        if s_req_upd:
+                            requirements = s_req_upd
+                    except Exception:
+                        pass
                     break
 
     # Ищем созданный медиафайл (если задача не чисто текстовая)
