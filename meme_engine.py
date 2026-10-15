@@ -282,8 +282,8 @@ def normalize_search_query_en(query):
         return "rain world"
     if any(w in q for w in ["махораг", "адаптир", "дхарм"]):
         return "mahoraga jujutsu kaisen"
-    if any(w in q for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер"]):
-        return "crossout"
+    if any(w in q for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер", "птур", "вереск", "скорп", "мамонт", "жнец", "автосборк"]):
+        return "crossout game"
     if any(w in q for w in ["2018", "2019"]):
         return "crossout"
     if any(w in q for w in ["гигачад", "сигма", "gigachad"]):
@@ -313,6 +313,13 @@ def search_internet_for_meme_image(query):
 
     # 1. Check curated list
     q_lower = clean_q.lower()
+    # For Crossout memes, strictly use Crossout assets and clean templates. Never use scrapers that return Peter the Great or unrelated memes!
+    if any(w in q_lower for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер", "птур", "вереск", "скорп", "мамонт", "жнец", "автосборк"]):
+        xo_assets = ["ptur.png", "heather.png", "gasgen.png", "hover.png", "scorpion.png", "mammoth.png", "harvester.png"]
+        existing = [os.path.join(MEDIA_DIR, a) for a in xo_assets if os.path.exists(os.path.join(MEDIA_DIR, a))]
+        if existing:
+            return random.choice(existing)
+
     for item in MEMES_2020_2022:
         if any(kw in q_lower for kw in item["keywords"]):
             if fetch_image_from_url(item["url"], cached_file):
@@ -775,8 +782,19 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
             img_path = cached_tpl
 
     if not img_path:
-        # Ищем в интернете через скрапер
-        img_path = search_internet_for_meme_image(clean_theme)
+        is_xo = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер", "крафт", "бочки", "рандом", "пустош", "вереск", "птур", "кларнет", "скорп", "мамонт", "жнец", "дробовик", "тошнитель", "реликт", "билды", "билд", "оружие", "автосборк"])
+        if is_xo:
+            xo_assets = ["ptur.png", "heather.png", "gasgen.png", "hover.png", "scorpion.png", "mammoth.png", "harvester.png", "meme_autobuild.png", "buff_doge_vs_cheems.png"]
+            existing = [os.path.join(MEDIA_DIR, a) for a in xo_assets if os.path.exists(os.path.join(MEDIA_DIR, a))]
+            if existing:
+                img_path = random.choice(existing)
+            else:
+                clean_tpls = [m for m in CURATED_TEMPLATES if m["name"] in ["doge_vs_cheems", "gigachad", "two_buttons", "distracted_boyfriend", "grus_plan", "change_my_mind"]]
+                if clean_tpls:
+                    m = random.choice(clean_tpls)
+                    img_path = os.path.join(TEMPLATES_DIR, f"{m['name']}.jpg")
+        else:
+            img_path = search_internet_for_meme_image(clean_theme)
 
     # Загружаем изображение
     try:

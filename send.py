@@ -259,7 +259,8 @@ def main():
             file_path=args.photo,
             reply_to=args.reply_to
         )
-        print("Sent to owner via Bot API:", res.get("ok") if res else False)
+        msg_id = res.get("result", {}).get("message_id") if (res and res.get("ok")) else None
+        print(f"Sent to owner via Bot API: {res.get('ok') if res else False} (msg_id={msg_id})")
     else:
         chat_id = args.chat or cfg["yarik_chat_id"]
         asyncio.run(send_via_telethon(

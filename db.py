@@ -76,6 +76,13 @@ def init_db():
             value TEXT
         )
         """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS handled_messages (
+            message_id INTEGER PRIMARY KEY,
+            chat_id INTEGER,
+            handled_at REAL
+        )
+        """)
 
 def save_chat(chat_id, title, username, chat_type, last_synced=None):
     with get_db() as conn:
@@ -152,6 +159,29 @@ def get_kv(key, default=None):
 def set_kv(key, value):
     with get_db() as conn:
         conn.execute("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
+
+def is_message_handled(msg_id):
+    if not msg_id:
+        return False
+    try:
+        with get_db() as conn:
+            cur = conn.execute("SELECT 1 FROM handled_messages WHERE message_id = ?", (int(msg_id),))
+            return cur.fetchone() is not None
+    except Exception:
+        return False
+
+def mark_message_handled(msg_id, chat_id=None):
+    if not msg_id:
+        return
+    try:
+        with get_db() as conn:
+            conn.execute("""
+            INSERT INTO handled_messages (message_id, chat_id, handled_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(message_id) DO NOTHING
+            """, (int(msg_id), int(chat_id) if chat_id else None, time.time()))
+    except Exception:
+        pass
 
 def is_meme_already_sent(meme_hash=None, headline=None):
     if not meme_hash and not headline:

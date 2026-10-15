@@ -672,11 +672,12 @@ def _normalize_proposal_keys(user_id):
         return ["yarik", "Ярик", "6271387044"]
     return [str(user_id)]
 
-def set_pending_proposal(user_id, task_text, bot_msg_id=None, last_err=None, script_path=None):
+def set_pending_proposal(user_id, task_text, bot_msg_id=None, last_err=None, script_path=None, proposal_msg_id=None):
     from db import set_kv
     data = {
         "task_text": task_text,
         "bot_msg_id": bot_msg_id,
+        "proposal_msg_id": proposal_msg_id,
         "last_err": last_err,
         "script_path": script_path,
         "created_at": time.time()
@@ -684,6 +685,8 @@ def set_pending_proposal(user_id, task_text, bot_msg_id=None, last_err=None, scr
     dumped = json.dumps(data, ensure_ascii=False)
     for k in _normalize_proposal_keys(user_id):
         set_kv(f"pending_ext_proposal_{k}", dumped)
+        if proposal_msg_id:
+            set_kv(f"proposal_msg_id_{k}", str(proposal_msg_id))
 
 def get_pending_proposal(user_id):
     from db import get_kv
@@ -696,6 +699,10 @@ def get_pending_proposal(user_id):
                 if time.time() - data.get("created_at", 0) > 900:
                     clear_pending_proposal(user_id)
                     return None
+                if not data.get("proposal_msg_id"):
+                    prop_id_str = get_kv(f"proposal_msg_id_{k}")
+                    if prop_id_str and prop_id_str.isdigit():
+                        data["proposal_msg_id"] = int(prop_id_str)
                 return data
             except Exception:
                 continue
@@ -705,6 +712,7 @@ def clear_pending_proposal(user_id):
     from db import set_kv
     for k in _normalize_proposal_keys(user_id):
         set_kv(f"pending_ext_proposal_{k}", "")
+        set_kv(f"proposal_msg_id_{k}", "")
 
 def is_pure_chitchat(text):
     if not text:

@@ -17,7 +17,7 @@ from config import (
     BOT_SENT_FILE,
     LOCK_PATH
 )
-from db import init_db, save_message, save_chat, get_kv, set_kv
+from db import init_db, save_message, save_chat, get_kv, set_kv, is_message_handled, mark_message_handled
 
 def is_bot_mention(text):
     if not text:
@@ -47,16 +47,18 @@ def get_bot_sent_ids():
 HANDLED_MSGS_FILE = os.path.join(os.path.dirname(BOT_SENT_FILE), "handled_msg_ids.txt")
 
 def get_handled_ids():
-    if not os.path.exists(HANDLED_MSGS_FILE):
-        return set()
-    try:
-        with open(HANDLED_MSGS_FILE, "r") as f:
-            return {int(line.strip()) for line in f if line.strip().isdigit()}
-    except Exception:
-        return set()
+    ids = set()
+    if os.path.exists(HANDLED_MSGS_FILE):
+        try:
+            with open(HANDLED_MSGS_FILE, "r") as f:
+                ids = {int(line.strip()) for line in f if line.strip().isdigit()}
+        except Exception:
+            pass
+    return ids
 
-def add_handled_id(msg_id):
+def add_handled_id(msg_id, chat_id=None):
     try:
+        mark_message_handled(msg_id, chat_id)
         with open(HANDLED_MSGS_FILE, "a") as f:
             f.write(f"{msg_id}\n")
     except Exception:
@@ -94,6 +96,18 @@ async def poll_control_bot(cfg, exit_event, result_box):
     except ValueError:
         offset = 0
 
+    if offset == 0:
+        try:
+            url_init = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset=-1&timeout=2"
+            req_init = urllib.request.Request(url_init, headers={"User-Agent": "CrossoutBot/1.0"})
+            with urllib.request.urlopen(req_init, timeout=5) as r_init:
+                d_init = json.loads(r_init.read().decode("utf-8"))
+                if d_init.get("ok") and d_init.get("result"):
+                    offset = d_init["result"][-1]["update_id"] + 1
+                    set_kv("control_bot_offset", str(offset))
+        except Exception:
+            pass
+
     while not exit_event.is_set():
         try:
             url = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={offset}&timeout=5"
@@ -124,6 +138,9 @@ async def poll_control_bot(cfg, exit_event, result_box):
                 
                 if from_id == owner_id:
                     msg_id = msg.get("message_id")
+                    if is_message_handled(msg_id):
+                        continue
+                    add_handled_id(msg_id, owner_id)
                     text = msg.get("text") or msg.get("caption") or ""
                     date_str = str(msg.get("date", int(time.time())))
 
@@ -193,10 +210,31 @@ async def main():
     parser.add_argument("--after-id", type=int, default=None, help="ID последнего известного сообщения Ярика")
     parser.add_argument("--timeout", type=int, default=900, help="Таймаут ожидания в секундах")
     parser.add_argument("--filter-mentions", action="store_true", default=True, help="Реагировать только на обращения")
+    parser.add_argument("--get-latest-id", action="store_true", default=False, help="Получить ID последнего сообщения чата и выйти")
     args = parser.parse_args()
 
     init_db()
     cfg = load_config()
+
+    if args.get_latest_id:
+        client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                print(json.dumps({"latest_id": 0}))
+                return
+            entity = await client.get_entity(cfg["yarik_chat_id"])
+            latest_msgs = await client.get_messages(entity, limit=1)
+            lid = latest_msgs[0].id if latest_msgs else 0
+            print(json.dumps({"latest_id": lid}))
+            return
+        except Exception as e:
+            sys.stderr.write(f"Error getting latest id: {e}\n")
+            print(json.dumps({"latest_id": 0}))
+            return
+        finally:
+            await client.disconnect()
+
     yarik_chat_id = cfg["yarik_chat_id"]
     owner_id = cfg.get("owner_id", 5067025016)
 
@@ -225,16 +263,21 @@ async def main():
                 bot_sent = get_bot_sent_ids()
                 handled_ids = get_handled_ids()
                 after_id = args.after_id
-                if after_id is not None:
-                    check_stream = client.iter_messages(entity, min_id=after_id)
+                if after_id is None:
+                    # DO NOT process past messages from 600 seconds ago!
+                    # Fetch current newest message ID and ONLY wait for genuinely NEW messages!
+                    latest_msgs = await client.get_messages(entity, limit=1)
+                    if latest_msgs:
+                        after_id = latest_msgs[0].id
+                    check_stream = client.iter_messages(entity, min_id=after_id) if after_id else client.iter_messages(entity, limit=0)
                 else:
-                    check_stream = client.iter_messages(entity, limit=6)
+                    check_stream = client.iter_messages(entity, min_id=after_id)
 
                 # Check recent unhandled messages
                 async for m in check_stream:
-                    if m.id in bot_sent or m.id in handled_ids:
+                    if m.id in bot_sent or m.id in handled_ids or is_message_handled(m.id):
                         continue
-                    if (time.time() - m.date.timestamp()) > 600:
+                    if after_id is not None and m.id <= after_id:
                         continue
 
                     sender_uid = m.sender_id or (getattr(m.from_id, 'user_id', None) if getattr(m, 'from_id', None) else None)
@@ -347,7 +390,9 @@ async def main():
                 async def handle_candidate_message(msg):
                     if exit_event.is_set():
                         return
-                    if msg.id in get_bot_sent_ids() or msg.id in get_handled_ids():
+                    if msg.id in get_bot_sent_ids() or msg.id in get_handled_ids() or is_message_handled(msg.id):
+                        return
+                    if after_id is not None and msg.id <= after_id:
                         return
 
                     sender_uid = msg.sender_id or (getattr(msg.from_id, 'user_id', None) if getattr(msg, 'from_id', None) else None)
@@ -469,12 +514,13 @@ async def main():
                         try:
                             recent = await client.get_messages(entity, limit=4)
                             for rm in recent:
-                                if rm.id in get_bot_sent_ids() or rm.id in get_handled_ids():
+                                if rm.id in get_bot_sent_ids() or rm.id in get_handled_ids() or is_message_handled(rm.id):
+                                    continue
+                                if after_id is not None and rm.id <= after_id:
                                     continue
                                 if is_bot_mention(rm.message):
-                                    if (time.time() - rm.date.timestamp()) <= 600:
-                                        await handle_candidate_message(rm)
-                                        return
+                                    await handle_candidate_message(rm)
+                                    return
                         except Exception:
                             pass
                         await asyncio.sleep(3)

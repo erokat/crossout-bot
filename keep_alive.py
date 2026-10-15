@@ -31,7 +31,7 @@ from config import (
     BOT_SENT_FILE,
     load_config
 )
-from db import init_db, resolve_confirmation, get_confirmation
+from db import init_db, resolve_confirmation, get_confirmation, get_kv, set_kv, is_message_handled, mark_message_handled
 from meme_generator import generate_crossout_meme
 from dynamic_agent import (
     is_autonomous_task,
@@ -77,6 +77,12 @@ YARIK_CHITCHAT_POOL = [
 ]
 
 
+
+def extract_sent_msg_id(stdout_text):
+    if not stdout_text:
+        return None
+    m = re.search(r"\(msg_id=(\d+)\)", stdout_text)
+    return int(m.group(1)) if m else None
 
 def delete_bot_message(bot_token, chat_id, message_id):
     if not bot_token or not chat_id or not message_id:
@@ -131,6 +137,7 @@ def setup_environment():
                 print(f"[INIT ERROR] Failed to restore antigravity-oauth-token from repo: {e}")
 
     # 3. Create ~/.gemini/antigravity-cli/settings.json
+    gemini_dir = oauth_dir
     try:
         settings_path = os.path.join(gemini_dir, "settings.json")
         settings_data = {
@@ -705,13 +712,16 @@ def handle_owner_message(msg_data):
         if is_confirm:
             clear_pending_proposal("owner")
             orig_task = pending.get("task_text", "")
+            prop_msg_id = pending.get("proposal_msg_id")
+
             ack_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "owner",
-                "--text", f"Принято, Миша! 🛠️ Приступаю к созданию дополнения под задачу:\n«{orig_task}»\n\nПишу код, настраиваю модули и компилирую..."
+                "--text", "Принял, делаю! 🛠️⏳"
             ]
-            subprocess.run(ack_cmd)
+            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
 
             res_text, res_media = execute_autonomous_task(orig_task, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai, sender_key="owner", retry_context=pending)
             cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
@@ -720,10 +730,19 @@ def handle_owner_message(msg_data):
             else:
                 cmd_owner.extend(["--text", res_text])
             subprocess.run(cmd_owner)
+
+            del_ids = [str(x) for x in [prop_msg_id, ack_msg_id] if x]
+            if del_ids:
+                del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--delete"] + del_ids
+                subprocess.run(del_cmd)
             return
 
         elif is_reject:
             clear_pending_proposal("owner")
+            prop_msg_id = pending.get("proposal_msg_id")
+            if prop_msg_id:
+                del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--delete", str(prop_msg_id)]
+                subprocess.run(del_cmd)
             cmd_owner = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
@@ -1084,9 +1103,10 @@ def handle_owner_message(msg_data):
             f"📌 **Задача:** _{clean_task}_\n\n"
             "Напиши **«Да, делай»** (или просто **«да»**), если запускаем!"
         )
-        set_pending_proposal("owner", text)
         cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", proposal_text]
-        subprocess.run(cmd)
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        prop_id = extract_sent_msg_id(proc.stdout)
+        set_pending_proposal("owner", text, proposal_msg_id=prop_id)
         return
 
     # Если это чистый разговор / приветствие
@@ -1144,16 +1164,19 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         if is_confirm:
             clear_pending_proposal(sender_key)
             orig_task = pending.get("task_text", "")
-            target_name = "Миша" if is_owner_sender else "Ярик"
+            prop_msg_id = pending.get("proposal_msg_id")
+
             ack_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "yarik",
-                "--text", f"Принято, {target_name}! 🛠️ Приступаю к созданию дополнения под задачу:\n«{orig_task}»\n\nПишу код, настраиваю модули и компилирую...",
+                "--text", "Принял, делаю! 🛠️⏳",
                 "--reply-to", str(msg_id)
             ]
-            subprocess.run(ack_cmd)
+            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
 
+            target_name = "Миша" if is_owner_sender else "Ярик"
             photo_file = msg_data.get("photo")
             res_text, res_media = execute_autonomous_task(orig_task, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai, sender_key=sender_key, retry_context=pending)
             send_cmd = [
@@ -1168,10 +1191,19 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             else:
                 send_cmd.extend(["--text", res_text])
             subprocess.run(send_cmd)
+
+            del_ids = [str(x) for x in [prop_msg_id, ack_msg_id] if x]
+            if del_ids:
+                del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--delete"] + del_ids
+                subprocess.run(del_cmd)
             return
 
         elif is_reject:
             clear_pending_proposal(sender_key)
+            prop_msg_id = pending.get("proposal_msg_id")
+            if prop_msg_id:
+                del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--delete", str(prop_msg_id)]
+                subprocess.run(del_cmd)
             target_name = "Миша" if is_owner_sender else "Ярик"
             send_cmd = [
                 sys.executable,
@@ -1710,7 +1742,6 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 f"📌 **Задача:** _{clean_task}_\n\n"
                 "Черкани **«Да, сделай»** (или просто **«да»**), если пилим!"
             )
-        set_pending_proposal(sender_key, text, bot_msg_id=msg_id)
         send_cmd = [
             sys.executable,
             os.path.join(BASE_DIR, "send.py"),
@@ -1718,7 +1749,9 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             "--text", proposal_text,
             "--reply-to", str(msg_id)
         ]
-        subprocess.run(send_cmd)
+        proc = subprocess.run(send_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        prop_id = extract_sent_msg_id(proc.stdout)
+        set_pending_proposal(sender_key, text, bot_msg_id=msg_id, proposal_msg_id=prop_id)
         return
 
     # Чистый диалог / приветствия
@@ -1780,6 +1813,29 @@ def main():
 
     log_event("[ORCHESTRATOR] Main duty loop started...")
     last_processed_id = None
+    stored_last_id = get_kv("last_processed_id")
+    if stored_last_id and stored_last_id.isdigit():
+        last_processed_id = int(stored_last_id)
+
+    log_event("[ORCHESTRATOR] Initializing latest message ID from chat on startup...")
+    try:
+        cmd_latest = [sys.executable, os.path.join(BASE_DIR, "wait_for_yarik.py"), "--get-latest-id"]
+        res_latest = subprocess.run(cmd_latest, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+        for line in res_latest.stdout.splitlines():
+            try:
+                d = json.loads(line.strip())
+                if "latest_id" in d and d["latest_id"] > 0:
+                    latest_id = int(d["latest_id"])
+                    if last_processed_id is None or latest_id > last_processed_id:
+                        last_processed_id = latest_id
+                    mark_message_handled(last_processed_id)
+                    set_kv("last_processed_id", str(last_processed_id))
+                    log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id}. Ignoring prior messages.")
+                    break
+            except Exception:
+                continue
+    except Exception as e:
+        log_event(f"[ORCHESTRATOR WARNING] Could not fetch latest message ID on startup: {e}")
 
     while True:
         try:
@@ -1815,8 +1871,14 @@ def main():
 
             for m in messages:
                 mid = m.get("id")
-                if mid and (last_processed_id is None or mid > last_processed_id):
-                    last_processed_id = mid
+                if mid:
+                    if is_message_handled(mid):
+                        log_event(f"[ORCHESTRATOR] Skipping already handled message id={mid}")
+                        continue
+                    mark_message_handled(mid, m.get("chat_id") or (cfg.get("owner_id") if source == "owner" else cfg.get("yarik_chat_id")))
+                    if last_processed_id is None or mid > last_processed_id:
+                        last_processed_id = mid
+                        set_kv("last_processed_id", str(mid))
                 try:
                     if source == "owner":
                         handle_owner_message(m)

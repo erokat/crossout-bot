@@ -418,6 +418,45 @@ def gen_heather_vs_ptur():
     draw_text_with_outline(draw, (90, 830), "«На Вереске решает рандом, на ПТУРе — терпение союзников»", get_font(22), fill="#cbd5e1")
     return img, "heather_vs_ptur", headline
 
+def gen_enemy_ptur_vs_ally_ptur():
+    width, height = 900, 950
+    img = Image.new("RGB", (width, height), color=(18, 22, 30))
+    draw = ImageDraw.Draw(img)
+    headline = "ВРАЖЕСКИЙ ПТУР VS СОЮЗНЫЙ ПТУР В CROSSOUT"
+
+    draw_text_with_outline(draw, (70, 35), "ПТУР: ВРАЖЕСКИЙ VS СОЮЗНЫЙ", get_font(36), fill="#F87171")
+    draw.line([(40, 85), (860, 85)], fill="#555555", width=3)
+    draw_text_with_outline(draw, (60, 105), "Суровая субординация управляемых ракет в Пустошах", get_font(24), fill="#E2E8F0")
+
+    # Вражеский ПТУР слева
+    draw.rectangle([(40, 150), (435, 780)], fill=(36, 20, 24), outline="#ef4444", width=2)
+    draw_text_with_outline(draw, (60, 170), "ВРАЖЕСКИЙ ПТУР 🔴", get_font(24), fill="#f87171")
+    p_asset = get_asset("ptur.png")
+    if p_asset:
+        im = Image.open(p_asset).convert("RGBA").resize((280, 220))
+        img.paste(im, (90, 220), im)
+    draw_text_with_outline(draw, (55, 470), "• Огибает 3 горы и 5 укрытий", get_font(20), fill="#ffffff")
+    draw_text_with_outline(draw, (55, 520), "• Залетает в щель в 1 пиксель", get_font(20), fill="#fca5a5")
+    draw_text_with_outline(draw, (55, 570), "• Ваншотает твой Газген и склад", get_font(20), fill="#f87171")
+    draw_text_with_outline(draw, (55, 620), "• Управляется киберкотлетой", get_font(20), fill="#fef08a")
+    draw_text_with_outline(draw, (55, 700), "Статус: Билет в ангар за 3 сек 💥", get_font(22), fill="#ef4444")
+
+    # Союзный ПТУР справа
+    draw.rectangle([(465, 150), (860, 780)], fill=(20, 28, 40), outline="#38bdf8", width=2)
+    draw_text_with_outline(draw, (490, 170), "СОЮЗНЫЙ ПТУР 🔵", get_font(24), fill="#38bdf8")
+    if p_asset:
+        im_ally = Image.open(p_asset).convert("RGBA").resize((280, 220))
+        im_ally = im_ally.transpose(Image.FLIP_LEFT_RIGHT)
+        img.paste(im_ally, (520, 220), im_ally)
+    draw_text_with_outline(draw, (480, 470), "• 15 сек летит строго в небо", get_font(20), fill="#ffffff")
+    draw_text_with_outline(draw, (480, 520), "• Крутит сальто над базой", get_font(20), fill="#cbd5e1")
+    draw_text_with_outline(draw, (480, 570), "• Врезается в спину союзнику 💀", get_font(20), fill="#fca5a5")
+    draw_text_with_outline(draw, (480, 620), "• Тиммейт в войсе в шоке", get_font(20), fill="#38bdf8")
+    draw_text_with_outline(draw, (480, 700), "Статус: Помог врагам победить 🤡", get_font(22), fill="#38bdf8")
+
+    draw_text_with_outline(draw, (70, 830), "«Вражеский ПТУР целится в тебя, а союзный — в твою нервную систему»", get_font(21), fill="#cbd5e1")
+    return img, "enemy_ptur_vs_ally_ptur", headline
+
 def gen_ptur_sniper():
     width, height = 900, 950
     img = Image.new("RGB", (width, height), color=(18, 24, 30))
@@ -583,6 +622,7 @@ CROSSOVER_GENERATORS = [
 ]
 
 CROSSOUT_GENERATORS = [
+    ("enemy_ptur_vs_ally_ptur", gen_enemy_ptur_vs_ally_ptur),
     ("heather_ptur", gen_heather_vs_ptur),
     ("autobuild", gen_autobuild),
     ("gasgen", gen_gasgen_blast),
@@ -610,11 +650,13 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
     is_crossout_topic = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "ховер", "автосборк", "птур", "скорп", "мамонт", "жнец", "вереск", "кларнет"])
     is_rw_topic = any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
     is_crossover_topic = is_crossout_topic and is_rw_topic
+    is_ptur_vs = any(w in theme_lower for w in ["птур", "ракета"]) and any(w in theme_lower for w in ["вражеск", "союзн", "враг", "vs", "сравнен", "тиммейт", "свой", "чужой"])
     is_heather_topic = ("вереск" in theme_lower) or (("птур" in theme_lower or "ракета" in theme_lower) and any(w in theme_lower for w in ["сравнен", "vs", "геймплей"]))
 
     has_targeted = (
         is_crossover_topic
         or is_rw_topic
+        or is_ptur_vs
         or is_heather_topic
         or any(w in theme_lower for w in ["автосборк", "газген", "взрыв", "птур", "ракета", "скорп", "мамонт", "жнец", "ховер", "клоун", "доге"])
     )
@@ -628,6 +670,8 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         cands = [func for _, func in RW_GENERATORS]
         random.shuffle(cands)
         candidates = cands
+    elif is_ptur_vs:
+        candidates = [gen_enemy_ptur_vs_ally_ptur]
     elif is_heather_topic:
         candidates = [gen_heather_vs_ptur]
     elif "автосборк" in theme_lower:
