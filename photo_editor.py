@@ -98,7 +98,7 @@ def is_complex_photo_request(text):
     Определяет, требует ли запрос сложного составного фотомонтажа,
     генеративной дорисовки, замены фона или скачивания элементов из интернета.
     Такие задачи передаются в ИИ-движок (Dynamic Skill Engine / Gemini 3.8 Flash Medium),
-    а не в простой Pillow-скрипт с одной наклейкой.
+    а простые наклейки ассетов выполняются локально через Pillow без нагрузки на память.
     """
     if not text:
         return False
@@ -118,18 +118,17 @@ def is_complex_photo_request(text):
     ]):
         return True
 
-    # 3. Составные многошаговые действия («сначала X, потом Y, а затем Z», «поставь X и напиши Y»)
-    if any(w in t for w in ["потом", "а затем", "а после", "после этого", "и еще добавь", "и ещё добавь", "и внизу напиши", "а внизу напиши", "и напиши", "а напиши"]):
-        if any(w in t for w in ["вставь", "наложи", "поставь", "прилепи", "добавь", "сделай", "фото", "вереск", "газген", "стикер", "лицо"]):
-            return True
-
-    # 4. Коллажи, склейка нескольких элементов
+    # 3. Коллажи, склейка нескольких элементов
     if any(w in t for w in ["коллаж", "смонтируй", "склей два фото", "склей фото", "соедини фото", "вырежи и вставь"]):
         return True
 
-    # 5. Вставка конкретных предметов/оружия/стикеров на лицо, голову, глаза, персонажа
-    if any(action in t for action in ["поставь", "прилепи", "наложи", "вставь", "присобачь", "прикрепи", "повесь", "прифотошопь"]):
-        if any(target in t for target in ["на лицо", "на ее лицо", "на её лицо", "на морду", "на лоб", "на глаза", "на голову", "в руку", "в лапу", "на тело", "по середине", "посередине", "прям по середине", "прямо по середине", "по центру"]):
+    # 4. Если в запросе упомянут локальный стикер/ассет бота (вереск, газген, птур...) — локальный обработчик сделает быстрее и без OOM
+    if any(kw in t for kw in STICKER_LOCAL_ASSETS):
+        return False
+
+    # 5. Составные многошаговые действия
+    if any(w in t for w in ["потом", "а затем", "а после", "после этого", "и еще добавь", "и ещё добавь"]):
+        if any(w in t for w in ["вставь", "наложи", "поставь", "прилепи", "добавь", "сделай"]):
             return True
 
     return False
@@ -513,9 +512,15 @@ def overlay_sticker_on_image(base_img, sticker_query, pos_name="auto", scale=0.3
 
         # Определяем позицию
         p_low = (pos_name or "").lower()
-        if "лицо" in p_low or "face" in p_low or "морду" in p_low:
-            x = int(W * 0.42)
-            y = int(H * 0.32)
+        if "по середине" in p_low or "посередине" in p_low or "по центру" in p_low or "центр" in p_low:
+            x = (W - sw) // 2
+            if "лицо" in p_low or "face" in p_low or "морду" in p_low:
+                y = max(10, int(H * 0.38 - sh // 2))
+            else:
+                y = max(10, (H - sh) // 2)
+        elif "лицо" in p_low or "face" in p_low or "морду" in p_low:
+            x = (W - sw) // 2
+            y = max(10, int(H * 0.35 - sh // 2))
         elif "голову" in p_low or "сверху" in p_low or "head" in p_low or "top" in p_low:
             x = (W - sw) // 2
             y = max(10, int(H * 0.08))
@@ -702,15 +707,15 @@ def process_universal_photo_command(photo_path, command_text):
 
     # 5. Добавление стикера / предмета / ассета на фото
     elif any(w in t_low for w in ["добавь на фото", "поставь на фото", "прилепи на фото", "вставь на фото", "наложи на фото", "прилепи", "наложи картинку", "добавь картинку", "вставь картинку", "на лицо", "прифотошопь", "стикер"]) or any(kw in t_low for kw in STICKER_LOCAL_ASSETS):
-        # Извлекаем название предмета/стикера
-        m_stk = re.search(r"(?i)(?:добавь|поставь|прилепи|наложи|вставь|прифотошопь)(?:\s+(?:на\s+фото|на\s+картинку|на\s+лицо(?:\s+[а-я]+)?))?\s+(.+?)(?:\s+(?:сверху|снизу|на голову|на лицо|по центру|слева|справа)|$)", command_text)
-        sticker_q = m_stk.group(1).strip() if m_stk else ""
-        if not sticker_q or any(w in sticker_q.lower() for w in ["этот", "эту", "фото", "картинку"]):
-            for kw in STICKER_LOCAL_ASSETS:
-                if kw in t_low:
-                    sticker_q = kw
-                    break
+        sticker_q = None
+        for kw in STICKER_LOCAL_ASSETS:
+            if kw in t_low:
+                sticker_q = kw
+                break
         if not sticker_q:
+            m_stk = re.search(r"(?i)(?:добавь|поставь|прилепи|наложи|вставь|прифотошопь)(?:\s+(?:на\s+фото|на\s+картинку|на\s+лицо(?:\s+[а-я]+)?))?\s+(.+?)(?:\s+(?:сверху|снизу|на голову|на лицо|по центру|слева|справа)|$)", command_text)
+            sticker_q = m_stk.group(1).strip() if m_stk else ""
+        if not sticker_q or any(w in sticker_q.lower() for w in ["этот", "эту", "фото", "картинку"]):
             sticker_q = "газген"
 
         pos = "auto"
@@ -727,6 +732,19 @@ def process_universal_photo_command(photo_path, command_text):
 
         img = overlay_sticker_on_image(img, sticker_q, pos_name=pos)
         reply_cap = f"Прилепил {sticker_q} прямо на фото! 🚜🔥"
+
+        # Проверяем, просил ли пользователь одновременно добавить надпись («и внизу напиши Вереск бот» / «напиши ...»)
+        m_cap = re.search(r"(?i)(?:и\s+)?(?:внизу|снизу|сверху|наверху)?\s*(?:напиши|подпиши|добавь\s+текст|текст)\s*[:\s-]+\s*['\"«]?(.*?)['\"»]?$", command_text)
+        if not m_cap:
+            m_cap = re.search(r"(?i)(?:и\s+)?(?:внизу|снизу)\s+напиши\s+(.+)$", command_text)
+        if m_cap:
+            cap_text = m_cap.group(1).strip()
+            if cap_text and len(cap_text) >= 1:
+                if any(w in t_low for w in ["сверху напиши", "наверху напиши"]):
+                    img = render_photo_overlay(img, top_text=cap_text)
+                else:
+                    img = render_photo_overlay(img, bottom_text=cap_text)
+                reply_cap = f"Поставил {sticker_q} и добавил надпись: «{cap_text}»! 📸🔥"
 
     # 6. Fallback к текстовой надписи
     else:

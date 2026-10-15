@@ -224,39 +224,40 @@ def setup_environment():
     except Exception as e:
         print(f"[INIT ERROR] Failed to write config.json: {e}")
 
-    # 5. Restore historical Antigravity session (de5ca636) and memory
-    session_data_dir = os.path.join(BASE_DIR, "session_data")
-    conv_gz = os.path.join(session_data_dir, "conversation.db.gz")
-    conv_target_dir = os.path.expanduser("~/.gemini/antigravity-cli/conversations")
-    conv_target = os.path.join(conv_target_dir, "de5ca636-4ede-4348-a756-2b4d4f01194a.db")
-    if os.path.exists(conv_gz) and not os.path.exists(conv_target):
-        try:
-            os.makedirs(conv_target_dir, exist_ok=True)
-            with gzip.open(conv_gz, "rb") as f_in, open(conv_target, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            print(f"[INIT] Historical conversation session restored to {conv_target}")
-        except Exception as e:
-            print(f"[INIT ERROR] Failed to restore conversation db: {e}")
+    # 5. Restore historical Antigravity session (de5ca636) and memory only if explicitly requested
+    if os.environ.get("RESTORE_HISTORICAL_SESSIONS") == "1":
+        session_data_dir = os.path.join(BASE_DIR, "session_data")
+        conv_gz = os.path.join(session_data_dir, "conversation.db.gz")
+        conv_target_dir = os.path.expanduser("~/.gemini/antigravity-cli/conversations")
+        conv_target = os.path.join(conv_target_dir, "de5ca636-4ede-4348-a756-2b4d4f01194a.db")
+        if os.path.exists(conv_gz) and not os.path.exists(conv_target):
+            try:
+                os.makedirs(conv_target_dir, exist_ok=True)
+                with gzip.open(conv_gz, "rb") as f_in, open(conv_target, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+                print(f"[INIT] Historical conversation session restored to {conv_target}")
+            except Exception as e:
+                print(f"[INIT ERROR] Failed to restore conversation db: {e}")
 
-    sum_src = os.path.join(session_data_dir, "conversation_summaries.db")
-    sum_target = os.path.expanduser("~/.gemini/antigravity-cli/conversation_summaries.db")
-    if os.path.exists(sum_src) and not os.path.exists(sum_target):
-        try:
-            shutil.copy2(sum_src, sum_target)
-            print(f"[INIT] conversation_summaries.db restored to {sum_target}")
-        except Exception as e:
-            print(f"[INIT ERROR] Failed to restore conversation_summaries: {e}")
+        sum_src = os.path.join(session_data_dir, "conversation_summaries.db")
+        sum_target = os.path.expanduser("~/.gemini/antigravity-cli/conversation_summaries.db")
+        if os.path.exists(sum_src) and not os.path.exists(sum_target):
+            try:
+                shutil.copy2(sum_src, sum_target)
+                print(f"[INIT] conversation_summaries.db restored to {sum_target}")
+            except Exception as e:
+                print(f"[INIT ERROR] Failed to restore conversation_summaries: {e}")
 
-    brain_tar = os.path.join(session_data_dir, "brain.tar.gz")
-    brain_target_dir = os.path.expanduser("~/.gemini/antigravity-cli/brain/de5ca636-4ede-4348-a756-2b4d4f01194a")
-    if os.path.exists(brain_tar) and not os.path.exists(brain_target_dir):
-        try:
-            os.makedirs(brain_target_dir, exist_ok=True)
-            with tarfile.open(brain_tar, "r:gz") as tar:
-                tar.extractall(path=brain_target_dir)
-            print(f"[INIT] Brain artifacts restored to {brain_target_dir}")
-        except Exception as e:
-            print(f"[INIT ERROR] Failed to restore brain artifacts: {e}")
+        brain_tar = os.path.join(session_data_dir, "brain.tar.gz")
+        brain_target_dir = os.path.expanduser("~/.gemini/antigravity-cli/brain/de5ca636-4ede-4348-a756-2b4d4f01194a")
+        if os.path.exists(brain_tar) and not os.path.exists(brain_target_dir):
+            try:
+                os.makedirs(brain_target_dir, exist_ok=True)
+                with tarfile.open(brain_tar, "r:gz") as tar:
+                    tar.extractall(path=brain_target_dir)
+                print(f"[INIT] Brain artifacts restored to {brain_target_dir}")
+            except Exception as e:
+                print(f"[INIT ERROR] Failed to restore brain artifacts: {e}")
 
     # Copy GEMINI.md to user global rules
     rule_src = os.path.join(BASE_DIR, "GEMINI.md")
@@ -589,6 +590,8 @@ def run_antigravity_cli(prompt, timeout=40):
     env["AGY_AUTO_UPDATE"] = "0"
     env["ANTIGRAVITY_SKIP_UPDATE_CHECK"] = "1"
     env["DEBIAN_FRONTEND"] = "noninteractive"
+    env["GOMEMLIMIT"] = "150MiB"
+    env["GOGC"] = "40"
 
     max_retries = 1
     for attempt in range(1, max_retries + 1):
