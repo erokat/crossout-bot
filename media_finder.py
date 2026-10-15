@@ -247,6 +247,14 @@ def find_and_download_music(query, max_filesize="30M"):
     if q_no_preps and q_no_preps.lower() != clean_q.lower():
         search_queries.insert(0, q_no_preps)
 
+    # Добавляем сокращенные запросы на случай опечаток в длинной фразе
+    words = [w for w in q_no_preps.split() if len(w) > 1]
+    if len(words) >= 4:
+        search_queries.append(f"{words[0]} {words[1]} {' '.join(words[3:])}")
+        search_queries.append(f"{words[0]} {words[1]}")
+    elif len(words) == 3:
+        search_queries.append(f"{words[0]} {words[1]}")
+
     out_tmpl = os.path.join(MUSIC_DIR, f"{safe_name}.%(ext)s")
     for sq in search_queries:
         cmd = [

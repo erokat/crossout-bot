@@ -520,6 +520,11 @@ def run_periodic_media_cleaner():
                             pass
         except Exception as e:
             print(f"[CLEANUP EXCEPTION] Error in periodic cleaner: {e}")
+        try:
+            import gc
+            gc.collect()
+        except Exception:
+            pass
 
 def ask_gemini_api(prompt, photo_path=None, system_instruction=None):
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -574,61 +579,70 @@ def ocr_image_file(photo_path):
         print(f"[OCR ERROR] {e}")
         return ""
 
+AGY_SEMAPHORE = threading.Semaphore(1)
+
 def run_antigravity_cli(prompt, timeout=40):
-    agy_bin = shutil.which("agy") or shutil.which("antigravity")
-    if not agy_bin:
-        for candidate in ["/usr/local/bin/agy", "/root/.local/bin/agy", "/data/data/com.termux/files/usr/bin/agy"]:
-            if os.path.exists(candidate):
-                agy_bin = candidate
-                break
-    if not agy_bin:
-        agy_bin = "agy"
+    acquired = AGY_SEMAPHORE.acquire(blocking=True, timeout=5)
+    if not acquired:
+        log_event("[AGY WARNING] Another heavy CLI process is currently active. Skipping concurrent execution to protect Render memory.")
+        return None
+    try:
+        agy_bin = shutil.which("agy") or shutil.which("antigravity")
+        if not agy_bin:
+            for candidate in ["/usr/local/bin/agy", "/root/.local/bin/agy", "/data/data/com.termux/files/usr/bin/agy"]:
+                if os.path.exists(candidate):
+                    agy_bin = candidate
+                    break
+        if not agy_bin:
+            agy_bin = "agy"
 
-    cmd = [agy_bin, "--model", "gemini-3.8-flash-medium", "--dangerously-skip-permissions", "--disable-slash-commands", "-p", prompt]
-    env = dict(os.environ)
-    env["CI"] = "1"
-    env["AGY_AUTO_UPDATE"] = "0"
-    env["ANTIGRAVITY_SKIP_UPDATE_CHECK"] = "1"
-    env["DEBIAN_FRONTEND"] = "noninteractive"
-    env["GOMEMLIMIT"] = "150MiB"
-    env["GOGC"] = "40"
+        cmd = [agy_bin, "--model", "gemini-3.8-flash-medium", "--dangerously-skip-permissions", "--disable-slash-commands", "-p", prompt]
+        env = dict(os.environ)
+        env["CI"] = "1"
+        env["AGY_AUTO_UPDATE"] = "0"
+        env["ANTIGRAVITY_SKIP_UPDATE_CHECK"] = "1"
+        env["DEBIAN_FRONTEND"] = "noninteractive"
+        env["GOMEMLIMIT"] = "100MiB"
+        env["GOGC"] = "20"
 
-    max_retries = 1
-    for attempt in range(1, max_retries + 1):
-        try:
-            res = subprocess.run(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=timeout,
-                env=env
-            )
-            if res.returncode == 0 and res.stdout.strip():
-                return res.stdout.strip()
-            else:
-                err_msg = res.stderr[:300] if res.stderr else "Unknown error"
-                log_event(f"[AGY WARNING] Attempt {attempt}/{max_retries} failed for {agy_bin}: {err_msg}")
-                # Check for transient errors like 503, UNAVAILABLE, or eligibility
-                if any(k in err_msg.lower() for k in ["unavailable", "503", "eligibility", "rate limit", "overloaded", "connection"]):
-                    if attempt < max_retries:
-                        time.sleep(2 * attempt)
+        max_retries = 1
+        for attempt in range(1, max_retries + 1):
+            try:
+                res = subprocess.run(
+                    cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=timeout,
+                    env=env
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    return res.stdout.strip()
+                else:
+                    err_msg = res.stderr[:300] if res.stderr else "Unknown error"
+                    log_event(f"[AGY WARNING] Attempt {attempt}/{max_retries} failed for {agy_bin}: {err_msg}")
+                    # Check for transient errors like 503, UNAVAILABLE, or eligibility
+                    if any(k in err_msg.lower() for k in ["unavailable", "503", "eligibility", "rate limit", "overloaded", "connection"]):
+                        if attempt < max_retries:
+                            time.sleep(2 * attempt)
+                            continue
+                    if attempt < max_retries and not res.stdout.strip():
+                        time.sleep(1.5)
                         continue
-                if attempt < max_retries and not res.stdout.strip():
-                    time.sleep(1.5)
+                    return None
+            except subprocess.TimeoutExpired:
+                log_event(f"[AGY TIMEOUT] Attempt {attempt}/{max_retries} timed out after {timeout}s")
+                if attempt < max_retries:
+                    time.sleep(1)
                     continue
                 return None
-        except subprocess.TimeoutExpired:
-            log_event(f"[AGY TIMEOUT] Attempt {attempt}/{max_retries} timed out after {timeout}s")
-            if attempt < max_retries:
-                time.sleep(1)
-                continue
-            return None
-        except Exception as e:
-            log_event(f"[AGY EXCEPTION] Failed to execute {agy_bin}: {e}")
-            return None
-    return None
+            except Exception as e:
+                log_event(f"[AGY EXCEPTION] Failed to execute {agy_bin}: {e}")
+                return None
+        return None
+    finally:
+        AGY_SEMAPHORE.release()
 
 def ask_ai(prompt, photo_path=None, system_instruction=None):
     # 0. Приоритет Antigravity CLI (Gemini 3.8 Flash Medium) для веб-поиска, фактов, новостей и кода
@@ -1131,27 +1145,14 @@ def handle_owner_message(msg_data):
             subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--audio", track_path, "--text", cap])
             return
         else:
-            log_event(f"[ORCHESTRATOR] Music search didn't find file, delegating to AI music generator for owner: {text!r}")
-            ack_cmd = [
+            log_event(f"[ORCHESTRATOR] Music search didn't find file for owner: {text!r}")
+            cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "owner",
-                "--no-copy",
-                "--text", "Принял, Миша! Генерирую музыкальный трек через ИИ... 🎵⏳"
+                "--text", f"Не удалось найти трек «{track_title}». Проверь правильность названия или автора на опечатки! 🎵"
             ]
-            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-            run_autonomous_task_async(
-                task_text=text,
-                sender_name="Миша",
-                photo_path=None,
-                ask_ai_fn=ask_ai,
-                sender_key="owner",
-                recipient="owner",
-                reply_to_msg_id=None,
-                ack_msg_id=ack_msg_id,
-                is_owner_sender=True
-            )
+            subprocess.run(cmd)
             return
 
     # 0.45. Поиск и отправка GIF анимаций для владельца
@@ -1765,28 +1766,15 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--audio", track_path, "--text", cap, "--reply-to", str(msg_id)])
             return
         else:
-            log_event(f"[ORCHESTRATOR] Music search didn't find file, delegating to AI music generator for {target_name}: {text!r}")
-            ack_cmd = [
+            log_event(f"[ORCHESTRATOR] Music search didn't find file for {target_name}: {text!r}")
+            cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "yarik",
-                "--no-copy",
                 "--reply-to", str(msg_id),
-                "--text", f"Принял, {target_name}! Генерирую музыкальный трек через ИИ... 🎵⏳"
+                "--text", f"Не удалось найти трек «{track_title}». Проверь название или исполнителя на опечатки! 🎵"
             ]
-            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-            run_autonomous_task_async(
-                task_text=text,
-                sender_name=target_name,
-                photo_path=None,
-                ask_ai_fn=ask_ai,
-                sender_key=sender_key,
-                recipient="yarik",
-                reply_to_msg_id=msg_id,
-                ack_msg_id=ack_msg_id,
-                is_owner_sender=is_owner_sender
-            )
+            subprocess.run(cmd)
             return
 
     # 1.45. Поиск и отправка GIF анимаций в чат
