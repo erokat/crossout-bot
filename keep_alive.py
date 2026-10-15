@@ -66,12 +66,13 @@ def setup_environment():
         except Exception as e:
             print(f"[INIT ERROR] Failed to decode SESSION_BASE64: {e}")
 
-    # 2. Decode OAUTH_TOKEN_BASE64 if present
+    # 2. Decode OAUTH_TOKEN_BASE64 if present, or restore from repo session_data
+    oauth_dir = os.path.expanduser("~/.gemini/antigravity-cli")
+    os.makedirs(oauth_dir, exist_ok=True)
+    oauth_path = os.path.join(oauth_dir, "antigravity-oauth-token")
+
     oauth_b64 = os.environ.get("OAUTH_TOKEN_BASE64")
     if oauth_b64:
-        oauth_dir = os.path.expanduser("~/.gemini/antigravity-cli")
-        os.makedirs(oauth_dir, exist_ok=True)
-        oauth_path = os.path.join(oauth_dir, "antigravity-oauth-token")
         try:
             with open(oauth_path, "wb") as f:
                 f.write(base64.b64decode(oauth_b64))
@@ -79,18 +80,25 @@ def setup_environment():
             print(f"[INIT] antigravity-oauth-token decoded successfully to {oauth_path}")
         except Exception as e:
             print(f"[INIT ERROR] Failed to decode OAUTH_TOKEN_BASE64: {e}")
+    elif not os.path.exists(oauth_path):
+        oauth_repo = os.path.join(BASE_DIR, "session_data", "antigravity-oauth-token")
+        if os.path.exists(oauth_repo):
+            try:
+                shutil.copy2(oauth_repo, oauth_path)
+                os.chmod(oauth_path, 0o600)
+                print(f"[INIT] antigravity-oauth-token restored from repo to {oauth_path}")
+            except Exception as e:
+                print(f"[INIT ERROR] Failed to restore antigravity-oauth-token from repo: {e}")
 
     # 3. Create ~/.gemini/antigravity-cli/settings.json
     try:
-        gemini_dir = os.path.expanduser("~/.gemini/antigravity-cli")
-        os.makedirs(gemini_dir, exist_ok=True)
         settings_path = os.path.join(gemini_dir, "settings.json")
         settings_data = {
-            "modelProvider": "gemini",
             "model": "Gemini 3.8 Flash (Medium)",
             "allowNonWorkspaceAccess": True,
             "toolPermission": "always-proceed",
-            "artifactReviewPolicy": "always-proceed"
+            "artifactReviewPolicy": "always-proceed",
+            "trustedWorkspaces": [BASE_DIR, "/app", "/data/data/com.termux/files/home"]
         }
         with open(settings_path, "w", encoding="utf-8") as f:
             json.dump(settings_data, f, indent=2)
@@ -386,7 +394,7 @@ def ask_gemini_api(prompt, photo_path=None, system_instruction=None):
     if not gemini_key:
         return None
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
         parts = []
         if photo_path and os.path.exists(photo_path):
             mime = "image/jpeg" if photo_path.lower().endswith((".jpg", ".jpeg")) else "image/png"

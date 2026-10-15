@@ -20,3 +20,4 @@ media/meme_*.png
 media/test_*.png
 gdrive_config.json
 gdrive_token.json
+session_data/antigravity-oauth-token

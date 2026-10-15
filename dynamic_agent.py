@@ -64,6 +64,11 @@ def is_autonomous_task(text, has_media=False):
         return has_media
     t = text.lower().strip()
 
+    # Если уже есть зарегистрированное дополнение под эти триггеры
+    ext_path, _ = find_existing_extension(t)
+    if ext_path:
+        return True
+
     action_verbs = [
         "обрежь", "обрезать", "вырежи", "вырезать", "сожми", "сжать",
         "склей", "склеить", "конвертируй", "сконвертируй", "конвертировать",
@@ -80,7 +85,8 @@ def is_autonomous_task(text, has_media=False):
         "сделай так чтобы", "установи модуль", "поставь библиотеку", "скачай файл",
         "сделай таблицу", "сохрани в excel", "сохрани в csv", "сделай отчет",
         "сделай pdf", "сгенерируй pdf", "добавь дополнение", "напиши дополнение",
-        "создай дополнение", "добавь модуль", "создай модуль"
+        "создай дополнение", "сгенерируй дополнение", "сделай дополнение",
+        "дополни дополнение", "дополнение", "добавь модуль", "создай модуль"
     ]
 
     if any(verb in t for verb in action_verbs):
@@ -202,16 +208,21 @@ def auto_install_missing_packages(error_output):
 
     return installed_any
 
-def run_script(script_path, input_file=None, timeout=60):
+def run_script(script_path, input_file=None, task_text=None, timeout=60):
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     ffmpeg_exe = get_ffmpeg_binary()
     env["FFMPEG_EXE"] = ffmpeg_exe
 
+    if task_text:
+        env["TASK_TEXT"] = str(task_text)
+
     args = [sys.executable, script_path]
     if input_file:
         env["INPUT_FILE"] = os.path.abspath(input_file)
         args.append(os.path.abspath(input_file))
+    elif task_text:
+        args.append(str(task_text))
 
     try:
         res = subprocess.run(
@@ -267,8 +278,29 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     5. Регистрирует новое дополнение в extensions/registry.json для постоянного использования.
     6. Возвращает созданный файл и подробный отчет.
     """
+    # 1. Проверяем, есть ли уже готовое дополнение для этой задачи (не требует AI!)
+    existing_script, ext_info = find_existing_extension(task_text)
+    if existing_script:
+        print(f"[DYNAMIC AGENT] Reusing existing extension: {existing_script}")
+        code_rc, stdout, stderr = run_script(existing_script, input_file=photo_path, task_text=task_text)
+        if code_rc == 0:
+            new_media = find_newest_media(set(), stdout=stdout)
+            if any(marker in stdout for marker in ["📍", "🌡️", "📊", "☀️", "🌤️", "☁️"]):
+                report = stdout
+            else:
+                report = (
+                    f"⚡ **Использовано дополнение к боту:** `{os.path.basename(existing_script)}`\n"
+                    f"_{ext_info.get('description', 'Выполнение сохраненной функции')}_\n\n"
+                )
+                if stdout:
+                    report += f"📊 **Результат:**\n```\n{stdout[:2000]}\n```\n"
+            if new_media:
+                report += f"\n📁 Готовый файл: `{os.path.basename(new_media)}`"
+            return report, new_media
+
+    # 2. Если дополнения еще нет — требуется AI для генерации нового модуля
     if not ask_ai_fn:
-        return "Модуль AI недоступен.", None
+        return f"{sender_name}, модуль AI временно недоступен для генерации нового кода.", None
 
     ffmpeg_bin = get_ffmpeg_binary()
 
@@ -280,23 +312,6 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             f"Внутри твоего кода путь к этому файлу доступен через `os.environ.get('INPUT_FILE')` "
             f"или `sys.argv[1] if len(sys.argv) > 1 else None`.\n"
         )
-
-    # 1. Проверяем, есть ли уже готовое дополнение для этой задачи
-    existing_script, ext_info = find_existing_extension(task_text)
-    if existing_script:
-        print(f"[DYNAMIC AGENT] Reusing existing extension: {existing_script}")
-        code_rc, stdout, stderr = run_script(existing_script, input_file=photo_path)
-        if code_rc == 0:
-            new_media = find_newest_media(set(), stdout=stdout)
-            report = (
-                f"⚡ **Использовано дополнение к боту:** `{os.path.basename(existing_script)}`\n"
-                f"_{ext_info.get('description', 'Выполнение сохраненной функции')}_\n\n"
-            )
-            if stdout:
-                report += f"📊 **Результат:**\n```\n{stdout[:1000]}\n```\n"
-            if new_media:
-                report += f"📁 Готовый файл: `{os.path.basename(new_media)}`"
-            return report, new_media
 
     # 2. Генерируем новое дополнение с нуля
     prompt = (
