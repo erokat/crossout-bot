@@ -526,17 +526,34 @@ def run_antigravity_cli(prompt, timeout=180):
         agy_bin = "agy"
 
     cmd = [agy_bin, "--dangerously-skip-permissions", "-p", prompt]
-    try:
-        res = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
-        if res.returncode == 0 and res.stdout.strip():
-            return res.stdout.strip()
-        else:
-            if res.stderr:
-                log_event(f"[AGY WARNING] Error running {agy_bin}: {res.stderr[:200]}")
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            res = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+            if res.returncode == 0 and res.stdout.strip():
+                return res.stdout.strip()
+            else:
+                err_msg = res.stderr[:300] if res.stderr else "Unknown error"
+                log_event(f"[AGY WARNING] Attempt {attempt}/{max_retries} failed for {agy_bin}: {err_msg}")
+                # Check for transient errors like 503, UNAVAILABLE, or eligibility
+                if any(k in err_msg.lower() for k in ["unavailable", "503", "eligibility", "rate limit", "overloaded", "connection"]):
+                    if attempt < max_retries:
+                        time.sleep(2 * attempt)
+                        continue
+                if attempt < max_retries and not res.stdout.strip():
+                    time.sleep(1.5)
+                    continue
+                return None
+        except subprocess.TimeoutExpired:
+            log_event(f"[AGY TIMEOUT] Attempt {attempt}/{max_retries} timed out after {timeout}s")
+            if attempt < max_retries:
+                time.sleep(1)
+                continue
             return None
-    except Exception as e:
-        log_event(f"[AGY EXCEPTION] Failed to execute {agy_bin}: {e}")
-        return None
+        except Exception as e:
+            log_event(f"[AGY EXCEPTION] Failed to execute {agy_bin}: {e}")
+            return None
+    return None
 
 def ask_ai(prompt, photo_path=None, system_instruction=None):
     # 1. Try Gemini API directly if configured
@@ -626,8 +643,21 @@ def solve_school_task(text, photo_path=None, is_owner=False, sender_name="Яри
 
     solution = ask_ai(prompt, photo_path=photo_path, system_instruction=system_instruction)
 
+    # If first attempt returned None, try a concise direct prompt without heavy system instruction
     if not solution:
-        if photo_path:
+        short_prompt = f"Реши по шагам школьное задание: {text}"
+        solution = ask_ai(short_prompt, photo_path=photo_path)
+
+    if not solution:
+        # Detect if text contains clear mathematical / formula structure
+        has_math = any(ch in text for ch in ["=", "+", "-", "*", "/", "^", "²", "³", "≥", "≤", ">", "<", "cos", "sin", "tg", "ctg", "log", "ln", "sqrt", "lim", "int"])
+        if has_math:
+            return (
+                f"{target_name}, я распознал твой математический пример: «{text}», "
+                "но сервер вычислений кратковременно вернул ошибку перегрузки (503 / Unavailable). "
+                "Пожалуйста, повтори запрос («Бот реши ...») через несколько секунд — я решу всё по шагам!"
+            )
+        elif photo_path:
             return (
                 f"{target_name}, я попытался разобрать фото с заданием, но не смог четко распознать текст. "
                 "Пожалуйста, сфотографируй страницу ближе и четче (при хорошем освещении) или напиши само задание текстом — я сразу всё решу!"
