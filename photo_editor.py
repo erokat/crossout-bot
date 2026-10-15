@@ -69,6 +69,7 @@ def is_photo_editor_request(text, has_photo=False):
         "подпиши фото", "подпиши картинку", "подпиши", "сделай мем из фото",
         "сделай мем с этим фото", "сделай мем из этой картинки", "сделай мем из этой фотки",
         "наложи текст", "сделай демотиватор", "вставь текст", "допиши",
+        "замени надпись", "замени на этой картинке", "поменяй надпись", "поменяй текст", "переделай текст", "переделай надпись", "замени текст",
         "добавь на фото", "прилепи на фото", "вставь на фото", "наложи на фото",
         "прилепи", "наложи картинку", "добавь картинку на фото", "вставь картинку на фото",
         "на лицо", "добавь на лицо", "прилепи на лицо", "вставь на лицо", "прифотошопь",
@@ -82,7 +83,7 @@ def is_photo_editor_request(text, has_photo=False):
 
     # If photo is already attached/replied and user asks to edit something
     if has_photo:
-        if any(w in t for w in ["надпись", "подпись", "текст", "напиши", "титры"]):
+        if any(w in t for w in ["надпись", "подпись", "текст", "напиши", "титры", "замени", "поменяй", "переделай"]):
             return True
         if any(w in t for w in [
             "фильтр", "эффект", "наложи на фото", "вставь на фото", "поверни", "обрежь", "заблюрь", "чб",
@@ -92,81 +93,103 @@ def is_photo_editor_request(text, has_photo=False):
 
     return False
 
+def parse_caption_parts(raw_caption):
+    """
+    Разделяет текст на верхнюю и нижнюю части (если есть разделитель или ключевые слова)
+    и надежно отсекает любые префиксы команд ('замени на этой картинке надпись на...').
+    """
+    t = raw_caption.strip()
+    if not t:
+        return "", ""
+
+    # Проверяем, было ли в запросе явное указание на расположение текста сверху/снизу
+    has_explicit_top = bool(re.search(r"(?i)\b(?:сверху|в\s*верху|наверху|сверху\s+картинки|наверху\s+фото)\b", t))
+    has_explicit_bot = bool(re.search(r"(?i)\b(?:снизу|в\s*низу|под\s+фото|под\s+картинкой)\b", t))
+
+    # 0. Отсекаем обращение к боту и вежливые слова
+    t = re.sub(r"(?i)^(?:!бот|!bot|/бот|/bot|бот[,\s]*|ботик[,\s]*|пожалуйста[,\s]*|плиз[,\s]*)\s*", "", t).strip()
+
+    # 1. Отсекаем глаголы и формулировки замены/редактирования/добавления надписи:
+    # 'замени на этой картинке надпись на ...' -> '...'
+    # 'поменяй текст на фото на ...' -> '...'
+    # 'добавь надпись на картинку ...' -> '...'
+    pat = (
+        r"(?i)^(?:замени|поменяй|измени|переделай|добавь|напиши|сделай|наложи|прикрепи|вставь|запили|впиши|подпиши)"
+        r"(?:\s+(?:на|в)?\s*(?:этом|этой|эту)?\s*(?:фото(?:графию)?|картинк[еу]|пикч[еу]))?"
+        r"(?:\s+(?:надпись|подпись|текст|слова|титры|мем))?"
+        r"(?:\s+(?:на|в)?\s*(?:этом|этой|эту)?\s*(?:фото(?:графию)?|картинк[еу]|пикч[еу]))?"
+        r"(?:\s+(?:на|вместо\s+[^\n]+?\s+на))?"
+        r"\s*[:,\s-]*\s*"
+    )
+    t = re.sub(pat, "", t).strip()
+
+    # 2. Проверяем явное разделение на низ: '... и внизу картинки ...', '... снизу: ...', '... а снизу ...'
+    split_pat = r"(?i)\s*(?:,\s*)?(?:\b(?:и|а)\s+)?(?:в\s*низу|снизу|под\s+картинкой|под\s+фото)(?:\s+картинки|\s+фото|\s+напиши|\s+текст|\s+надпись)*\s*[:\s-]+\s*"
+    parts = re.split(split_pat, t, maxsplit=1)
+    if len(parts) == 2:
+        top = re.sub(r"(?i)^(?:в\s*верху|сверху|наверху|сверху\s+картинки)[:\s-]*", "", parts[0]).strip()
+        bot = parts[1].strip()
+        return top, bot
+
+    # 3. 'сверху: ... снизу: ...'
+    m_top_bot = re.search(r"(?i)(?:в\s*верху|сверху|наверху)\s*[:\s-]+\s*(.+?)\s+(?:в\s*низу|снизу)\s*[:\s-]+\s*(.+)", t)
+    if m_top_bot:
+        return m_top_bot.group(1).strip(), m_top_bot.group(2).strip()
+
+    # 4. Явное указание только снизу: 'снизу: ...'
+    m_bot_only = re.search(r"(?i)^(?:в\s*низу|снизу|под\s+фото|под\s+картинкой)\s*[:\s-]+\s*(.+)$", t)
+    if m_bot_only:
+        return "", m_bot_only.group(1).strip()
+
+    # 5. Явное указание только сверху: 'сверху: ...'
+    m_top_only = re.search(r"(?i)^(?:в\s*верху|сверху|наверху)\s*[:\s-]+\s*(.+)$", t)
+    if m_top_only:
+        return m_top_only.group(1).strip(), ""
+
+    # 6. Разделители '//' или перевод строки
+    if "//" in t:
+        p = [x.strip() for x in t.split("//", 1)]
+        return p[0], p[1]
+    if "\n" in t:
+        p = [x.strip() for x in t.split("\n", 1)]
+        return p[0], p[1]
+
+    # 7. Контрасты и противопоставления: 'верити, не верити, но тут три верити'
+    m_contrast = re.search(r"(?i)^(.+?[,;])\s*(но тут|а тут|но в итоге|но на самом деле)\s*(.+)$", t)
+    if m_contrast:
+        top = m_contrast.group(1).strip()
+        bot = f"{m_contrast.group(2).capitalize()} {m_contrast.group(3).strip()}"
+        return top, bot
+
+    # 8. Одиночный текст: если пользователь явно просил сверху — ставим наверх, иначе внизу
+    clean_single = re.sub(r"(?i)^(?:в\s*верху|сверху|наверху|в\s*низу|снизу)[:\s-]*", "", t).strip()
+    if has_explicit_top and not has_explicit_bot:
+        return clean_single, ""
+    else:
+        return "", clean_single
+
 def extract_caption_text(text):
+    """
+    Извлекает чистый текст для надписи из команды пользователя,
+    полностью удаляя мета-команды ('замени на картинке надпись на...').
+    """
     if not text:
         return ""
     t = text.strip()
 
-    # Never extract stickerpack commands as photo captions!
+    # Запросы на стикерпак не являются надписью
     if any(w in t.lower() for w in ["стикерпак", "стикер пак", "в стикерпак", "в пак", "в стикеры", "в стикер"]):
         return ""
 
-    patterns = [
-        r"(?i)(?:^|\s)(?:бот|ботик)?\s*(?:пожалуйста|плиз)?\s*(?:добавь|сделай|напиши|прикрепи|наложи|запили)?\s*(?:надпись|подпись|текст|мем|титры|словечки)?\s*[:,\s-]+\s*(.+)$",
-        r"(?i)(?:^|\s)(?:бот|ботик)?\s*(?:пожалуйста|плиз)?\s*(?:подпиши|напиши на фото|напиши на картинке|на фото напиши|сделай мем из этого фото|сделай мем с этим фото|сделай мем из этой картинки)\s*[:,\s-]*\s*(.+)$"
-    ]
-    for pat in patterns:
-        m = re.search(pat, t)
-        if m:
-            cand = m.group(1).strip()
-            cand = re.sub(r"^[:,\s-]+", "", cand).strip()
-            # If cand isn't just common filler words
-            if cand and cand.lower() not in ["надпись", "текст", "фото", "картинку", "пожалуйста"]:
-                if not any(w in cand.lower() for w in ["стикерпак", "стикер пак", "в пак", "в стикер"]):
-                    return cand
+    top, bot = parse_caption_parts(t)
+    if top and bot:
+        return f"{top}\n{bot}"
+    elif bot:
+        return bot
+    elif top:
+        return top
 
-    # Fallback strip command prefix
-    cleaned = re.sub(
-        r"(?i)^(?:бот[,\s]*)?(?:пожалуйста[,\s]*)?(?:добавь[,\s]*)?(?:надпись|подпись|текст|напиши на фото|напиши на картинке|подпиши)[,\s:]*",
-        "", t
-    ).strip()
-    if any(w in cleaned.lower() for w in ["стикерпак", "стикер пак", "в пак", "в стикер"]):
-        return ""
-    return cleaned or t
-
-def parse_caption_parts(raw_caption):
-    """
-    Разделяет текст на верхнюю и нижнюю части (если есть разделитель или ключевые слова)
-    """
-    text = raw_caption.strip()
-    if not text:
-        return "", ""
-
-    # 1. Проверяем формат "сверху: ... снизу: ..." или "снизу: ... сверху: ..."
-    m_split = re.search(r"(?i)сверху[:\s]+(.+?)\s+снизу[:\s]+(.+)", text)
-    if m_split:
-        return m_split.group(1).strip(), m_split.group(2).strip()
-
-    m_split_rev = re.search(r"(?i)снизу[:\s]+(.+?)\s+сверху[:\s]+(.+)", text)
-    if m_split_rev:
-        return m_split_rev.group(2).strip(), m_split_rev.group(1).strip()
-
-    # Проверяем явное указание только сверху или только снизу
-    m_top_only = re.search(r"(?i)^сверху[:\s]+(.+)$", text)
-    if m_top_only:
-        return m_top_only.group(1).strip(), ""
-
-    m_bot_only = re.search(r"(?i)^снизу[:\s]+(.+)$", text)
-    if m_bot_only:
-        return "", m_bot_only.group(1).strip()
-
-    # 2. Проверяем явный разделитель через // или \n
-    if "//" in text:
-        parts = [p.strip() for p in text.split("//", 1)]
-        return parts[0], parts[1]
-
-    if "\n" in text:
-        parts = [p.strip() for p in text.split("\n", 1)]
-        return parts[0], parts[1]
-
-    # 3. Проверяем разделители типа "но тут", "а тут", "когда ... но ..."
-    m_split2 = re.search(r"(?i)^(.+?[,;])\s*(но тут|а тут|но в итоге|но на самом деле)\s*(.+)$", text)
-    if m_split2:
-        top_part = m_split2.group(1).strip()
-        bot_part = f"{m_split2.group(2).capitalize()} {m_split2.group(3).strip()}"
-        return top_part, bot_part
-
-    return text, ""
+    return t
 
 def render_photo_overlay(base_img, top_text="", bottom_text="", single_text=""):
     """
@@ -261,11 +284,11 @@ def edit_photo_with_caption(photo_path, user_instruction, style="auto"):
     if not photo_path or not os.path.exists(photo_path):
         raise FileNotFoundError(f"Input photo not found: {photo_path}")
 
-    caption_text = extract_caption_text(user_instruction)
-    if not caption_text:
-        caption_text = user_instruction.strip()
-
-    top_text, bottom_text = parse_caption_parts(caption_text)
+    top_text, bottom_text = parse_caption_parts(user_instruction)
+    if top_text and bottom_text:
+        caption_text = f"{top_text}\n{bottom_text}"
+    else:
+        caption_text = top_text or bottom_text or extract_caption_text(user_instruction) or user_instruction.strip()
 
     # Определяем стиль
     instr_lower = user_instruction.lower()
@@ -303,14 +326,7 @@ def edit_photo_with_caption(photo_path, user_instruction, style="auto"):
             canvas = render_caption_meme(img, text_top=caption_text.capitalize())
     else:
         # Default: Стильный оверлей прямо на фото, гарантированно видимый в Telegram
-        # Если текст не разбит на части и не указано 'сверху', оверлей отрисовывает как нижний субтитр
-        if not bottom_text and top_text == caption_text and not caption_text.lower().startswith("сверху"):
-            top_pass = ""
-            bot_pass = ""
-        else:
-            top_pass = top_text
-            bot_pass = bottom_text
-        canvas = render_photo_overlay(img, top_text=top_pass, bottom_text=bot_pass, single_text=caption_text)
+        canvas = render_photo_overlay(img, top_text=top_text, bottom_text=bottom_text, single_text=caption_text)
 
     # Сохраняем результат
     ts = int(time.time())
@@ -627,7 +643,7 @@ def process_universal_photo_command(photo_path, command_text):
         return out_p, "Держи классический демотиватор! 🖤🖼️"
 
     # 3. Текстовая надпись на фото (ПРИОРИТЕТ над стикерами!)
-    elif any(w in t_low for w in ["надпись", "подпись", "текст", "титры", "напиши", "подпиши", "допиши"]):
+    elif any(w in t_low for w in ["надпись", "подпись", "текст", "титры", "напиши", "подпиши", "допиши", "замени", "поменяй", "переделай", "впиши"]):
         out_p, _ = edit_photo_with_caption(photo_path, command_text)
         return out_p, "Лови готовое фото с надписью! 📸🔥"
 
