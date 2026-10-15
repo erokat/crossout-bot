@@ -240,6 +240,18 @@ class WebServerHandler(BaseHTTPRequestHandler):
             self.wfile.write(resp.encode("utf-8"))
             return
 
+        elif path == "/test_ai":
+            test_prompt = qs.get("prompt", ["Напиши 1 строчку на Python"])[0]
+            t0 = time.time()
+            ai_res = ask_ai(test_prompt)
+            dt = round(time.time() - t0, 2)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            resp = json.dumps({"prompt": test_prompt, "result": ai_res, "duration_sec": dt}, ensure_ascii=False)
+            self.wfile.write(resp.encode("utf-8"))
+            return
+
         elif path == "/confirm":
             req_id = qs.get("id", [None])[0]
             action = qs.get("action", [None])[0]
