@@ -274,7 +274,7 @@ def setup_environment():
     try:
         settings_path = os.path.join(gemini_dir, "settings.json")
         settings_data = {
-            "model": "gemini-3.8-flash-high",
+            "model": "gemini-3.8-flash-medium",
             "allowNonWorkspaceAccess": True,
             "toolPermission": "always-proceed",
             "artifactReviewPolicy": "always-proceed",
@@ -649,7 +649,7 @@ def run_antigravity_cli(prompt, timeout=40):
     if not agy_bin:
         agy_bin = "agy"
 
-    cmd = [agy_bin, "--model", "gemini-3.8-flash-high", "--dangerously-skip-permissions", "--disable-slash-commands", "-p", prompt]
+    cmd = [agy_bin, "--model", "gemini-3.8-flash-medium", "--dangerously-skip-permissions", "--disable-slash-commands", "-p", prompt]
     env = dict(os.environ)
     env["CI"] = "1"
     env["AGY_AUTO_UPDATE"] = "1"
