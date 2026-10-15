@@ -366,12 +366,9 @@ def find_and_download_image(query, dest_dir=None):
         dest_dir = IMAGES_DIR
     os.makedirs(dest_dir, exist_ok=True)
 
+    import random
     clean_q = clean_query(query, "image")
-    q_hash = hashlib.md5(clean_q.lower().encode("utf-8")).hexdigest()[:10]
-    out_file = os.path.join(dest_dir, f"img_{q_hash}.jpg")
-
-    if os.path.exists(out_file) and os.path.getsize(out_file) > 10000:
-        return out_file, clean_q
+    out_file = os.path.join(dest_dir, f"img_{int(time.time())}_{random.randint(1000, 9999)}.jpg")
 
     urls = []
 
