@@ -815,6 +815,178 @@ def extract_meme_count(text):
     return 1
 
 
+def spawn_meme_creator_subagent(
+    theme,
+    recipient="yarik",
+    reply_to_msg_id=None,
+    meme_index=1,
+    total_count=1,
+    is_owner_sender=False,
+    is_repeat=False,
+    add_to_stickers=False,
+    notify_owner=False,
+    ask_ai_fn=None
+):
+    """
+    Spawns an isolated subagent worker (meme-creator) in a background thread.
+    Rule: 1 meme = 1 dedicated subagent.
+    The main orchestrator thread is freed immediately and does not block!
+    """
+    import threading
+
+    def _meme_worker():
+        subagent_id = f"meme-creator-{meme_index}-{int(time.time() * 1000) % 100000}"
+        try:
+            log_event(f"[{subagent_id}] Subagent started for {recipient}: theme={theme!r} (#{meme_index}/{total_count})")
+
+            # Stagger slightly if multiple memes in batch to avoid file/network race condition
+            if meme_index > 1:
+                time.sleep((meme_index - 1) * 1.5)
+
+            recipient_target = "owner" if (recipient == "owner" or (is_owner_sender and recipient != "yarik")) else "yarik"
+            meme_path = generate_crossout_meme(theme=theme, allow_repeat=is_repeat, recipient=recipient_target)
+
+            if not meme_path or not os.path.exists(meme_path):
+                log_event(f"[{subagent_id}] ERROR: Meme generation returned invalid path: {meme_path}")
+                return
+
+            t_lower = (theme or "").lower()
+            is_crossout_topic = any(w in t_lower for w in ["кросс", "крос", "crossout", "газген", "птур", "ховер", "утюг", "капкан", "мамонт", "скорпион"])
+            num_suffix = f" (#{meme_index})" if total_count > 1 else ""
+
+            def get_smart_meme_caption(recipient_role, user_text, suffix=""):
+                if is_crossout_topic:
+                    if recipient_role == "owner":
+                        pool = [
+                            f"Миха, свежий прикол прямиком со сварочного стола! Оцени инженерную мысль 🚜💥{suffix}",
+                            f"Мишан, зацени этот шедевр! Когда собрал идеальный крафт, но рандом решил иначе 💀🚜{suffix}",
+                            f"Миха, лови годный мемасик! Чистая правда жизни в Пустошах 🚜🔥{suffix}",
+                            f"Миха, горячий мемчик прямо из печи Скитальцев! Как тебе? 🔥🚜{suffix}",
+                            f"Миха, чистейшая база из рандома! Такое только в Crossout можно увидеть 🚜💀{suffix}"
+                        ]
+                    else:
+                        pool = [
+                            f"Ярик, держи свежак из Пустошей! Оценивай по шкале от 1 до 10 🚜💥{suffix}",
+                            f"Ярик, лови годную жизу! Когда рандом опять преподносит сюрпризы 💀🚜{suffix}",
+                            f"Ярик, зацени этот шедевр инженерной мысли! Газген на кабине — классика 🚜🔥{suffix}",
+                            f"Ярик, лови жизу про Пустоши! Чистая правда любого рандомного боя 🚜🔥{suffix}"
+                        ]
+                else:
+                    if recipient_role == "owner":
+                        pool = [
+                            f"Миха, держи готовую картинку по твоему запросу! 🎨🔥{suffix}",
+                            f"Мишан, зацени что получилось! 📸✨{suffix}",
+                            f"Миха, лови свежий шедевр! 🎨🔥{suffix}",
+                            f"Мишан, оценивай результат! 📸🔥{suffix}"
+                        ]
+                    else:
+                        pool = [
+                            f"Ярик, держи! Оценивай результат от 1 до 10 🎨🔥{suffix}",
+                            f"Ярик, лови по твоему запросу! 📸✨{suffix}",
+                            f"Ярик, зацени что получилось! 🎨🔥{suffix}"
+                        ]
+                return random.choice(pool)
+
+            fallback_cap = get_smart_meme_caption("owner" if (recipient == "owner" or is_owner_sender) else "yarik", theme, suffix=num_suffix)
+            topic_warning = " СТРОГИЙ ЗАПРЕТ: НЕ приплетай Crossout, Пустоши или Газген, если тема не о Crossout!" if not is_crossout_topic else ""
+
+            ai_fn = ask_ai_fn or ask_ai
+            caption = None
+            try:
+                if is_owner_sender and recipient == "owner":
+                    prompt_cap = (
+                        f"Ты создал изображение/мем по теме: «{theme}». Твой создатель и владелец МИША запросил его{num_suffix}.{topic_warning} "
+                        "Придумай одну смешную, угарную, прикольную подпись строго в тему запроса. "
+                        "Обращайся к Мише по имени (Миша, Миха, Мишан), по-братски, разговорно, живо и прикольно. "
+                        "СТРОЖАЙШИЙ ЗАПРЕТ: НИКАКИХ 'шеф', 'босс', 'командир'! И НЕ называй его Яриком (Ярик — его друг в чате)! "
+                        "Без кавычек, 1 короткое сочное предложение с эмодзи."
+                    )
+                elif is_owner_sender and recipient == "yarik":
+                    prompt_cap = (
+                        f"Владелец бота поручил отправить Ярику мем{num_suffix} по теме: «{theme}». "
+                        "Напиши короткую, живую, угарную подпись корешу в чат (1-2 предложения), как реальный заядлый геймер в тему этого мема, "
+                        "и попроси его дать строгую экспертную оценку этому шедевру. Выдай ТОЛЬКО текст реплики."
+                    )
+                else:
+                    prompt_cap = (
+                        f"Ты создал изображение/мем по теме: «{theme}». Твой кореш Ярик запросил его{num_suffix}.{topic_warning} "
+                        "Придумай одну смешную, угарную, жизненную подпись строго в тему запроса. "
+                        "Обращайся к нему Ярик. Без кавычек, 1 короткое сочное предложение с эмодзи."
+                    )
+                ai_reply = ai_fn(prompt_cap)
+                if ai_reply:
+                    caption = ai_reply.strip().strip('"').strip("'")
+            except Exception as e_ai:
+                log_event(f"[{subagent_id}] AI caption failed: {e_ai}")
+
+            if not caption:
+                caption = fallback_cap
+            else:
+                if is_owner_sender and recipient == "owner":
+                    caption = re.sub(r"\bшеф[а-я]*\b", "Миша", caption, flags=re.I)
+                    caption = re.sub(r"\bбосс[а-я]*\b", "Миша", caption, flags=re.I)
+                    caption = re.sub(r"\bкомандир[а-я]*\b", "Миша", caption, flags=re.I)
+                    if any(w in caption.lower() for w in ["ярик", "ярику", "ярика"]):
+                        caption = fallback_cap
+
+            # Delivery via send.py
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", recipient,
+                "--photo", meme_path,
+                "--text", caption
+            ]
+            if reply_to_msg_id:
+                send_cmd.extend(["--reply-to", str(reply_to_msg_id)])
+            subprocess.run(send_cmd)
+
+            # If stickers requested
+            if add_to_stickers:
+                sticker_cmd = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "add_to_sticker_pack.py"),
+                    "--image", meme_path
+                ]
+                subprocess.run(sticker_cmd)
+
+                if meme_index == total_count:
+                    if total_count > 1:
+                        stk_reply = f"Закинул всю пачку из {total_count} шедевров в стикерпак! 🔥"
+                    else:
+                        stk_reply = "Закинул этот угар в стикерпак, Миша! Теперь можно спамить в чатах 🔥💀" if is_owner_sender else "Закинул этот угар в стикерпак! Ярик, теперь можно спамить в чатах 🔥💀"
+                    confirm_cmd = [
+                        sys.executable,
+                        os.path.join(BASE_DIR, "send.py"),
+                        "--to", recipient,
+                        "--text", stk_reply
+                    ]
+                    if reply_to_msg_id:
+                        confirm_cmd.extend(["--reply-to", str(reply_to_msg_id)])
+                    subprocess.run(confirm_cmd)
+
+            # If report to owner requested (when owner ordered memes for yarik)
+            if notify_owner and recipient == "yarik":
+                rep_text = f"Отправил Ярику пачку из {total_count} уникальных мемов! 🔥🚜" if total_count > 1 else "Отправил Ярику свежий мем в чат! 🔥🚜"
+                cmd_owner = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "owner",
+                    "--photo", meme_path,
+                    "--text", rep_text
+                ]
+                subprocess.run(cmd_owner)
+
+            log_event(f"[{subagent_id}] Completed meme delivery: {meme_path}")
+        except Exception as e:
+            traceback.print_exc()
+            log_event(f"[{subagent_id}] Subagent error: {e}")
+
+    t = threading.Thread(target=_meme_worker, name=f"Subagent-MemeCreator-{meme_index}", daemon=True)
+    t.start()
+    return t
+
+
 def handle_owner_message(msg_data):
     text = msg_data.get("text", "").strip()
     photo = msg_data.get("photo")
@@ -1221,37 +1393,19 @@ def handle_owner_message(msg_data):
         if has_meme_mention:
             is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
             count = extract_meme_count(text)
-            last_meme = None
+            log_event(f"[ORCHESTRATOR] Owner ordered {count} meme(s) for Yarik. Spawning dedicated subagents...")
             for idx in range(count):
-                meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="yarik")
-                last_meme = meme_path
-                num_suffix = f" (#{idx + 1})" if count > 1 else ""
-                prompt_cap = (
-                    f"Владелец бота поручил отправить Ярику мем{num_suffix} по теме: «{text}». "
-                    "Напиши короткую, живую, угарную подпись корешу в чат (1-2 предложения), как реальный заядлый геймер в тему этого мема, "
-                    "и попроси его дать строгую экспертную оценку этому шедевру. Выдай ТОЛЬКО текст реплики."
+                spawn_meme_creator_subagent(
+                    theme=text,
+                    recipient="yarik",
+                    meme_index=idx + 1,
+                    total_count=count,
+                    is_owner_sender=True,
+                    is_repeat=is_repeat,
+                    notify_owner=(idx == count - 1)
                 )
-                if any(w in t_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв"]):
-                    fb_cap = f"Ярик, зацени этот шедевр по Rain World{num_suffix}! Требуется твоя строгая экспертная оценка от 1 до 10 🌧️🐱"
-                else:
-                    fb_cap = f"Ярик, зацени этот шедевр{num_suffix}! Требуется твоя строгая экспертная оценка от 1 до 10 🔥🚜"
-                caption = ask_ai(prompt_cap) or fb_cap
-
-                # Отправка Ярику через Telethon
-                cmd_yarik = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", meme_path, "--text", caption]
-                subprocess.run(cmd_yarik)
-                if count > 1 and idx < count - 1:
-                    time.sleep(1.5)
-
-            # Отчет владельцу в Control Bot
-            report_text = f"Отправил Ярику пачку из {count} уникальных мемов! Попросил его строгую экспертную оценку 🔥🚜" if count > 1 else "Отправил Ярику свежий мем в чат! Ждем экспертную оценку 🔥🚜"
-            cmd_owner = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "owner",
-                "--photo", last_meme,
-                "--text", report_text
-            ]
+            report_text = f"Запустил отдельного субагента meme-creator для каждого мема (пачка из {count} шт.)! 🎨🚀 Скоро отправлю Ярику в чат." if count > 1 else "Запустил отдельного субагента meme-creator! 🎨🚀 Скоро отправлю Ярику в чат."
+            cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", report_text]
             subprocess.run(cmd_owner)
             return
 
@@ -1272,19 +1426,17 @@ def handle_owner_message(msg_data):
     if is_owner_meme:
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
         count = extract_meme_count(text)
+        log_event(f"[ORCHESTRATOR] Owner requested {count} meme(s) for himself. Spawning dedicated subagents...")
         for idx in range(count):
-            meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient="owner")
-            num_suffix = f" #{idx + 1}" if count > 1 else ""
-            cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "owner",
-                "--photo", meme_path,
-                "--text", f"Свежий мем{num_suffix} готов! 🚜💥"
-            ]
-            subprocess.run(cmd)
-            if count > 1 and idx < count - 1:
-                time.sleep(1.5)
+            spawn_meme_creator_subagent(
+                theme=text,
+                recipient="owner",
+                meme_index=idx + 1,
+                total_count=count,
+                is_owner_sender=True,
+                is_repeat=is_repeat,
+                notify_owner=False
+            )
         return
 
     # 0.7. Автономная генерация динамических навыков (Dynamic Skill Engine)
@@ -1960,110 +2112,21 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "тоже самое"])
         count = extract_meme_count(text)
         recipient_target = "owner" if is_owner_sender else "yarik"
-        is_crossout_topic = any(w in t_lower for w in ["кросс", "крос", "crossout", "газген", "птур", "ховер", "утюг", "капкан", "мамонт", "скорпион"])
+        add_to_stickers = any(w in t_lower for w in ["стикер", "пак"]) and any(w in t_lower for w in ["добавь", "закинь", "в стикерпак", "в пак"])
 
+        log_event(f"[ORCHESTRATOR] Spawning {count} isolated subagent(s) (meme-creator) for {recipient_target}: {text!r}")
         for idx in range(count):
-            meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient=recipient_target)
-            num_suffix = f" (#{idx + 1})" if count > 1 else ""
-
-            def get_smart_meme_caption(recipient_role, user_text, num_suffix=""):
-                if is_crossout_topic:
-                    if recipient_role == "owner":
-                        pool = [
-                            f"Миха, свежий прикол прямиком со сварочного стола! Оцени инженерную мысль 🚜💥{num_suffix}",
-                            f"Мишан, зацени этот шедевр! Когда собрал идеальный крафт, но рандом решил иначе 💀🚜{num_suffix}",
-                            f"Миха, лови годный мемасик! Чистая правда жизни в Пустошах 🚜🔥{num_suffix}",
-                            f"Миха, горячий мемчик прямо из печи Скитальцев! Как тебе? 🔥🚜{num_suffix}",
-                            f"Миха, чистейшая база из рандома! Такое только в Crossout можно увидеть 🚜💀{num_suffix}"
-                        ]
-                    else:
-                        pool = [
-                            f"Ярик, держи свежак из Пустошей! Оценивай по шкале от 1 до 10 🚜💥{num_suffix}",
-                            f"Ярик, лови годную жизу! Когда рандом опять преподносит сюрпризы 💀🚜{num_suffix}",
-                            f"Ярик, зацени этот шедевр инженерной мысли! Газген на кабине — классика 🚜🔥{num_suffix}",
-                            f"Ярик, лови жизу про Пустоши! Чистая правда любого рандомного боя 🚜🔥{num_suffix}"
-                        ]
-                else:
-                    if recipient_role == "owner":
-                        pool = [
-                            f"Миха, держи готовую картинку по твоему запросу! 🎨🔥{num_suffix}",
-                            f"Мишан, зацени что получилось! 📸✨{num_suffix}",
-                            f"Миха, лови свежий шедевр! 🎨🔥{num_suffix}",
-                            f"Мишан, оценивай результат! 📸🔥{num_suffix}"
-                        ]
-                    else:
-                        pool = [
-                            f"Ярик, держи! Оценивай результат от 1 до 10 🎨🔥{num_suffix}",
-                            f"Ярик, лови по твоему запросу! 📸✨{num_suffix}",
-                            f"Ярик, зацени что получилось! 🎨🔥{num_suffix}"
-                        ]
-                return random.choice(pool)
-
-            fallback_cap = get_smart_meme_caption("owner" if is_owner_sender else "yarik", text, num_suffix=num_suffix)
-            topic_warning = " СТРОГИЙ ЗАПРЕТ: НЕ приплетай Crossout, Пустоши или Газген, если тема не о Crossout!" if not is_crossout_topic else ""
-
-            if is_owner_sender:
-                prompt_cap = (
-                    f"Ты создал изображение/мем по теме: «{text}». Твой создатель и владелец МИША запросил его{num_suffix}.{topic_warning} "
-                    "Придумай одну смешную, угарную, прикольную подпись строго в тему запроса. "
-                    "Обращайся к Мише по имени (Миша, Миха, Мишан), по-братски, разговорно, живо и прикольно. "
-                    "СТРОЖАЙШИЙ ЗАПРЕТ: НИКАКИХ 'шеф', 'босс', 'командир'! И НЕ называй его Яриком (Ярик — его друг в чате)! "
-                    "Без кавычек, 1 короткое сочное предложение с эмодзи."
-                )
-            else:
-                prompt_cap = (
-                    f"Ты создал изображение/мем по теме: «{text}». Твой кореш Ярик запросил его{num_suffix}.{topic_warning} "
-                    "Придумай одну смешную, угарную, жизненную подпись строго в тему запроса. "
-                    "Обращайся к нему Ярик. Без кавычек, 1 короткое сочное предложение с эмодзи."
-                )
-
-            caption = ask_ai(prompt_cap)
-            if not caption:
-                caption = fallback_cap
-            else:
-                caption = caption.strip().strip('"').strip("'")
-            if is_owner_sender:
-                caption = re.sub(r"\bшеф[а-я]*\b", "Миша", caption, flags=re.I)
-                caption = re.sub(r"\bбосс[а-я]*\b", "Миша", caption, flags=re.I)
-                caption = re.sub(r"\bкомандир[а-я]*\b", "Миша", caption, flags=re.I)
-                if any(w in caption.lower() for w in ["ярик", "ярику", "ярика"]):
-                    caption = fallback_cap
-
-            send_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "yarik",
-                "--photo", meme_path,
-                "--text", caption,
-                "--reply-to", str(msg_id)
-            ]
-            subprocess.run(send_cmd)
-
-            # Если просили добавить в стикерпак
-            if any(w in t_lower for w in ["стикер", "пак"]) and any(w in t_lower for w in ["добавь", "закинь", "в стикерпак", "в пак"]):
-                sticker_cmd = [
-                    sys.executable,
-                    os.path.join(BASE_DIR, "add_to_sticker_pack.py"),
-                    "--image", meme_path
-                ]
-                subprocess.run(sticker_cmd)
-
-            if count > 1 and idx < count - 1:
-                time.sleep(1.5)
-
-        if any(w in t_lower for w in ["стикер", "пак"]) and any(w in t_lower for w in ["добавь", "закинь", "в стикерпак", "в пак"]):
-            if count > 1:
-                stk_reply = f"Закинул всю пачку из {count} шедевров в стикерпак! 🔥"
-            else:
-                stk_reply = "Закинул этот угар в стикерпак, Миша! Теперь можно спамить в чатах 🔥💀" if is_owner_sender else "Закинул этот угар в стикерпак! Ярик, теперь можно спамить в чатах 🔥💀"
-            confirm_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "yarik",
-                "--text", stk_reply,
-                "--reply-to", str(msg_id)
-            ]
-            subprocess.run(confirm_cmd)
+            spawn_meme_creator_subagent(
+                theme=text,
+                recipient=recipient_target,
+                reply_to_msg_id=msg_id if idx == 0 else None,
+                meme_index=idx + 1,
+                total_count=count,
+                is_owner_sender=is_owner_sender,
+                is_repeat=is_repeat,
+                add_to_stickers=add_to_stickers,
+                notify_owner=False
+            )
         return
 
     # 1.7. Автономная генерация динамических навыков (Dynamic Skill Engine)
