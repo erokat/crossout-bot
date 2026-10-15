@@ -254,10 +254,25 @@ def gen_rw_five_pebbles():
 def gen_rw_echo():
     echo_asset = os.path.join(MEDIA_DIR, "echo_meme_original.jpg")
     width, height = 800, 960
-    if os.path.exists(echo_asset):
+
+    # Если ассет еще не скачан в контейнере, автоматически вытягиваем его с GitHub
+    if not os.path.exists(echo_asset) or os.path.getsize(echo_asset) < 1000:
+        try:
+            import urllib.request
+            gh_raw = "https://raw.githubusercontent.com/erokat/crossout-bot/main/media/echo_meme_original.jpg"
+            req = urllib.request.Request(gh_raw, headers={"User-Agent": "CrossoutBot/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = r.read()
+            if len(data) > 1000:
+                with open(echo_asset, "wb") as f:
+                    f.write(data)
+        except Exception as e:
+            print(f"[RW ECHO] Error downloading asset: {e}")
+
+    if os.path.exists(echo_asset) and os.path.getsize(echo_asset) > 1000:
         raw = Image.open(echo_asset).convert("RGB").resize((800, 800), Image.Resampling.LANCZOS)
     else:
-        raw = Image.new("RGB", (800, 800), color=(15, 20, 30))
+        raw = Image.new("RGB", (800, 800), color=(20, 24, 36))
 
     canvas = Image.new("RGB", (width, height), (255, 255, 255))
     canvas.paste(raw, (0, 160))
@@ -277,21 +292,18 @@ def gen_rw_echo():
     draw.text(((width - tw2) // 2, 95), sub_text, font=font_sub, fill="#666666")
 
     # Speech bubble for Echo saying "..."
-    bw, bh = 140, 70
-    bx0 = 420
+    bw, bh = 150, 75
+    bx0 = 430
     by0 = 160 + 200
     bx1 = bx0 + bw
     by1 = by0 + bh
 
-    draw.rounded_rectangle([bx0, by0, bx1, by1], radius=18, fill="#FFFFFF", outline="#000000", width=4)
-    draw.polygon([(bx0 + 20, by1), (bx0 + 50, by1), (bx0 - 15, by1 + 35)], fill="#FFFFFF", outline="#000000")
-    draw.line([(bx0 + 22, by1), (bx0 + 48, by1)], fill="#FFFFFF", width=5)
+    draw.rounded_rectangle([bx0, by0, bx1, by1], radius=20, fill="#FFFFFF", outline="#000000", width=4)
+    draw.polygon([(bx0 + 15, by1), (bx0 + 50, by1), (bx0 - 20, by1 + 40)], fill="#FFFFFF", outline="#000000")
+    draw.line([(bx0 + 18, by1), (bx0 + 48, by1)], fill="#FFFFFF", width=6)
 
-    font_dots = get_font(42)
-    bb_dots = draw.textbbox((0, 0), "...", font=font_dots)
-    dw = bb_dots[2] - bb_dots[0]
-    dh = bb_dots[3] - bb_dots[1]
-    draw.text((bx0 + (bw - dw) // 2, by0 + (bh - dh) // 2 - 10), "...", font=font_dots, fill="#000000")
+    font_dots = get_font(46)
+    draw.text((bx0 + bw // 2, by0 + bh // 2 - 8), "...", font=font_dots, fill="#000000", anchor="mm")
 
     return canvas, "rw_echo", headline
 
