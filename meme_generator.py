@@ -767,26 +767,6 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
     out_path, headline = generate_universal_meme(theme=theme or "Crossout Пустоши", allow_repeat=True, recipient=recipient)
     return out_path
 
-    # Save to media and saved_memes
-    out_name = f"meme_{int(time.time())}_{random.randint(1000, 9999)}.png"
-    out_path = os.path.join(MEDIA_DIR, out_name)
-    chosen_img.save(out_path, "PNG")
-
-    if os.path.exists(SAVED_MEMES_DIR):
-        try:
-            saved_copy = os.path.join(SAVED_MEMES_DIR, out_name)
-            shutil.copy2(out_path, saved_copy)
-            try:
-                from gdrive import upload_file_to_drive
-                upload_file_to_drive(saved_copy)
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    record_sent_meme(chosen_hash, chosen_tpl, chosen_hl, out_path, sent_to=recipient)
-    return out_path
-
 # Alias for universal meme generation
 generate_meme = generate_crossout_meme
 

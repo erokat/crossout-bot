@@ -31,6 +31,11 @@ from config import (
     BOT_SENT_FILE,
     load_config
 )
+
+CFG = load_config()
+YARIK_CHAT_ID = int(CFG.get("yarik_chat_id", 6271387044))
+OWNER_ID = int(CFG.get("owner_id", 5067025016))
+
 from db import init_db, resolve_confirmation, get_confirmation, get_kv, set_kv, is_message_handled, mark_message_handled
 from meme_generator import generate_crossout_meme
 from dynamic_agent import (
@@ -44,6 +49,7 @@ from dynamic_agent import (
     is_pure_chitchat
 )
 from photo_editor import is_photo_editor_request, edit_photo_with_caption
+from media_finder import find_and_download_image, extract_image_search_and_caption
 
 MISHA_CHITCHAT_POOL = [
     "Здарова, Миша! В ангаре порядок, крафты заправлены. Чем займемся? 🚜🔥",
@@ -876,6 +882,42 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd_owner)
         return
 
+    # 0.52. Поиск фото / картинок в интернете (+ наложение надписи при наличии)
+    is_img_search, search_q, caption_text = extract_image_search_and_caption(text)
+    if is_img_search and not photo:
+        log_event(f"[ORCHESTRATOR] Image search triggered for Owner: query={search_q!r}, caption={caption_text!r}")
+        img_path, clean_title = find_and_download_image(search_q)
+        if img_path and os.path.exists(img_path):
+            if caption_text:
+                try:
+                    final_img, _ = edit_photo_with_caption(img_path, f"добавь надпись: {caption_text}")
+                    cap = f"Миша, держи фото «{clean_title}» с твоей надписью! 📸🔥"
+                except Exception as e:
+                    log_event(f"[IMAGE SEARCH ERROR] {e}")
+                    final_img = img_path
+                    cap = f"Миша, вот фото: «{clean_title}»! 📸"
+            else:
+                final_img = img_path
+                cap = f"Миша, вот фото: «{clean_title}»! 📸"
+            cmd_owner = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--photo", final_img,
+                "--text", cap
+            ]
+            subprocess.run(cmd_owner)
+            return
+        else:
+            cmd_owner = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--text", f"Миша, не удалось найти подходящее фото по запросу «{search_q}» в сети."
+            ]
+            subprocess.run(cmd_owner)
+            return
+
     # 0.55. Фоторедактор: Добавление надписи / текста на фото или создание мема из фото
     if is_photo_editor_request(text, has_photo=bool(photo)):
         if photo and os.path.exists(photo):
@@ -1412,8 +1454,42 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
-    # 1.55. Фоторедактор: Добавление надписи / текста на фото или создание мема из фото
+    # 1.52. Поиск фото / картинок в интернете (+ наложение надписи при наличии)
     photo_file = msg_data.get("photo")
+    is_img_search, search_q, caption_text = extract_image_search_and_caption(text)
+    if is_img_search and not photo_file:
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        log_event(f"[ORCHESTRATOR] Image search triggered for {target_name}: query={search_q!r}, caption={caption_text!r}")
+        img_path, clean_title = find_and_download_image(search_q)
+        if img_path and os.path.exists(img_path):
+            if caption_text:
+                try:
+                    final_img, _ = edit_photo_with_caption(img_path, f"добавь надпись: {caption_text}")
+                    cap = f"Держи фото с надписью, {target_name}! 📸🔥" if is_owner_sender else f"Ярик, лови фото «{clean_title}» с твоей надписью! 📸🚜"
+                except Exception as e:
+                    log_event(f"[IMAGE SEARCH ERROR] {e}")
+                    final_img = img_path
+                    cap = f"Держи фото «{clean_title}», {target_name}! 📸"
+            else:
+                final_img = img_path
+                cap = f"Миша, вот фото: «{clean_title}»! 📸" if is_owner_sender else f"Ярик, лови фото по запросу «{clean_title}»! 📸🚜"
+
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--photo", final_img,
+                "--text", cap,
+                "--reply-to", str(msg_id)
+            ]
+            subprocess.run(send_cmd)
+            return
+        else:
+            err_msg = f"{target_name}, не удалось найти подходящее фото по запросу «{search_q}» в сети."
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", err_msg, "--reply-to", str(msg_id)])
+            return
+
+    # 1.55. Фоторедактор: Добавление надписи / текста на фото или создание мема из фото
     if is_photo_editor_request(text, has_photo=bool(photo_file)):
         target_name = "Миша" if is_owner_sender else "Ярик"
         if photo_file and os.path.exists(photo_file):

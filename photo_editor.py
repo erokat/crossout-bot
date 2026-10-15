@@ -48,6 +48,9 @@ def is_photo_editor_request(text, has_photo=False):
         "наложи текст", "сделай демотиватор", "вставь текст", "допиши"
     ]
     if any(tr in t for tr in explicit_triggers):
+        # If user asks to search/find an image in the internet, it's an image search request, not a local photo editor request
+        if not has_photo and any(w in t for w in ["найди", "скинь", "поищи", "покажи", "скачай", "в интернете", "из интернета"]):
+            return False
         return True
 
     # If photo is already attached/replied and user asks to add something

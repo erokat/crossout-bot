@@ -13,10 +13,12 @@ MEDIA_DIR = os.path.join(BASE_DIR, "media")
 MUSIC_DIR = os.path.join(MEDIA_DIR, "music")
 GIF_DIR = os.path.join(MEDIA_DIR, "gifs")
 VIDEO_DIR = os.path.join(MEDIA_DIR, "videos")
+IMAGES_DIR = os.path.join(MEDIA_DIR, "images")
 
 os.makedirs(MUSIC_DIR, exist_ok=True)
 os.makedirs(GIF_DIR, exist_ok=True)
 os.makedirs(VIDEO_DIR, exist_ok=True)
+os.makedirs(IMAGES_DIR, exist_ok=True)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
@@ -38,6 +40,10 @@ def clean_query(text, media_type="music"):
                 return "Beethoven symphony 5 orchestra epic"
         t = re.sub(r"(?i)^(?:музыку|музыка|трек|песню|песня|бит|симфонию|симфония)\s*", "", t).strip()
         return t or "DNCE Cake by the ocean"
+    elif media_type == "image":
+        t = re.sub(r"(?i)^(?:фото|фотку|фотографию|картинку|пикчу|арт|изображение|в\s+интернете|в\s+сети|в\s+яндексе|в\s+гугле)\s*", "", t).strip()
+        t = re.sub(r"(?i)^(?:локации|локацию|персонажа)\s*", "", t).strip()
+        return t or "gaming landscape"
     else:
         t = re.sub(r"(?i)^(?:видео|видос|клип|гиф|гифку|гифка)\s*", "", t).strip()
         return t or "funny cat"
@@ -350,3 +356,110 @@ def find_and_download_video(query, max_filesize="40M"):
         print(f"[MEDIA FINDER] Video download error: {e}")
 
     return None, clean_q
+
+def find_and_download_image(query, dest_dir=None):
+    """
+    Ищет изображение в сети через Bing Images и Yandex Images, проверяет через PIL и сохраняет в JPEG.
+    Возвращает (file_path, clean_query) или (None, clean_query).
+    """
+    if not dest_dir:
+        dest_dir = IMAGES_DIR
+    os.makedirs(dest_dir, exist_ok=True)
+
+    clean_q = clean_query(query, "image")
+    q_hash = hashlib.md5(clean_q.lower().encode("utf-8")).hexdigest()[:10]
+    out_file = os.path.join(dest_dir, f"img_{q_hash}.jpg")
+
+    if os.path.exists(out_file) and os.path.getsize(out_file) > 10000:
+        return out_file, clean_q
+
+    urls = []
+
+    # 1. Bing Images Search
+    try:
+        bing_url = f"https://www.bing.com/images/search?q={urllib.parse.quote(clean_q)}"
+        req = urllib.request.Request(bing_url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            found = re.findall(r'murl&quot;:&quot;(https?://[^&]+?)&quot;', html)
+            for u in found:
+                if any(ext in u.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                    urls.append(u)
+    except Exception as e:
+        print(f"[MEDIA FINDER] Bing image error: {e}")
+
+    # 2. Yandex Images Search
+    if len(urls) < 4:
+        try:
+            y_url = f"https://yandex.ru/images/search?text={urllib.parse.quote(clean_q)}"
+            req = urllib.request.Request(y_url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+                found = re.findall(r'img_url=([^\x26\s\"<>]+)', html)
+                for u in found:
+                    unq = urllib.parse.unquote(u)
+                    if any(ext in unq.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                        urls.append(unq)
+        except Exception as e:
+            print(f"[MEDIA FINDER] Yandex image error: {e}")
+
+    # Download candidate and verify with PIL
+    from PIL import Image
+    for cand_url in urls[:12]:
+        try:
+            req = urllib.request.Request(cand_url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = resp.read()
+                if len(data) < 5000:
+                    continue
+                temp_raw = out_file + f".tmp_{os.getpid()}_{int(time.time())}"
+                with open(temp_raw, "wb") as f:
+                    f.write(data)
+                try:
+                    with Image.open(temp_raw) as img:
+                        img_rgb = img.convert("RGB")
+                        img_rgb.save(out_file, "JPEG", quality=95)
+                    if os.path.exists(temp_raw):
+                        os.remove(temp_raw)
+                    return out_file, clean_q
+                except Exception:
+                    if os.path.exists(temp_raw):
+                        os.remove(temp_raw)
+                    continue
+        except Exception:
+            continue
+
+    return None, clean_q
+
+def extract_image_search_and_caption(text):
+    """
+    Проверяет, содержит ли сообщение запрос на поиск изображения в сети,
+    и извлекает поисковый запрос и надпись (если запрошена).
+    """
+    if not text:
+        return False, None, None
+    t = text.strip()
+    t_clean = re.sub(r"(?i)^(?:!бот|!bot|/бот|/bot|бот[,\s]*|ботик[,\s]*|пожалуйста[,\s]*|плиз[,\s]*)\s*", "", t).strip()
+
+    search_pat = r"(?i)^(?:найди(?:\s+в\s+интернете|\s+в\s+сети|\s+в\s+гугле|\s+в\s+яндексе)?|скинь|поищи|покажи|скачай|отправь|кинь)\s+(?:фото|фотку|картинку|пикчу|арт|изображение|в\s+интернете|в\s+сети|в\s+яндексе|в\s+гугле)\s*(.+)$"
+    m = re.search(search_pat, t_clean)
+    if not m:
+        m2 = re.search(r"(?i)^найди\s+в\s+интернете\s+(.+)$", t_clean)
+        if m2:
+            body = m2.group(1).strip()
+        else:
+            return False, None, None
+    else:
+        body = m.group(1).strip()
+
+    caption_pat = r"(?i)\s*(?:,\s*)?(?:\bи\s+)?(?:добавь\s+надпись|сделай\s+надпись|напиши|подпиши|с\s+надписью|с\s+текстом|добавь\s+текст|сделай\s+мем)\s*[:\s-]+\s*(.+)$"
+    m_cap = re.search(caption_pat, body)
+    if m_cap:
+        caption = m_cap.group(1).strip()
+        search_query = body[:m_cap.start()].strip()
+    else:
+        caption = None
+        search_query = body
+
+    search_query = re.sub(r"(?i)^(?:локации|локацию|персонажа|арт|фото|картинку|фотку|пикчу)\s*", "", search_query).strip()
+    return True, search_query, caption
