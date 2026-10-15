@@ -65,6 +65,10 @@ def is_autonomous_task(text, has_media=False):
         return has_media
     t = text.lower().strip()
 
+    from photo_editor import is_photo_editor_request
+    if is_photo_editor_request(t, has_media):
+        return False
+
     # Если уже есть зарегистрированное дополнение под эти триггеры
     ext_path, _ = find_existing_extension(t)
     if ext_path:
@@ -103,6 +107,10 @@ def check_or_classify_autonomous_task(text, has_media=False, ask_ai_fn=None):
     Интеллектуальный классификатор: проверяет быстрые правила и при необходимости
     спрашивает AI, является ли сообщение прямым поручением сделать/сгенерировать что-то.
     """
+    from photo_editor import is_photo_editor_request
+    if is_photo_editor_request(text, has_media):
+        return False
+
     if is_autonomous_task(text, has_media):
         return True
 

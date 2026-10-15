@@ -43,6 +43,7 @@ from dynamic_agent import (
     clear_pending_proposal,
     is_pure_chitchat
 )
+from photo_editor import is_photo_editor_request, edit_photo_with_caption
 
 MISHA_CHITCHAT_POOL = [
     "Здарова, Миша! В ангаре порядок, крафты заправлены. Чем займемся? 🚜🔥",
@@ -502,7 +503,7 @@ def run_antigravity_cli(prompt):
 
     cmd = [agy_bin, "--dangerously-skip-permissions", "-p", prompt]
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
+        res = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
         else:
@@ -802,6 +803,40 @@ def handle_owner_message(msg_data):
         ]
         subprocess.run(cmd_owner)
         return
+
+    # 0.55. Фоторедактор: Добавление надписи / текста на фото или создание мема из фото
+    if is_photo_editor_request(text, has_photo=bool(photo)):
+        if photo and os.path.exists(photo):
+            try:
+                edited_img, caption_res = edit_photo_with_caption(photo, text)
+                cmd_owner = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "owner",
+                    "--photo", edited_img,
+                    "--text", "Держи готовое фото с надписью, Миша! 📸🔥"
+                ]
+                subprocess.run(cmd_owner)
+                return
+            except Exception as e:
+                log_event(f"[PHOTO EDITOR ERROR] {e}")
+                cmd_owner = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "owner",
+                    "--text", f"Миша, не удалось наложить надпись на фото: {e}"
+                ]
+                subprocess.run(cmd_owner)
+                return
+        else:
+            cmd_owner = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--text", "Миша, прикрепи фото или отправь картинку с подписью, чтобы я добавил текст! 📸"
+            ]
+            subprocess.run(cmd_owner)
+            return
 
     # 0.6. Домашнее задание / решение задач / перевод текста / учеба
     if is_homework_or_study(text, has_photo=bool(photo)):
@@ -1242,8 +1277,49 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
-    # 1.6. Домашнее задание / решение задач / перевод текста / учеба
+    # 1.55. Фоторедактор: Добавление надписи / текста на фото или создание мема из фото
     photo_file = msg_data.get("photo")
+    if is_photo_editor_request(text, has_photo=bool(photo_file)):
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        if photo_file and os.path.exists(photo_file):
+            log_event(f"[ORCHESTRATOR] Photo editor triggered for {target_name}: {text!r} (photo={photo_file})")
+            try:
+                edited_img, caption_res = edit_photo_with_caption(photo_file, text)
+                reply_caption = f"Держи готовое фото с надписью, {target_name}! 📸🔥" if is_owner_sender else f"Ярик, готово! Лови с пылу с жару 📸🚜"
+                send_cmd = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "yarik",
+                    "--photo", edited_img,
+                    "--text", reply_caption,
+                    "--reply-to", str(msg_id)
+                ]
+                subprocess.run(send_cmd)
+                return
+            except Exception as e:
+                log_event(f"[PHOTO EDITOR ERROR] {e}")
+                err_cmd = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "yarik",
+                    "--text", f"{target_name}, не удалось наложить надпись на фото: {e}",
+                    "--reply-to", str(msg_id)
+                ]
+                subprocess.run(err_cmd)
+                return
+        else:
+            prompt_photo = f"{target_name}, чтобы добавить надпись на картинку или сделать мем — прикрепи фото к сообщению или ответь (reply) на сообщение с фото! 📸"
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--text", prompt_photo,
+                "--reply-to", str(msg_id)
+            ]
+            subprocess.run(send_cmd)
+            return
+
+    # 1.6. Домашнее задание / решение задач / перевод текста / учеба
     is_homework = is_homework_or_study(text, has_photo=bool(photo_file))
     if is_homework:
         recipient_name = "Миша" if is_owner_sender else "Ярик"
