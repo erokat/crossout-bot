@@ -821,6 +821,12 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         except Exception as ge:
             print(f"[DYNAMIC SKILL ENGINE] GDrive backup notice: {ge}")
 
+        try:
+            from github_sync import push_skill_to_github
+            push_skill_to_github(skill_name=skill_name, file_path=script_path, code=code)
+        except Exception as ghe:
+            print(f"[DYNAMIC SKILL ENGINE] GitHub push notice: {ghe}")
+
         register_extension(skill_name, script_filename, skill_desc, triggers[:7], produces_media=bool(new_media))
         print(f"[DYNAMIC SKILL ENGINE] Successfully registered dynamic skill: {skill_name} (triggers: {triggers[:7]}, produces_media={bool(new_media)})")
 

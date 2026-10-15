@@ -356,6 +356,15 @@ def restore_dynamic_skills(skills_dir=None, install_requirements=True):
         with open(init_file, "w", encoding="utf-8") as f:
             f.write("# -*- coding: utf-8 -*-\n")
 
+    # 0. Sync missing skills from GitHub repository
+    try:
+        from github_sync import sync_skills_from_github
+        gh_synced = sync_skills_from_github(skills_dir=s_dir, install_requirements=False, timeout=10)
+        if gh_synced > 0:
+            print(f"[DYNAMIC SKILLS] Synced {gh_synced} skill(s) from GitHub repository.")
+    except Exception as ghe:
+        print(f"[DYNAMIC SKILLS] GitHub sync notice: {ghe}")
+
     # 1. Seed any local .py skill files from disk into SQLite dynamic_skills table
     if os.path.exists(s_dir):
         for fname in os.listdir(s_dir):
