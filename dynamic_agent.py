@@ -240,15 +240,15 @@ def run_script(script_path, input_file=None, task_text=None, timeout=60):
     except Exception as e:
         return -1, "", str(e)
 
-def find_newest_media(before_files, stdout=""):
+def find_newest_media(before_files, stdout="", min_mtime=0):
     # 1. Проверяем явный путь в stdout
     if stdout:
         m = re.findall(r"([/\w.-]+\.(?:png|jpg|jpeg|gif|webp|mp4|webm|mov|mp3|ogg|wav|csv|xlsx|txt|pdf))", stdout, re.IGNORECASE)
         for cand in reversed(m):
-            if os.path.exists(cand) and os.path.isfile(cand):
+            if os.path.exists(cand) and os.path.isfile(cand) and cand not in before_files:
                 return cand
             full_cand = os.path.join(BASE_DIR, cand.lstrip("/"))
-            if os.path.exists(full_cand) and os.path.isfile(full_cand):
+            if os.path.exists(full_cand) and os.path.isfile(full_cand) and full_cand not in before_files:
                 return full_cand
 
     # 2. Проверяем папки media/ и extensions/
@@ -260,8 +260,12 @@ def find_newest_media(before_files, stdout=""):
                 for f in files:
                     if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".webm", ".mov", ".mp3", ".ogg", ".wav", ".csv", ".xlsx", ".txt", ".pdf")):
                         fp = os.path.join(root, f)
-                        if os.path.isfile(fp) and (time.time() - os.path.getmtime(fp) < 90) and fp not in before_files:
-                            all_candidates.append(fp)
+                        if os.path.isfile(fp) and fp not in before_files:
+                            mtime = os.path.getmtime(fp)
+                            if min_mtime > 0 and mtime >= (min_mtime - 1.0):
+                                all_candidates.append(fp)
+                            elif min_mtime == 0 and (time.time() - mtime < 60):
+                                all_candidates.append(fp)
 
     if all_candidates:
         all_candidates.sort(key=os.path.getmtime, reverse=True)
@@ -281,10 +285,15 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     # 1. Проверяем, есть ли уже готовое дополнение для этой задачи (не требует AI!)
     existing_script, ext_info = find_existing_extension(task_text)
     if existing_script:
+        before_files = set()
+        for root, _, files in os.walk(MEDIA_DIR):
+            for f in files:
+                before_files.add(os.path.join(root, f))
+        start_time = time.time()
         print(f"[DYNAMIC AGENT] Reusing existing extension: {existing_script}")
         code_rc, stdout, stderr = run_script(existing_script, input_file=photo_path, task_text=task_text)
         if code_rc == 0:
-            new_media = find_newest_media(set(), stdout=stdout)
+            new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time)
             if any(marker in stdout for marker in ["📍", "🌡️", "📊", "☀️", "🌤️", "☁️"]):
                 report = stdout
             else:
@@ -365,6 +374,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     for root, _, files in os.walk(MEDIA_DIR):
         for f in files:
             before_files.add(os.path.join(root, f))
+    start_time = time.time()
 
     # Первый запуск
     code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
@@ -407,7 +417,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         print(f"[DYNAMIC AGENT] Successfully registered new extension: {ext_slug} (triggers: {words[:7]})")
 
     # Ищем созданный медиафайл
-    new_media = find_newest_media(before_files, stdout=stdout)
+    new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time)
 
     final_text_parts = []
     final_text_parts.append(f"🧩 **Сгенерировано новое дополнение к боту:** `{script_filename}`")
