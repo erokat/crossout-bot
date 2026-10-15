@@ -913,8 +913,40 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
             ]
             joke_data = random.choice(jokes_rw)
         else:
-            is_xo_topic = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер", "крафт", "бочки", "рандом", "пустош"])
-            if is_xo_topic:
+            is_heather_ptur = ("вереск" in theme_lower) and ("птур" in theme_lower or "ракета" in theme_lower or "кларнет" in theme_lower)
+            is_xo_topic = is_heather_ptur or any(w in theme_lower for w in [
+                "кросс", "крос", "crossout", "газген", "утюг", "ховер", "крафт",
+                "бочки", "рандом", "пустош", "вереск", "птур", "кларнет",
+                "скорп", "мамонт", "жнец", "дробовик", "тошнитель", "реликт"
+            ])
+            if is_heather_ptur:
+                jokes_target = [
+                    {
+                        "style": "caption",
+                        "title": "Геймплей на Вереске vs Геймплей на ПТУРе в Crossout:",
+                        "subtitle": "Стреляешь навесом на удачу через полкарты vs 10 секунд ведешь ракету, пока твой крафт сзади разбирают на винтики 💀",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "demotivator",
+                        "title": "ВЕРЕСК VS ПТУР",
+                        "subtitle": "Один жмет ЛКМ и надеется на рандом, второй смотрит кино от первого лица до первого забора",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "impact",
+                        "title": "ВЕРЕСК: ЗАПУСТИЛ И ЗАБЫЛ",
+                        "subtitle": "ПТУР: ВЕЛ РАКЕТУ 15 СЕКУНД И ВРЕЗАЛСЯ В ТРУБУ СОЮЗНИКА",
+                        "sound_or_extra": None
+                    },
+                    {
+                        "style": "pov",
+                        "title": "ЖИЗА: Момент сравнения геймплея миномета Вереск и ПТУРа",
+                        "subtitle": "На Вереске ты бог баллистики, на ПТУРе — оператор дрона-камикадзе в гараже",
+                        "sound_or_extra": None
+                    }
+                ]
+            elif is_xo_topic:
                 jokes_target = [
                     {
                         "style": "caption",
@@ -991,6 +1023,7 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     style = joke_data.get("style", "caption").lower()
     t_top = joke_data.get("title", f"МЕМ: {clean_theme.upper()}")
     t_bot = joke_data.get("subtitle", "Классика жанра, которой нет объяснения")
+    t_extra = joke_data.get("sound_or_extra")
     # Enforce style compatibility so styles look natural with the image
     img_path_str = str(img_path).lower() if img_path else ""
     if "gigachad" in img_path_str or (curated_match and curated_match.get("name") in ["gigachad", "roll_safe", "is_this_a_pigeon", "bernie_sanders"]):

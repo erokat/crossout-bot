@@ -56,6 +56,27 @@ def find_existing_extension(task_text):
                 return fp, info
     return None, None
 
+def is_explicit_meme_request(text):
+    if not text:
+        return False
+    t = text.lower().strip()
+    # Explicit coding/module creation requests must not be treated as simple memes
+    code_words = [
+        "напиши код", "напиши скрипт", "создай скрипт", "создай модуль",
+        "создай дополнение", "напиши дополнение", "добавь модуль", "добавь дополнение",
+        "сделай модуль", "сделай скрипт", "сделай дополнение"
+    ]
+    if any(cw in t for cw in code_words):
+        return False
+    meme_words = ["мем", "мэм", "мемасик", "мемчик", "мемы", "мэмы", "демотиватор"]
+    return any(mw in t for mw in meme_words)
+
+def is_meme_or_media_request(text):
+    if not text:
+        return False
+    t = text.lower().strip()
+    return any(w in t for w in ["мем", "мэм", "мемасик", "мемчик", "пикч", "картинк", "демотиватор", "кросаут", "кроссаут", "crossout"])
+
 def is_autonomous_task(text, has_media=False):
     """
     Определяет, требует ли запрос динамического создания нового дополнения,
@@ -67,6 +88,9 @@ def is_autonomous_task(text, has_media=False):
 
     from photo_editor import is_photo_editor_request
     if is_photo_editor_request(t, has_media):
+        return False
+
+    if is_explicit_meme_request(t):
         return False
 
     # Если уже есть зарегистрированное дополнение под эти триггеры
@@ -109,6 +133,9 @@ def check_or_classify_autonomous_task(text, has_media=False, ask_ai_fn=None):
     """
     from photo_editor import is_photo_editor_request
     if is_photo_editor_request(text, has_media):
+        return False
+
+    if is_explicit_meme_request(text):
         return False
 
     if is_autonomous_task(text, has_media):
@@ -420,11 +447,43 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
 
     ai_reply = ask_ai_fn(prompt, photo_path=photo_path)
     if not ai_reply:
-        return f"{sender_name}, не удалось сгенерировать дополнение для этой задачи. Попробуй уточнить требования!", None
+        # Попытка 2: более компактный и прямой промпт без длинных пояснений (для защиты от таймаута)
+        print("[DYNAMIC AGENT] Prompt 1 timed out or failed. Retrying with compact prompt...")
+        compact_prompt = (
+            f"Напиши автономный Python 3 скрипт для задачи Telegram-бота: «{task_text}».\n"
+            f"# EXTENSION: ext_mod | {task_text[:50]}\n"
+            "Все созданные файлы сохраняй в media/ и выведи путь через print(result_path).\n"
+            "Код верни строго в ```python ... ``` без лишних рассуждений."
+        )
+        ai_reply = ask_ai_fn(compact_prompt, photo_path=photo_path)
 
-    code = extract_python_code(ai_reply)
+    code = extract_python_code(ai_reply) if ai_reply else None
+
+    # Если AI вообще не смог сгенерировать код
     if not code:
-        return ai_reply, None
+        proposal_user = "owner" if sender_name in ["Миша", "erokat", "Ты (Владелец)"] else str(sender_name)
+        set_pending_proposal(proposal_user, task_text)
+
+        # Если это запрос на мем / графику / Crossout — спасаем ситуацию резервным генератором мемов!
+        if is_meme_or_media_request(task_text):
+            try:
+                from meme_generator import generate_crossout_meme
+                fallback_meme = generate_crossout_meme(theme=task_text, recipient="owner" if proposal_user == "owner" else "yarik")
+                if fallback_meme and os.path.exists(fallback_meme):
+                    report = (
+                        f"⚠️ Не удалось с первого раза скомпилировать отдельный модуль из-за таймаута AI, "
+                        f"но я перехватил задачу и сгенерировал мем через штатный генератор! 🔥\n\n"
+                        f"💡 Хочешь, чтобы я доделал и закрепил отдельный модуль генерации для этого? Напиши «доделай модуль»!"
+                    )
+                    return report, fallback_meme
+            except Exception as e:
+                print(f"[DYNAMIC AGENT] Fallback meme generation failed: {e}")
+
+        return (
+            f"⚠️ {sender_name}, произошла заминка: AI-движок не успел сформировать код дополнения (таймаут генерации).\n\n"
+            f"Я сохранил задачу «{task_text}». Могу исправить и доделать этот модуль генерации!\n"
+            f"Напиши «доделай модуль» или уточни требования 👍"
+        ), None
 
     # Извлекаем метаданные дополнения
     slug_match = re.search(r"#\s*EXTENSION:\s*([a-zA-Z0-9_-]+)\s*\|\s*(.+)", code)
@@ -455,25 +514,30 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         if installed:
             code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
 
-    # Self-healing / самоотладка при ошибках
+    # Self-healing / самоотладка при ошибках (до 2 попыток)
     if code_rc != 0 and stderr:
-        fix_prompt = (
-            f"Скрипт дополнения для «{task_text}» упал с ошибкой:\n\n"
-            f"```\n{stderr[:900]}\n```\n\n"
-            f"Исходный код:\n```python\n{code}\n```\n\n"
-            "Устрани ошибку, исправь логику и верни исправленный, полностью работающий Python-код строго внутри ```python ... ```."
-        )
-        fixed_reply = ask_ai_fn(fix_prompt)
-        fixed_code = extract_python_code(fixed_reply)
-        if fixed_code:
-            with open(script_path, "w", encoding="utf-8") as f:
-                f.write("# -*- coding: utf-8 -*-\n")
-                f.write(f"# Auto-fixed Antigravity Extension: {ext_desc}\n\n")
-                f.write(fixed_code)
-            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
-            if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
-                if auto_install_missing_packages(stderr):
-                    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
+        for attempt in range(2):
+            fix_prompt = (
+                f"Скрипт дополнения для «{task_text}» упал с кодом {code_rc}.\n"
+                f"Ошибка:\n```\n{stderr[:900]}\n```\n\n"
+                f"Исходный код:\n```python\n{code}\n```\n\n"
+                "Устрани ошибку, исправь логику и верни исправленный, полностью работающий Python-код строго внутри ```python ... ```."
+            )
+            fixed_reply = ask_ai_fn(fix_prompt)
+            fixed_code = extract_python_code(fixed_reply)
+            if fixed_code:
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write("# -*- coding: utf-8 -*-\n")
+                    f.write(f"# Auto-fixed Antigravity Extension: {ext_desc} (attempt {attempt + 1})\n\n")
+                    f.write(fixed_code)
+                code = fixed_code
+                code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
+                if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
+                    if auto_install_missing_packages(stderr):
+                        code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
+                if code_rc == 0:
+                    print(f"[DYNAMIC AGENT] Self-healing succeeded on attempt {attempt + 1}!")
+                    break
 
     # Ищем созданный медиафайл (если задача не чисто текстовая)
     new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=script_path)
@@ -521,7 +585,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         return natural_caption, new_media
 
     # Если чисто текстовый результат
-    if stdout:
+    if stdout and code_rc == 0:
         clean_out = "\n".join([line for line in stdout.splitlines() if not line.startswith("/") and not line.endswith((".png", ".jpg", ".mp4", ".mp3", ".xlsx", ".pdf"))])
         if clean_out.strip():
             return clean_out.strip(), None
@@ -529,7 +593,31 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     if code_rc == 0:
         return f"Готово, {sender_name}! Всё четко сработало 👍", None
     else:
-        return f"{sender_name}, при выполнении возникла заминка. Попробуй уточнить запрос!", None
+        # Обработка ошибки выполнения скрипта: сообщаем суть ошибки и предлагаем доделать модуль
+        err_lines = [l.strip() for l in (stderr or "").strip().splitlines() if l.strip()]
+        last_err = err_lines[-1] if err_lines else f"код {code_rc}"
+        proposal_user = "owner" if sender_name in ["Миша", "erokat", "Ты (Владелец)"] else str(sender_name)
+        set_pending_proposal(proposal_user, task_text)
+
+        if is_meme_or_media_request(task_text):
+            try:
+                from meme_generator import generate_crossout_meme
+                fallback_meme = generate_crossout_meme(theme=task_text, recipient="owner" if proposal_user == "owner" else "yarik")
+                if fallback_meme and os.path.exists(fallback_meme):
+                    report = (
+                        f"⚠️ Модуль генерации завершился с ошибкой: `{last_err}`.\n"
+                        f"Я попытался исправить код автоматически, а пока держи готовый мем через резервный движок! 🔥\n\n"
+                        f"💡 Хочешь, чтобы я доделал и отладил этот модуль? Напиши «доделай модуль»!"
+                    )
+                    return report, fallback_meme
+            except Exception as e:
+                print(f"[DYNAMIC AGENT] Fallback meme generation failed after script error: {e}")
+
+        return (
+            f"⚠️ Ошибка выполнения модуля для «{task_text}»:\n`{last_err}`\n\n"
+            f"Я попытался исправить скрипт через самоотладку, но требуется доработка.\n"
+            f"Предлагаю доделать этот модуль генерации! Напиши «доделай модуль» или «исправь» 👍"
+        ), None
 
 def set_pending_proposal(user_id, task_text, bot_msg_id=None):
     from db import set_kv

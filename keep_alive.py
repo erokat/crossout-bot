@@ -445,34 +445,37 @@ def ask_gemini_api(prompt, photo_path=None, system_instruction=None):
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not gemini_key:
         return None
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
-        parts = []
-        if photo_path and os.path.exists(photo_path):
-            mime = "image/jpeg" if photo_path.lower().endswith((".jpg", ".jpeg")) else "image/png"
-            with open(photo_path, "rb") as f:
-                b64_img = base64.b64encode(f.read()).decode("utf-8")
-            parts.append({"inlineData": {"mimeType": mime, "data": b64_img}})
-        parts.append({"text": prompt})
-        body = {"contents": [{"parts": parts}]}
-        if system_instruction:
-            body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+    models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite"]
+    for model in models:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+            parts = []
+            if photo_path and os.path.exists(photo_path):
+                mime = "image/jpeg" if photo_path.lower().endswith((".jpg", ".jpeg")) else "image/png"
+                with open(photo_path, "rb") as f:
+                    b64_img = base64.b64encode(f.read()).decode("utf-8")
+                parts.append({"inlineData": {"mimeType": mime, "data": b64_img}})
+            parts.append({"text": prompt})
+            body = {"contents": [{"parts": parts}]}
+            if system_instruction:
+                body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            res_data = json.loads(resp.read().decode("utf-8"))
-            candidates = res_data.get("candidates", [])
-            if candidates:
-                parts_out = candidates[0].get("content", {}).get("parts", [])
-                out_texts = [p.get("text", "") for p in parts_out if "text" in p]
-                if out_texts:
-                    return "".join(out_texts).strip()
-    except Exception as e:
-        print(f"[GEMINI API EXCEPTION] {e}")
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=40) as resp:
+                res_data = json.loads(resp.read().decode("utf-8"))
+                candidates = res_data.get("candidates", [])
+                if candidates:
+                    parts_out = candidates[0].get("content", {}).get("parts", [])
+                    out_texts = [p.get("text", "") for p in parts_out if "text" in p]
+                    if out_texts:
+                        return "".join(out_texts).strip()
+        except Exception as e:
+            print(f"[GEMINI API EXCEPTION ({model})] {e}")
+            continue
     return None
 
 def ocr_image_file(photo_path):
@@ -491,7 +494,7 @@ def ocr_image_file(photo_path):
         print(f"[OCR ERROR] {e}")
         return ""
 
-def run_antigravity_cli(prompt):
+def run_antigravity_cli(prompt, timeout=180):
     agy_bin = shutil.which("agy") or shutil.which("antigravity")
     if not agy_bin:
         for candidate in ["/usr/local/bin/agy", "/root/.local/bin/agy", "/data/data/com.termux/files/usr/bin/agy"]:
@@ -503,7 +506,7 @@ def run_antigravity_cli(prompt):
 
     cmd = [agy_bin, "--dangerously-skip-permissions", "-p", prompt]
     try:
-        res = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        res = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
         else:
@@ -532,7 +535,18 @@ def ask_ai(prompt, photo_path=None, system_instruction=None):
         combined_prompt = f"{system_instruction}\n\n{combined_prompt}"
 
     # 3. Call Antigravity CLI
-    return run_antigravity_cli(combined_prompt)
+    res = run_antigravity_cli(combined_prompt, timeout=180)
+    if res:
+        return res
+
+    # 4. Fallback: if long prompt failed, retry with a shorter/compact prompt
+    if len(combined_prompt) > 350:
+        compact_prompt = prompt[:400]
+        res_compact = run_antigravity_cli(compact_prompt, timeout=90)
+        if res_compact:
+            return res_compact
+
+    return None
 
 def is_homework_or_study(text, has_photo=False):
     if not text and not has_photo:
@@ -680,7 +694,9 @@ def handle_owner_message(msg_data):
             r"\bда\b", r"\bдавай\b", r"\bсгенерируй\b", r"\bделай\b", r"\bсоздай\b",
             r"\bнапиши\b", r"\bго\b", r"\bок\b", r"\bага\b", r"\bда сгенерируй\b",
             r"\bда делай\b", r"\bда создай\b", r"\bделай давай\b", r"\bконечно\b",
-            r"\bгенерируй\b", r"\bсделай\b"
+            r"\bгенерируй\b", r"\bсделай\b", r"\bдоделай\b", r"\bдоделать\b",
+            r"\bдоделай модуль\b", r"\bдоделай генератор\b", r"\bисправь\b",
+            r"\bпочини\b", r"\bпопробуй еще\b", r"\bпопробуй ещё\b", r"\bпопробуй\b"
         ])
         is_reject = any(re.search(p, t_low) for p in [
             r"\bнет\b", r"\bне надо\b", r"\bне генерируй\b", r"\bотмена\b", r"\bотбой\b",
@@ -855,20 +871,6 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd_owner)
         return
 
-    # 0.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
-    if check_or_classify_autonomous_task(text, has_media=bool(photo), ask_ai_fn=ask_ai):
-        log_event(f"[ORCHESTRATOR] Executing autonomous task for Owner: {text!r}")
-        res_text, res_media = execute_autonomous_task(text, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai)
-        log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
-
-        cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
-        if res_media and os.path.exists(res_media):
-            cmd_owner.extend(["--photo", res_media, "--text", res_text])
-        else:
-            cmd_owner.extend(["--text", res_text])
-        subprocess.run(cmd_owner)
-        return
-
     # 1. Поручение отправить что-то Ярику (мем или сообщение)
     is_yarik_dest = any(w in t_lower for w in ["ярик", "ярику", "кореш"]) or is_meme_theme_req
     if is_yarik_dest:
@@ -938,6 +940,20 @@ def handle_owner_message(msg_data):
             subprocess.run(cmd)
             if count > 1 and idx < count - 1:
                 time.sleep(1.5)
+        return
+
+    # 0.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
+    if check_or_classify_autonomous_task(text, has_media=bool(photo), ask_ai_fn=ask_ai):
+        log_event(f"[ORCHESTRATOR] Executing autonomous task for Owner: {text!r}")
+        res_text, res_media = execute_autonomous_task(text, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai)
+        log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
+
+        cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
+        if res_media and os.path.exists(res_media):
+            cmd_owner.extend(["--photo", res_media, "--text", res_text])
+        else:
+            cmd_owner.extend(["--text", res_text])
+        subprocess.run(cmd_owner)
         return
 
     # 3. Запрос ссылки на стикерпак от владельца
@@ -1090,7 +1106,9 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             r"\bда\b", r"\bдавай\b", r"\bсгенерируй\b", r"\bделай\b", r"\bсоздай\b",
             r"\bнапиши\b", r"\bго\b", r"\bок\b", r"\bага\b", r"\bда сгенерируй\b",
             r"\bда делай\b", r"\bда создай\b", r"\bделай давай\b", r"\bконечно\b",
-            r"\bгенерируй\b", r"\bсделай\b"
+            r"\bгенерируй\b", r"\bсделай\b", r"\bдоделай\b", r"\bдоделать\b",
+            r"\bдоделай модуль\b", r"\bдоделай генератор\b", r"\bисправь\b",
+            r"\bпочини\b", r"\bпопробуй еще\b", r"\bпопробуй ещё\b", r"\bпопробуй\b"
         ])
         is_reject = any(re.search(p, t_low) for p in [
             r"\bнет\b", r"\bне надо\b", r"\bне генерируй\b", r"\bотмена\b", r"\bотбой\b",
@@ -1344,33 +1362,14 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
-    # 1.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
-    is_auto_task = check_or_classify_autonomous_task(text, has_media=bool(photo_file), ask_ai_fn=ask_ai)
-    if is_auto_task:
-        target_name = "Миша" if is_owner_sender else "Ярик"
-        log_event(f"[ORCHESTRATOR] Executing autonomous task for {target_name}: {text!r}")
-        res_text, res_media = execute_autonomous_task(text, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai)
-        log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
-        send_cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "yarik",
-            "--no-copy",
-            "--reply-to", str(msg_id)
-        ]
-        if res_media and os.path.exists(res_media):
-            send_cmd.extend(["--photo", res_media, "--text", res_text])
-        else:
-            send_cmd.extend(["--text", res_text])
-        subprocess.run(send_cmd)
-        return
-
-    # 2. Запрос на мем / картинку
-    is_meme_word = any(w in t_lower for w in ["мем", "мэм", "пикч", "картинк", "гиф", "сделай", "склепай", "запили", "нарисуй"])
+    # 1.65. Запрос на мем / картинку
+    is_explicit_meme = any(w in t_lower for w in ["мем", "мэм", "пикч", "картинк", "гиф", "демотиватор", "мемасик", "мемчик", "мемы", "мэмы"])
+    is_meme_action = any(w in t_lower for w in ["сделай", "склепай", "запили", "нарисуй", "сгенерируй", "создай", "скинь", "кинь", "выдай"]) and is_explicit_meme
+    is_meme_word = is_explicit_meme or is_meme_action
     is_another_word = any(w in t_lower for w in ["другое", "другой", "следующ", "новеньк", "переделай", "еще", "ещё"]) and any(w in t_lower for w in ["скинь", "давай", "дай", "покажи", "кинь", "сделай", "ботик", "бот", "выдай"])
     is_reply_to_media = bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["скинь", "давай", "другое", "другой", "еще", "ещё", "переделай", "не то", "фигня", "хуйня", "говно", "заново", "повтори"])
 
-    if (is_meme_word or is_another_word or is_reply_to_media) and not is_search_video and not is_homework and not is_auto_task:
+    if (is_meme_word or is_another_word or is_reply_to_media) and not is_search_video and not is_homework:
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "тоже самое"])
         count = extract_meme_count(text)
         recipient_target = "owner" if is_owner_sender else "yarik"
@@ -1531,6 +1530,27 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 "--reply-to", str(msg_id)
             ]
             subprocess.run(confirm_cmd)
+        return
+
+    # 1.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
+    is_auto_task = check_or_classify_autonomous_task(text, has_media=bool(photo_file), ask_ai_fn=ask_ai)
+    if is_auto_task:
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        log_event(f"[ORCHESTRATOR] Executing autonomous task for {target_name}: {text!r}")
+        res_text, res_media = execute_autonomous_task(text, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai)
+        log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--no-copy",
+            "--reply-to", str(msg_id)
+        ]
+        if res_media and os.path.exists(res_media):
+            send_cmd.extend(["--photo", res_media, "--text", res_text])
+        else:
+            send_cmd.extend(["--text", res_text])
+        subprocess.run(send_cmd)
         return
 
     # 3. Запрос на отправку ссылки на стикерпак (живой разговорный ответ)
