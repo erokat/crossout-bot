@@ -389,7 +389,7 @@ def find_and_download_image(query, dest_dir=None):
         print(f"[MEDIA FINDER] Bing image error: {e}")
 
     # 2. Yandex Images Search
-    if len(urls) < 4:
+    if len(urls) < 6:
         try:
             y_url = f"https://yandex.ru/images/search?text={urllib.parse.quote(clean_q)}"
             req = urllib.request.Request(y_url, headers=HEADERS)
@@ -403,9 +403,33 @@ def find_and_download_image(query, dest_dir=None):
         except Exception as e:
             print(f"[MEDIA FINDER] Yandex image error: {e}")
 
-    # Download candidate and verify with PIL
-    from PIL import Image
-    for cand_url in urls[:12]:
+    # 3. Query expansion for games/locations if needed (e.g. Rain World, Crossout)
+    q_lower = clean_q.lower()
+    alt_q = None
+    if "rain world" in q_lower or "рейн ворлд" in q_lower:
+        if "фильтраци" in q_lower or "filtration" in q_lower:
+            alt_q = "Rain World Filtration System screenshot wiki"
+        else:
+            alt_q = f"{clean_q} screenshot game"
+    elif "crossout" in q_lower or "кроссаут" in q_lower:
+        alt_q = f"Crossout {clean_q} screenshot"
+
+    if alt_q and len(urls) < 10:
+        try:
+            bing_url_alt = f"https://www.bing.com/images/search?q={urllib.parse.quote(alt_q)}"
+            req = urllib.request.Request(bing_url_alt, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+                found = re.findall(r'murl&quot;:&quot;(https?://[^&]+?)&quot;', html)
+                for u in found:
+                    if any(ext in u.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                        urls.append(u)
+        except Exception as e:
+            print(f"[MEDIA FINDER] Alt search error: {e}")
+
+    # Download candidate, handle transparency, and verify visibility with PIL
+    from PIL import Image, ImageStat
+    for cand_url in urls[:15]:
         try:
             req = urllib.request.Request(cand_url, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=8) as resp:
@@ -417,8 +441,25 @@ def find_and_download_image(query, dest_dir=None):
                     f.write(data)
                 try:
                     with Image.open(temp_raw) as img:
-                        img_rgb = img.convert("RGB")
+                        # Composite alpha transparency onto a white canvas to prevent pitch black backgrounds
+                        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                            rgba = img.convert("RGBA")
+                            bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+                            img_rgb = Image.alpha_composite(bg, rgba).convert("RGB")
+                        else:
+                            img_rgb = img.convert("RGB")
+
+                        # Verify brightness and contrast to prevent solid black or blank images
+                        stat = ImageStat.Stat(img_rgb)
+                        mean_b = sum(stat.mean) / len(stat.mean)
+                        std_b = sum(stat.stddev) / len(stat.stddev)
+                        if mean_b < 20 or (mean_b < 35 and std_b < 12):
+                            if os.path.exists(temp_raw):
+                                os.remove(temp_raw)
+                            continue
+
                         img_rgb.save(out_file, "JPEG", quality=95)
+
                     if os.path.exists(temp_raw):
                         os.remove(temp_raw)
                     return out_file, clean_q

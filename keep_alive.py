@@ -48,7 +48,15 @@ from dynamic_agent import (
     clear_pending_proposal,
     is_pure_chitchat
 )
-from photo_editor import is_photo_editor_request, edit_photo_with_caption
+from photo_editor import (
+    is_photo_editor_request,
+    edit_photo_with_caption,
+    process_universal_photo_command
+)
+from video_editor import (
+    is_video_editor_request,
+    process_video_command
+)
 from media_finder import find_and_download_image, extract_image_search_and_caption
 
 MISHA_CHITCHAT_POOL = [
@@ -918,17 +926,43 @@ def handle_owner_message(msg_data):
             subprocess.run(cmd_owner)
             return
 
-    # 0.55. Фоторедактор: Добавление надписи / текста на фото или создание мема из фото
+    # 0.53. Видеоредактор для владельца (GIF, скорость, реверс, звук, надпись)
+    video_file = msg_data.get("video") or (photo if photo and photo.lower().endswith((".mp4", ".mov", ".webm", ".mkv")) else None)
+    if is_video_editor_request(text, has_video=bool(video_file)):
+        if video_file and os.path.exists(video_file):
+            log_event(f"[ORCHESTRATOR] Video editor triggered for Owner: {text!r} (video={video_file})")
+            out_vid, reply_cap, is_gif, is_audio = process_video_command(video_file, text)
+            if out_vid and os.path.exists(out_vid):
+                cmd_owner = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "owner",
+                    "--photo", out_vid,
+                    "--text", f"Миша, {reply_cap.lower()}"
+                ]
+                subprocess.run(cmd_owner)
+                return
+            else:
+                cmd_owner = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "owner",
+                    "--text", f"Миша, не удалось обработать видео: {reply_cap}"
+                ]
+                subprocess.run(cmd_owner)
+                return
+
+    # 0.55. Фоторедактор: Добавление стикеров/надписи/фильтров/эффектов на фото
     if is_photo_editor_request(text, has_photo=bool(photo)):
         if photo and os.path.exists(photo):
             try:
-                edited_img, caption_res = edit_photo_with_caption(photo, text)
+                edited_img, reply_cap = process_universal_photo_command(photo, text)
                 cmd_owner = [
                     sys.executable,
                     os.path.join(BASE_DIR, "send.py"),
                     "--to", "owner",
                     "--photo", edited_img,
-                    "--text", "Держи готовое фото с надписью, Миша! 📸🔥"
+                    "--text", f"Миша, {reply_cap.lower()}"
                 ]
                 subprocess.run(cmd_owner)
                 return
@@ -938,7 +972,7 @@ def handle_owner_message(msg_data):
                     sys.executable,
                     os.path.join(BASE_DIR, "send.py"),
                     "--to", "owner",
-                    "--text", f"Миша, не удалось наложить надпись на фото: {e}"
+                    "--text", f"Миша, не удалось обработать фото: {e}"
                 ]
                 subprocess.run(cmd_owner)
                 return
@@ -947,7 +981,7 @@ def handle_owner_message(msg_data):
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "owner",
-                "--text", "Миша, прикрепи фото или отправь картинку с подписью, чтобы я добавил текст! 📸"
+                "--text", "Миша, прикрепи фото или отправь картинку с подписью, чтобы я применил эффект или надпись! 📸"
             ]
             subprocess.run(cmd_owner)
             return
@@ -1489,20 +1523,48 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", err_msg, "--reply-to", str(msg_id)])
             return
 
-    # 1.55. Фоторедактор: Добавление надписи / текста на фото или создание мема из фото
+    # 1.53. Видеоредактор в чате / для Ярика (GIF, скорость, реверс, звук, надпись)
+    video_file = msg_data.get("video") or (photo_file if photo_file and photo_file.lower().endswith((".mp4", ".mov", ".webm", ".mkv")) else None)
+    if is_video_editor_request(text, has_video=bool(video_file)):
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        if video_file and os.path.exists(video_file):
+            log_event(f"[ORCHESTRATOR] Video editor triggered for {target_name}: {text!r} (video={video_file})")
+            out_vid, reply_cap, is_gif, is_audio = process_video_command(video_file, text)
+            if out_vid and os.path.exists(out_vid):
+                send_cmd = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "yarik",
+                    "--photo", out_vid,
+                    "--text", f"{target_name}, {reply_cap.lower()}",
+                    "--reply-to", str(msg_id)
+                ]
+                subprocess.run(send_cmd)
+                return
+            else:
+                err_cmd = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "yarik",
+                    "--text", f"{target_name}, не удалось обработать видео: {reply_cap}",
+                    "--reply-to", str(msg_id)
+                ]
+                subprocess.run(err_cmd)
+                return
+
+    # 1.55. Фоторедактор: Добавление стикеров/надписи/фильтров/эффектов на фото
     if is_photo_editor_request(text, has_photo=bool(photo_file)):
         target_name = "Миша" if is_owner_sender else "Ярик"
         if photo_file and os.path.exists(photo_file):
             log_event(f"[ORCHESTRATOR] Photo editor triggered for {target_name}: {text!r} (photo={photo_file})")
             try:
-                edited_img, caption_res = edit_photo_with_caption(photo_file, text)
-                reply_caption = f"Держи готовое фото с надписью, {target_name}! 📸🔥" if is_owner_sender else f"Ярик, готово! Лови с пылу с жару 📸🚜"
+                edited_img, reply_cap = process_universal_photo_command(photo_file, text)
                 send_cmd = [
                     sys.executable,
                     os.path.join(BASE_DIR, "send.py"),
                     "--to", "yarik",
                     "--photo", edited_img,
-                    "--text", reply_caption,
+                    "--text", f"{target_name}, {reply_cap.lower()}",
                     "--reply-to", str(msg_id)
                 ]
                 subprocess.run(send_cmd)
@@ -1513,13 +1575,13 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                     sys.executable,
                     os.path.join(BASE_DIR, "send.py"),
                     "--to", "yarik",
-                    "--text", f"{target_name}, не удалось наложить надпись на фото: {e}",
+                    "--text", f"{target_name}, не удалось обработать фото: {e}",
                     "--reply-to", str(msg_id)
                 ]
                 subprocess.run(err_cmd)
                 return
         else:
-            prompt_photo = f"{target_name}, чтобы добавить надпись на картинку или сделать мем — прикрепи фото к сообщению или ответь (reply) на сообщение с фото! 📸"
+            prompt_photo = f"{target_name}, чтобы отредактировать фото, добавить стикер или надпись — прикрепи фото к сообщению или ответь (reply) на картинку! 📸"
             send_cmd = [
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
