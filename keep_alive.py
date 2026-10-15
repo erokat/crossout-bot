@@ -274,7 +274,7 @@ def setup_environment():
     try:
         settings_path = os.path.join(gemini_dir, "settings.json")
         settings_data = {
-            "model": "Gemini 3.8 Flash (Medium)",
+            "model": "Gemini 3.8 Flash (High)",
             "allowNonWorkspaceAccess": True,
             "toolPermission": "always-proceed",
             "artifactReviewPolicy": "always-proceed",
@@ -639,7 +639,7 @@ def ocr_image_file(photo_path):
         print(f"[OCR ERROR] {e}")
         return ""
 
-def run_antigravity_cli(prompt, timeout=180):
+def run_antigravity_cli(prompt, timeout=90):
     agy_bin = shutil.which("agy") or shutil.which("antigravity")
     if not agy_bin:
         for candidate in ["/usr/local/bin/agy", "/root/.local/bin/agy", "/data/data/com.termux/files/usr/bin/agy"]:
@@ -649,11 +649,25 @@ def run_antigravity_cli(prompt, timeout=180):
     if not agy_bin:
         agy_bin = "agy"
 
-    cmd = [agy_bin, "--dangerously-skip-permissions", "-p", prompt]
-    max_retries = 3
+    cmd = [agy_bin, "--dangerously-skip-permissions", "--disable-slash-commands", "-p", prompt]
+    env = dict(os.environ)
+    env["CI"] = "1"
+    env["AGY_AUTO_UPDATE"] = "1"
+    env["ANTIGRAVITY_SKIP_UPDATE_CHECK"] = "1"
+    env["DEBIAN_FRONTEND"] = "noninteractive"
+
+    max_retries = 2
     for attempt in range(1, max_retries + 1):
         try:
-            res = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+            res = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+                env=env
+            )
             if res.returncode == 0 and res.stdout.strip():
                 return res.stdout.strip()
             else:
@@ -697,14 +711,14 @@ def ask_ai(prompt, photo_path=None, system_instruction=None):
         combined_prompt = f"{system_instruction}\n\n{combined_prompt}"
 
     # 3. Call Antigravity CLI
-    res = run_antigravity_cli(combined_prompt, timeout=180)
+    res = run_antigravity_cli(combined_prompt, timeout=90)
     if res:
         return res
 
-    # 4. Fallback: if long prompt failed, retry with a shorter/compact prompt
-    if len(combined_prompt) > 350:
-        compact_prompt = prompt[:400]
-        res_compact = run_antigravity_cli(compact_prompt, timeout=90)
+    # 4. Fallback: if long prompt failed, retry with a direct compact instruction (preserving full user prompt!)
+    if len(combined_prompt) > 400:
+        compact_prompt = f"Выполни задачу пользователя строго по инструкции: «{prompt}»\nВыдай готовый результат без лишних рассуждений."
+        res_compact = run_antigravity_cli(compact_prompt, timeout=60)
         if res_compact:
             return res_compact
 
@@ -2145,7 +2159,7 @@ def main():
 
             source = data.get("source")
             messages = data.get("messages", [])
-            log_event(f"[ORCHESTRATOR] Received {len(messages)} messages from {source}: {[m.get('text', '')[:60] for m in messages]}")
+            log_event(f"[ORCHESTRATOR] Received {len(messages)} messages from {source}: {[m.get('text', '') for m in messages]}")
 
             for m in messages:
                 mid = m.get("id")

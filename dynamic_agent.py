@@ -323,7 +323,12 @@ def extract_python_code(response_text):
     pattern = r"```(?:python|py)?\s*([\s\S]*?)\s*```"
     matches = re.findall(pattern, response_text, re.IGNORECASE)
     if matches:
-        return matches[0].strip()
+        return max(matches, key=len).strip()
+    # If model returned raw Python without markdown fences
+    candidate = response_text.strip()
+    if "import " in candidate or "def " in candidate or candidate.startswith("#"):
+        lines = [l for l in candidate.splitlines() if not l.strip().startswith("```")]
+        return "\n".join(lines).strip()
     return None
 
 def get_ffmpeg_binary():
@@ -757,10 +762,11 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         "   - `from db import get_db, get_kv, set_kv` — чтение и запись в базу данных SQLite.\n"
         "   - `from media_finder import find_and_download_image` — поиск и скачивание артов/изображений.\n"
         "   - `from meme_generator import generate_crossout_meme` — штатная генерация мемов Crossout.\n"
-        "2. Рабочие директории:\n"
+        "2. Рабочие директории и генерация медиа:\n"
         "   - `./media/` — сохранение любых сгенерированных медиафайлов (картинки, графики, qr, видео, аудио).\n"
         "   - `./saved_memes/` — сохраненные мемы Crossout.\n"
         "   - `./skills/` — директория динамических навыков бота.\n"
+        "   - ДЛЯ ГЕНЕРАЦИИ КАРТИНОК, ГРАФИКИ, МЕМОВ, АРТОВ И СХЕМ: используй библиотеку `PIL` (`Pillow`) или `matplotlib`. Шрифты лежат в `./media/` (`RussoOne-Regular.ttf`, `Montserrat.ttf`, `Comfortaa.ttf`). Рисуй все запрошенные пользователем сцены, детали, персонажей и надписи качественно! Готовый файл сохраняй в `./media/<filename>.png` и печатай путь в stdout: `print(out_path)`.\n"
         "3. Отправка медиа и сообщений:\n"
         "   - Модуль может напечатать абсолютный путь к готовому медиафайлу в stdout (например: `print('/path/to/media.png')`) и текст сообщения.\n"
         "   - Также модуль может напрямую вызывать отправку через send.py:\n"
@@ -790,10 +796,10 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         # Попытка 2: компактный промпт для защиты от таймаута
         print("[DYNAMIC SKILL ENGINE] Prompt 1 timed out or failed. Retrying with compact prompt...")
         compact_prompt = (
-            f"Напиши автономный Python 3 скрипт в skills/ для задачи Telegram-бота: «{task_text}».\n"
-            f"# SKILL_NAME: skill_mod\n# DESCRIPTION: {task_text[:50]}\n"
-            "Все созданные файлы сохраняй в media/ и выведи путь через print(result_path).\n"
-            "Код верни строго в ```python ... ``` без лишних рассуждений."
+            f"Напиши надежный автономный Python 3 скрипт в skills/ для задачи Telegram-бота: «{task_text}».\n"
+            f"# SKILL_NAME: skill_mod\n# DESCRIPTION: {task_text[:120]}\n"
+            "Если требуется графика/картинка/мем — используй Pillow (PIL) и сохрани результат в media/, напечатав путь в stdout.\n"
+            "Код верни строго внутри ```python ... ``` без лишних рассуждений."
         )
         ai_reply = ask_ai_fn(compact_prompt, photo_path=photo_path)
 
@@ -803,9 +809,9 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     if not code:
         if is_meme_or_media_request(task_text):
             ext_slug = "skill_meme_" + hashlib.md5(task_text.encode()).hexdigest()[:6]
-            ext_desc = f"Генератор мема: {task_text[:50]}"
+            ext_desc = f"Генератор мема: {task_text[:120]}"
             code = synthesize_meme_extension_code(task_text, ext_slug, ext_desc)
-            print(f"[DYNAMIC SKILL ENGINE] Synthesized guaranteed meme extension code for: {task_text[:60]}")
+            print(f"[DYNAMIC SKILL ENGINE] Synthesized guaranteed meme extension code for: {task_text}")
         else:
             set_pending_proposal(proposal_user, task_text, last_err="Таймаут AI-генератора кода")
             return (
@@ -1110,7 +1116,7 @@ def run_autonomous_task_async(
 
     def _worker():
         try:
-            print(f"[DYNAMIC ASYNC WORKER] Starting task for {sender_name}: {task_text[:60]}")
+            print(f"[DYNAMIC ASYNC WORKER] Starting task for {sender_name}: {task_text}")
             res_text, res_media = execute_autonomous_task(
                 task_text,
                 sender_name=sender_name,
