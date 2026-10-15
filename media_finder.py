@@ -375,33 +375,37 @@ def find_and_download_image(query, dest_dir=None):
 
     urls = []
 
-    # 1. Bing Images Search
+    # 1. Yandex Images Search (Primary: best for Russian, games, wikis, and screenshots)
     try:
-        bing_url = f"https://www.bing.com/images/search?q={urllib.parse.quote(clean_q)}"
-        req = urllib.request.Request(bing_url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        y_url = f"https://yandex.ru/images/search?text={urllib.parse.quote(clean_q)}"
+        req = urllib.request.Request(y_url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=8) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
-            found = re.findall(r'murl&quot;:&quot;(https?://[^&]+?)&quot;', html)
+            found = re.findall(r'img_url=([^\x26\s\"<>]+)', html)
             for u in found:
-                if any(ext in u.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-                    urls.append(u)
+                unq = urllib.parse.unquote(u)
+                if any(ext in unq.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                    urls.append(unq)
     except Exception as e:
-        print(f"[MEDIA FINDER] Bing image error: {e}")
+        print(f"[MEDIA FINDER] Yandex image error: {e}")
 
-    # 2. Yandex Images Search
-    if len(urls) < 6:
+    # 2. Bing Images Search (with language & locale parameters to prevent European redirect to trending calendars)
+    if len(urls) < 8:
         try:
-            y_url = f"https://yandex.ru/images/search?text={urllib.parse.quote(clean_q)}"
-            req = urllib.request.Request(y_url, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            bing_url = f"https://www.bing.com/images/search?q={urllib.parse.quote(clean_q)}&setlang=ru&cc=RU"
+            req = urllib.request.Request(bing_url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 html = resp.read().decode("utf-8", errors="ignore")
-                found = re.findall(r'img_url=([^\x26\s\"<>]+)', html)
+                found = re.findall(r'murl&quot;:&quot;(https?://[^&]+?)&quot;', html)
                 for u in found:
-                    unq = urllib.parse.unquote(u)
-                    if any(ext in unq.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-                        urls.append(unq)
+                    u_low = u.lower()
+                    # Filter out unrelated European trending junk (calendars, weather widgets)
+                    if "kalender" in u_low or "kalenderpedia" in u_low or "wetter" in u_low:
+                        continue
+                    if any(ext in u_low for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                        urls.append(u)
         except Exception as e:
-            print(f"[MEDIA FINDER] Yandex image error: {e}")
+            print(f"[MEDIA FINDER] Bing image error: {e}")
 
     # 3. Query expansion for games/locations if needed (e.g. Rain World, Crossout)
     q_lower = clean_q.lower()
@@ -414,22 +418,23 @@ def find_and_download_image(query, dest_dir=None):
     elif "crossout" in q_lower or "кроссаут" in q_lower:
         alt_q = f"Crossout {clean_q} screenshot"
 
-    if alt_q and len(urls) < 10:
+    if alt_q and len(urls) < 15:
         try:
-            bing_url_alt = f"https://www.bing.com/images/search?q={urllib.parse.quote(alt_q)}"
-            req = urllib.request.Request(bing_url_alt, headers=HEADERS)
+            y_url_alt = f"https://yandex.ru/images/search?text={urllib.parse.quote(alt_q)}"
+            req = urllib.request.Request(y_url_alt, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=8) as resp:
                 html = resp.read().decode("utf-8", errors="ignore")
-                found = re.findall(r'murl&quot;:&quot;(https?://[^&]+?)&quot;', html)
+                found = re.findall(r'img_url=([^\x26\s\"<>]+)', html)
                 for u in found:
-                    if any(ext in u.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-                        urls.append(u)
+                    unq = urllib.parse.unquote(u)
+                    if any(ext in unq.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                        urls.append(unq)
         except Exception as e:
             print(f"[MEDIA FINDER] Alt search error: {e}")
 
     # Download candidate, handle transparency, and verify visibility with PIL
     from PIL import Image, ImageStat
-    for cand_url in urls[:15]:
+    for cand_url in urls[:20]:
         try:
             req = urllib.request.Request(cand_url, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=8) as resp:
@@ -449,11 +454,12 @@ def find_and_download_image(query, dest_dir=None):
                         else:
                             img_rgb = img.convert("RGB")
 
-                        # Verify brightness and contrast to prevent solid black or blank images
+                        # Verify that the image is not a completely flat, monochromatic or solid blank frame
                         stat = ImageStat.Stat(img_rgb)
                         mean_b = sum(stat.mean) / len(stat.mean)
                         std_b = sum(stat.stddev) / len(stat.stddev)
-                        if mean_b < 20 or (mean_b < 35 and std_b < 12):
+                        # Only reject if image has zero/near-zero variation (solid flat rectangle)
+                        if std_b < 4.0 or (mean_b < 3.0 and std_b < 5.0):
                             if os.path.exists(temp_raw):
                                 os.remove(temp_raw)
                             continue
