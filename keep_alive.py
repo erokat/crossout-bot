@@ -274,7 +274,7 @@ def setup_environment():
     try:
         settings_path = os.path.join(gemini_dir, "settings.json")
         settings_data = {
-            "model": "Gemini 3.8 Flash (High)",
+            "model": "gemini-3.8-flash-high",
             "allowNonWorkspaceAccess": True,
             "toolPermission": "always-proceed",
             "artifactReviewPolicy": "always-proceed",
@@ -639,7 +639,7 @@ def ocr_image_file(photo_path):
         print(f"[OCR ERROR] {e}")
         return ""
 
-def run_antigravity_cli(prompt, timeout=90):
+def run_antigravity_cli(prompt, timeout=40):
     agy_bin = shutil.which("agy") or shutil.which("antigravity")
     if not agy_bin:
         for candidate in ["/usr/local/bin/agy", "/root/.local/bin/agy", "/data/data/com.termux/files/usr/bin/agy"]:
@@ -649,14 +649,14 @@ def run_antigravity_cli(prompt, timeout=90):
     if not agy_bin:
         agy_bin = "agy"
 
-    cmd = [agy_bin, "--dangerously-skip-permissions", "--disable-slash-commands", "-p", prompt]
+    cmd = [agy_bin, "--model", "gemini-3.8-flash-high", "--dangerously-skip-permissions", "--disable-slash-commands", "-p", prompt]
     env = dict(os.environ)
     env["CI"] = "1"
     env["AGY_AUTO_UPDATE"] = "1"
     env["ANTIGRAVITY_SKIP_UPDATE_CHECK"] = "1"
     env["DEBIAN_FRONTEND"] = "noninteractive"
 
-    max_retries = 2
+    max_retries = 1
     for attempt in range(1, max_retries + 1):
         try:
             res = subprocess.run(
@@ -878,19 +878,33 @@ def handle_owner_message(msg_data):
     # 0.0. Проверка ответа на предложение создать дополнение
     pending = get_pending_proposal("owner")
     if pending and text:
+        if time.time() - pending.get("created_at", 0) > 300:
+            clear_pending_proposal("owner")
+            pending = None
+
+    if pending and text:
         t_low = text.lower().strip()
-        is_confirm = any(re.search(p, t_low) for p in [
-            r"\bда\b", r"\bдавай\b", r"\bсгенерируй\b", r"\bделай\b", r"\bсоздай\b",
-            r"\bнапиши\b", r"\bго\b", r"\bок\b", r"\bага\b", r"\bда сгенерируй\b",
-            r"\bда делай\b", r"\bда создай\b", r"\bделай давай\b", r"\bконечно\b",
-            r"\bгенерируй\b", r"\bсделай\b", r"\bдоделай\b", r"\bдоделать\b",
-            r"\bдоделай модуль\b", r"\bдоделай генератор\b", r"\bисправь\b",
-            r"\bпочини\b", r"\bпопробуй еще\b", r"\bпопробуй ещё\b", r"\bпопробуй\b"
-        ])
-        is_reject = any(re.search(p, t_low) for p in [
-            r"\bнет\b", r"\bне надо\b", r"\bне генерируй\b", r"\bотмена\b", r"\bотбой\b",
-            r"\bне делай\b", r"\bзабей\b", r"\bне стоит\b", r"\bне\b"
-        ])
+        words = t_low.split()
+        prop_msg_id = pending.get("proposal_msg_id")
+        reply_to_id = msg_data.get("reply_to_msg_id") if isinstance(msg_data, dict) else None
+        is_reply_to_proposal = bool(prop_msg_id and reply_to_id and str(reply_to_id) == str(prop_msg_id))
+
+        has_other_commands = any(w in t_low for w in ["скинь", "найди", "скачай", "покажи", "отправь", "кинь", "песн", "трек", "мем", "видео", "фото", "нарисуй", "сгенерируй", "шахмат", "доск", "сочини"])
+        is_confirm = False
+        is_reject = False
+
+        if not has_other_commands and (is_reply_to_proposal or len(words) <= 4):
+            is_confirm = any(re.search(p, t_low) for p in [
+                r"^\s*(?:бот[,\s]*)?(?:да|давай|делай|создавай|создай|го|ок|ага|конечно|генерируй|доделай(?:\s+модуль|\s+генератор)?|исправь|почини|попробуй(?:\s+ещ[её])?)\s*$"
+            ])
+            is_reject = any(re.search(p, t_low) for p in [
+                r"^\s*(?:бот[,\s]*)?(?:нет|не\s+надо|не\s+генерируй|отмена|отбой|не\s+делай|забей|не\s+стоит|не)\s*$"
+            ])
+
+        if not is_confirm and not is_reject:
+            clear_pending_proposal("owner")
+            pending = None
+
         if is_confirm:
             clear_pending_proposal("owner")
             orig_task = pending.get("task_text", "")
@@ -1406,28 +1420,37 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         else:
             pending = get_pending_proposal("owner")
 
+    if pending and text:
+        if time.time() - pending.get("created_at", 0) > 300:
+            clear_pending_proposal(sender_key)
+            clear_pending_proposal("yarik")
+            clear_pending_proposal("owner")
+            pending = None
+
     reply_to_id = msg_data.get("reply_to_msg_id")
     if pending and text:
         t_low = text.lower().strip()
+        words = t_low.split()
         prop_msg_id = pending.get("proposal_msg_id")
         is_reply_to_proposal = bool(prop_msg_id and reply_to_id and str(reply_to_id) == str(prop_msg_id))
-        is_direct_bot_confirm = bool("бот" in t_low)
 
-        is_confirm = any(re.search(p, t_low) for p in [
-            r"\bда\b", r"\bдавай\b", r"\bсгенерируй\b", r"\bделай\b", r"\bсоздай\b",
-            r"\bнапиши\b", r"\bго\b", r"\bок\b", r"\bага\b", r"\bда сгенерируй\b",
-            r"\bда делай\b", r"\bда создай\b", r"\bделай давай\b", r"\bконечно\b",
-            r"\bгенерируй\b", r"\bсделай\b", r"\bдоделай\b", r"\bдоделать\b",
-            r"\bдоделай модуль\b", r"\bдоделай генератор\b", r"\bисправь\b",
-            r"\bпочини\b", r"\bпопробуй еще\b", r"\bпопробуй ещё\b", r"\bпопробуй\b"
-        ])
-        is_reject = any(re.search(p, t_low) for p in [
-            r"\bнет\b", r"\bне надо\b", r"\bне генерируй\b", r"\bотмена\b", r"\bотбой\b",
-            r"\bне делай\b", r"\bзабей\b", r"\bне стоит\b", r"\bне\b"
-        ])
-        if (is_confirm or is_reject) and not (is_reply_to_proposal or is_direct_bot_confirm):
-            is_confirm = False
-            is_reject = False
+        has_other_commands = any(w in t_low for w in ["скинь", "найди", "скачай", "покажи", "отправь", "кинь", "песн", "трек", "мем", "видео", "фото", "нарисуй", "сгенерируй", "шахмат", "доск", "сочини"])
+        is_confirm = False
+        is_reject = False
+
+        if not has_other_commands and (is_reply_to_proposal or len(words) <= 4):
+            is_confirm = any(re.search(p, t_low) for p in [
+                r"^\s*(?:бот[,\s]*)?(?:да|давай|делай|создавай|создай|го|ок|ага|конечно|генерируй|доделай(?:\s+модуль|\s+генератор)?|исправь|почини|попробуй(?:\s+ещ[её])?)\s*$"
+            ])
+            is_reject = any(re.search(p, t_low) for p in [
+                r"^\s*(?:бот[,\s]*)?(?:нет|не\s+надо|не\s+генерируй|отмена|отбой|не\s+делай|забей|не\s+стоит|не)\s*$"
+            ])
+
+        if not is_confirm and not is_reject:
+            clear_pending_proposal(sender_key)
+            clear_pending_proposal("yarik")
+            clear_pending_proposal("owner")
+            pending = None
 
         if is_confirm:
             clear_pending_proposal(sender_key)
@@ -1596,7 +1619,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 cap = f"🎻 {target_name}, лови симфонию! Настоящая оркестровая мощь: {track_title}"
             else:
                 cap = f"🎵 Держи трек, {target_name}: {track_title}"
-            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", track_path, "--text", cap, "--reply-to", str(msg_id)])
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--audio", track_path, "--text", cap, "--reply-to", str(msg_id)])
         else:
             subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", f"{target_name}, не удалось найти или скачать трек: {track_title}", "--reply-to", str(msg_id)])
         return
@@ -1862,10 +1885,11 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
-    # 1.65. Запрос на мем / картинку
+    # 1.65. Запрос на мем / картинку / генерацию визуального контента
     is_explicit_meme = any(w in t_lower for w in ["мем", "мэм", "пикч", "картинк", "гиф", "демотиватор", "мемасик", "мемчик", "мемы", "мэмы"])
     is_meme_action = any(w in t_lower for w in ["сделай", "склепай", "запили", "нарисуй", "сгенерируй", "создай", "скинь", "кинь", "выдай"]) and is_explicit_meme
-    is_meme_word = is_explicit_meme or is_meme_action
+    is_visual_gen = any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and any(w in t_lower for w in ["доск", "шахмат", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "персонаж", "кота", "собаку", "машин", "фото", "изображен", "пикч", "картинк", "мем"])
+    is_meme_word = is_explicit_meme or is_meme_action or is_visual_gen
     is_another_word = any(w in t_lower for w in ["другое", "другой", "следующ", "новеньк", "переделай", "еще", "ещё"]) and any(w in t_lower for w in ["скинь", "давай", "дай", "покажи", "кинь", "сделай", "ботик", "бот", "выдай"])
     is_reply_to_media = bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["скинь", "давай", "другое", "другой", "еще", "ещё", "переделай", "не то", "фигня", "хуйня", "говно", "заново", "повтори"])
 
@@ -1873,56 +1897,60 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "тоже самое"])
         count = extract_meme_count(text)
         recipient_target = "owner" if is_owner_sender else "yarik"
+        is_crossout_topic = any(w in t_lower for w in ["кросс", "крос", "crossout", "газген", "птур", "ховер", "утюг", "капкан", "мамонт", "скорпион"])
 
         for idx in range(count):
             meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient=recipient_target)
             num_suffix = f" (#{idx + 1})" if count > 1 else ""
 
             def get_smart_meme_caption(recipient_role, user_text, num_suffix=""):
-                if recipient_role == "owner":
-                    pool = [
-                        f"Миха, свежий прикол прямиком со сварочного стола! Оцени инженерную мысль 🚜💥{num_suffix}",
-                        f"Мишан, зацени этот шедевр! Когда собрал идеальный крафт, но рандом решил иначе 💀🚜{num_suffix}",
-                        f"Миха, лови годный мемасик! Чистая правда жизни в Пустошах 🚜🔥{num_suffix}",
-                        f"Миха, вот тебе свежачок под чаёк! Рандом беспощаден, но мы держимся 🚜💥{num_suffix}",
-                        f"Мишан, гаражные хроники готовы к бою! Зацени как вышло 🚜💀{num_suffix}",
-                        f"Миха, горячий мемчик прямо из печи Скитальцев! Как тебе? 🔥🚜{num_suffix}",
-                        f"Миша, держи порцию жизы из Пустошей! Каждый бой как в первый раз 🚜💀{num_suffix}",
-                        f"Мишан, зацени билд мысли! Специально для создателя с душой сделано 🚜💥{num_suffix}",
-                        f"Миха, лови разрывной мем! Газген одобряет такую подачу 💣🚜{num_suffix}",
-                        f"Миша, свежая поставка мемов на склад прибыла! Оценивай качество 🚜🔥{num_suffix}",
-                        f"Миха, чистейшая база из рандома! Такое только в Crossout можно увидеть 🚜💀{num_suffix}",
-                        f"Мишан, свежесваренный мемчик готов! Как тебе такой поворот событий? 🚜💥{num_suffix}"
-                    ]
+                if is_crossout_topic:
+                    if recipient_role == "owner":
+                        pool = [
+                            f"Миха, свежий прикол прямиком со сварочного стола! Оцени инженерную мысль 🚜💥{num_suffix}",
+                            f"Мишан, зацени этот шедевр! Когда собрал идеальный крафт, но рандом решил иначе 💀🚜{num_suffix}",
+                            f"Миха, лови годный мемасик! Чистая правда жизни в Пустошах 🚜🔥{num_suffix}",
+                            f"Миха, горячий мемчик прямо из печи Скитальцев! Как тебе? 🔥🚜{num_suffix}",
+                            f"Миха, чистейшая база из рандома! Такое только в Crossout можно увидеть 🚜💀{num_suffix}"
+                        ]
+                    else:
+                        pool = [
+                            f"Ярик, держи свежак из Пустошей! Оценивай по шкале от 1 до 10 🚜💥{num_suffix}",
+                            f"Ярик, лови годную жизу! Когда рандом опять преподносит сюрпризы 💀🚜{num_suffix}",
+                            f"Ярик, зацени этот шедевр инженерной мысли! Газген на кабине — классика 🚜🔥{num_suffix}",
+                            f"Ярик, лови жизу про Пустоши! Чистая правда любого рандомного боя 🚜🔥{num_suffix}"
+                        ]
                 else:
-                    pool = [
-                        f"Ярик, держи свежак из Пустошей! Оценивай по шкале от 1 до 10 🚜💥{num_suffix}",
-                        f"Ярик, лови годную жизу! Когда рандом опять преподносит сюрпризы 💀🚜{num_suffix}",
-                        f"Ярик, зацени этот шедевр инженерной мысли! Газген на кабине — классика 🚜🔥{num_suffix}",
-                        f"Ярик, держи горячий мемчик! Как тебе такой поворот событий? 🚜💥{num_suffix}",
-                        f"Ярик, свежая порция юмора из гаража прибыла! Заценивай 🚜💀{num_suffix}",
-                        f"Ярик, лови жизу про Пустоши! Чистая правда любого рандомного боя 🚜🔥{num_suffix}",
-                        f"Ярик, вот тебе разрывной прикол! Взрывы, крафты и суровая реальность 🚜💣{num_suffix}",
-                        f"Ярик, держи подгон! Оценивай качество сборки этого мема 🚜💥{num_suffix}",
-                        f"Ярик, чистая база из ангара! Зацени шедевр 🚜🔥{num_suffix}",
-                        f"Ярик, лови пушечный прикол прямо с полигона! 🚜💥{num_suffix}"
-                    ]
+                    if recipient_role == "owner":
+                        pool = [
+                            f"Миха, держи готовую картинку по твоему запросу! 🎨🔥{num_suffix}",
+                            f"Мишан, зацени что получилось! 📸✨{num_suffix}",
+                            f"Миха, лови свежий шедевр! 🎨🔥{num_suffix}",
+                            f"Мишан, оценивай результат! 📸🔥{num_suffix}"
+                        ]
+                    else:
+                        pool = [
+                            f"Ярик, держи! Оценивай результат от 1 до 10 🎨🔥{num_suffix}",
+                            f"Ярик, лови по твоему запросу! 📸✨{num_suffix}",
+                            f"Ярик, зацени что получилось! 🎨🔥{num_suffix}"
+                        ]
                 return random.choice(pool)
 
             fallback_cap = get_smart_meme_caption("owner" if is_owner_sender else "yarik", text, num_suffix=num_suffix)
+            topic_warning = " СТРОГИЙ ЗАПРЕТ: НЕ приплетай Crossout, Пустоши или Газген, если тема не о Crossout!" if not is_crossout_topic else ""
 
             if is_owner_sender:
                 prompt_cap = (
-                    f"Ты генератор мемов по теме: «{text}». Твой создатель и владелец МИША запросил мем{num_suffix}. "
-                    "Придумай одну смешную, угарную, прикольную подпись к сгенерированному мему в тему запроса. "
+                    f"Ты создал изображение/мем по теме: «{text}». Твой создатель и владелец МИША запросил его{num_suffix}.{topic_warning} "
+                    "Придумай одну смешную, угарную, прикольную подпись строго в тему запроса. "
                     "Обращайся к Мише по имени (Миша, Миха, Мишан), по-братски, разговорно, живо и прикольно. "
                     "СТРОЖАЙШИЙ ЗАПРЕТ: НИКАКИХ 'шеф', 'босс', 'командир'! И НЕ называй его Яриком (Ярик — его друг в чате)! "
                     "Без кавычек, 1 короткое сочное предложение с эмодзи."
                 )
             else:
                 prompt_cap = (
-                    f"Ты генератор мемов по теме: «{text}». Твой кореш Ярик запросил мем{num_suffix}. "
-                    "Придумай одну смешную, угарную, жизненную подпись к мему в тему запроса. "
+                    f"Ты создал изображение/мем по теме: «{text}». Твой кореш Ярик запросил его{num_suffix}.{topic_warning} "
+                    "Придумай одну смешную, угарную, жизненную подпись строго в тему запроса. "
                     "Обращайся к нему Ярик. Без кавычек, 1 короткое сочное предложение с эмодзи."
                 )
 
@@ -1980,13 +2008,18 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     if is_auto_task:
         target_name = "Миша" if is_owner_sender else "Ярик"
         log_event(f"[ORCHESTRATOR] Executing autonomous skill for {target_name} (async): {text!r}")
+        from dynamic_agent import is_one_off_creative_task, is_meme_or_media_request
+        if is_one_off_creative_task(text) or is_meme_or_media_request(text):
+            ack_msg = f"Принял, {target_name}! Генерирую изображение... 🎨⏳"
+        else:
+            ack_msg = f"Принял задачу, {target_name}! Выполняю... 🛠️⏳"
         ack_cmd = [
             sys.executable,
             os.path.join(BASE_DIR, "send.py"),
             "--to", "yarik",
             "--no-copy",
             "--reply-to", str(msg_id),
-            "--text", f"Принял задачу, {target_name}! Генерирую динамический навык... 🛠️⏳"
+            "--text", ack_msg
         ]
         ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         ack_msg_id = extract_sent_msg_id(ack_res.stdout)

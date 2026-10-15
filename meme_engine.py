@@ -801,8 +801,13 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
         base_img = Image.open(img_path).convert("RGB")
     except Exception as e:
         print(f"[MEME ENGINE] Could not open image {img_path}: {e}")
-        # Крайний fallback на локальный ассет
-        fallback_assets = ["buff_doge_vs_cheems.png", "scav_large.png", "gasgen.png", "artificer.png"]
+        # Крайний fallback на локальный ассет строго по теме
+        if is_xo:
+            fallback_assets = ["buff_doge_vs_cheems.png", "gasgen.png", "ptur.png"]
+        elif is_rainworld:
+            fallback_assets = ["scav_large.png", "artificer.png"]
+        else:
+            fallback_assets = ["buff_doge_vs_cheems.png"]
         chosen_fa = next((os.path.join(MEDIA_DIR, a) for a in fallback_assets if os.path.exists(os.path.join(MEDIA_DIR, a))), None)
         base_img = Image.open(chosen_fa).convert("RGB") if chosen_fa else Image.new("RGB", (800, 800), (20, 24, 32))
 

@@ -39,6 +39,7 @@ def clean_query(text, media_type="music"):
             if len(t) < 20:
                 return "Beethoven symphony 5 orchestra epic"
         t = re.sub(r"(?i)^(?:музыку|музыка|трек|песню|песня|бит|симфонию|симфония)\s*", "", t).strip()
+        t = re.sub(r"(?i)\s*(?:,\s*)?(?:\bи\s+)?(?:сделай|поставь|назови|дай|с)\s+(?:у\s+самого\s+)?(?:файл[а-я]*\s+)?(?:музыкального\s+)?(?:но[о]*рмальн[а-я]*\s+)?(?:названи[а-я]*|именем|имя|название).*$", "", t).strip()
         return t or "DNCE Cake by the ocean"
     elif media_type == "image":
         t = re.sub(r"(?i)^(?:фото|фотку|фотографию|картинку|пикчу|арт|изображение|в\s+интернете|в\s+сети|в\s+яндексе|в\s+гугле)\s*", "", t).strip()
@@ -220,8 +221,10 @@ def synthesize_classical_symphony(clean_q, dest_path, duration=22.0):
 
 def find_and_download_music(query, max_filesize="30M"):
     clean_q = clean_query(query, "music")
-    q_hash = hashlib.md5(clean_q.lower().encode()).hexdigest()[:10]
-    out_file = os.path.join(MUSIC_DIR, f"track_{q_hash}.mp3")
+    safe_name = re.sub(r'[\\/*?:"<>|]', "", clean_q).strip()[:80]
+    if not safe_name:
+        safe_name = f"track_{hashlib.md5(clean_q.lower().encode()).hexdigest()[:10]}"
+    out_file = os.path.join(MUSIC_DIR, f"{safe_name}.mp3")
 
     if os.path.exists(out_file) and os.path.getsize(out_file) > 100000:
         return out_file, clean_q
@@ -238,7 +241,7 @@ def find_and_download_music(query, max_filesize="30M"):
                     return out_file, item["title"]
 
     # 2. Попытка через yt-dlp с эмуляцией Android/iOS клиента для обхода 403 на Render
-    out_tmpl = os.path.join(MUSIC_DIR, f"track_{q_hash}.%(ext)s")
+    out_tmpl = os.path.join(MUSIC_DIR, f"{safe_name}.%(ext)s")
     cmd = [
         "yt-dlp",
         "-x",
@@ -256,7 +259,7 @@ def find_and_download_music(query, max_filesize="30M"):
             return out_file, clean_q
 
         for f in os.listdir(MUSIC_DIR):
-            if f.startswith(f"track_{q_hash}") and f.endswith(".mp3"):
+            if f.startswith(safe_name) and f.endswith(".mp3"):
                 return os.path.join(MUSIC_DIR, f), clean_q
     except Exception as e:
         print(f"[MEDIA FINDER] Music download error: {e}")

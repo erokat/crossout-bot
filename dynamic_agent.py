@@ -238,22 +238,29 @@ def is_meme_or_media_request(text):
     if not text:
         return False
     t = text.lower().strip()
-    return any(w in t for w in ["мем", "мэм", "мемасик", "мемчик", "пикч", "картинк", "демотиватор", "кросаут", "кроссаут", "crossout"])
+    media_words = [
+        "мем", "мэм", "мемасик", "мемчик", "пикч", "картинк", "демотиватор",
+        "кросаут", "кроссаут", "crossout", "шахмат", "доск", "нарисуй", "сгенерируй",
+        "арт", "рисунок", "сцен", "фото", "изображен", "график", "открытк", "прикол"
+    ]
+    return any(w in t for w in media_words)
 
 def is_autonomous_task(text, has_media=False):
     """
-    Определяет, требует ли запрос динамического создания нового дополнения,
-    обработки медиафайла, генерации файла или расширения способностей бота.
+    Определяет, требует ли запрос динамического создания нового программного модуля в skills/,
+    только когда пользователь прямо просит запрограммировать/расширить бота новым кодом.
+    Любые запросы на мемы, картинки, генерацию изображений, музыку, решение задач, сочинения
+    и обычные вопросы НИКОГДА не должны идти в Dynamic Skill Engine!
     """
     if not text:
-        return has_media
+        return False
     t = text.lower().strip()
 
     from photo_editor import is_photo_editor_request
     if is_photo_editor_request(t, has_media):
         return False
 
-    if is_explicit_meme_request(t):
+    if is_explicit_meme_request(t) or is_one_off_creative_task(t) or is_meme_or_media_request(t):
         return False
 
     # Если уже есть зарегистрированное дополнение под эти триггеры
@@ -261,79 +268,21 @@ def is_autonomous_task(text, has_media=False):
     if ext_path:
         return True
 
-    action_verbs = [
-        "обрежь", "обрезать", "вырежи", "вырезать", "сожми", "сжать",
-        "склей", "склеить", "конвертируй", "сконвертируй", "конвертировать",
-        "поверни", "переверни", "замедли", "ускорь", "извлеки", "вытащи звук",
-        "сделай гиф", "сделай qr", "создай qr", "сгенерируй qr", "распакуй",
-        "обработай", "отредактируй", "удали фон", "сделай прозрачным",
-        "измени размер", "сделай превью", "наложи", "напиши код", "напиши скрипт",
-        "напиши программу", "создай файл", "сгенерируй файл", "добавь функцию",
-        "добавь возможность", "добавь команду", "сделай функцию", "добавь себе",
-        "научись", "сделай скрипт", "сделай генератор", "рассчитай", "смоделируй",
-        "нарисуй график", "создай график", "сделай парсер", "напиши парсер",
-        "симулятор", "калькулятор", "посчитай", "выполни код", "запусти код",
-        "сгенерируй код", "автономн", "сделай фичу", "добавь фичу",
-        "сделай так чтобы", "установи модуль", "поставь библиотеку", "скачай файл",
-        "сделай таблицу", "сохрани в excel", "сохрани в csv", "сделай отчет",
-        "сделай pdf", "сгенерируй pdf", "добавь дополнение", "напиши дополнение",
-        "создай дополнение", "сгенерируй дополнение", "сделай дополнение",
-        "дополни дополнение", "дополнение", "добавь модуль", "создай модуль"
+    # СТРОГИЙ ФИЛЬТР: ТОЛЬКО прямые поручения запрограммировать новый функционал для бота
+    explicit_coding_phrases = [
+        "добавь себе команду", "добавь команду", "создай модуль для бота", "напиши плагин",
+        "добавь функцию бота", "запрограммируй новую функцию", "напиши скрипт парсера",
+        "добавь дополнение к боту", "напиши python код", "создай python модуль",
+        "научи бота новой команде", "добавь новый навык", "зарегистрируй команду"
     ]
-
-    if any(verb in t for verb in action_verbs):
-        return True
-
-    if has_media and any(w in t for w in ["сделай", "переделай", "измени", "убери", "добавь", "поправь", "обрежь"]):
-        return True
-
-    return False
+    return any(p in t for p in explicit_coding_phrases)
 
 def check_or_classify_autonomous_task(text, has_media=False, ask_ai_fn=None):
     """
-    Интеллектуальный классификатор: проверяет быстрые правила и при необходимости
-    спрашивает AI, является ли сообщение прямым поручением сделать/сгенерировать что-то.
+    Проверяет, является ли запрос прямым требованием написать новый модуль/код для бота.
+    Никогда не отправляет творческие, визуальные или разговорные запросы в генератор кода.
     """
-    from photo_editor import is_photo_editor_request
-    if is_photo_editor_request(text, has_media):
-        return False
-
-    if is_explicit_meme_request(text):
-        return False
-
-    if is_autonomous_task(text, has_media):
-        return True
-
-    t_clean = text.lower().strip()
-    if len(t_clean) < 6:
-        return False
-
-    # Исключаем обычные разговорные фразы
-    chit_chat = ["привет", "здарова", "как дела", "что делаешь", "ты тут", "спасибо", "пока", "ярик", "бот ты тут", "ясно", "понял"]
-    if t_clean in chit_chat:
-        return False
-
-    # Поручения создать что-то
-    action_intent_patterns = [
-        r"\b(сделай|создай|сгенерируй|напиши|запили|собери|выгрузи|сохрани|добавь|установи|прикрути|научись)\b",
-        r"\b(файл|скрипт|программ|дополнени|плагин|модул|функци|таблиц|отчет|график|диаграмм|баз|код)\b"
-    ]
-    matches = sum(1 for p in action_intent_patterns if re.search(p, t_clean))
-    if matches >= 2:
-        return True
-
-    # Если есть подозрение на поручение — опрашиваем AI
-    if ask_ai_fn and len(t_clean) > 8 and any(w in t_clean for w in ["сделай", "создай", "сгенерируй", "напиши", "добавь", "научись", "файл", "можешь", "умеешь"]):
-        check_prompt = (
-            f"Пользователь написал боту: «{text}».\n"
-            "Это конкретное поручение СДЕЛАТЬ/СГЕНЕРИРОВАТЬ ЧТО-ТО (файл, скрипт, вычисление, дополнение, обработку)?\n"
-            "Ответь строго 'TASK' если это поручение что-то сделать/создать/написать, или 'CHAT' если это просто беседа."
-        )
-        res = ask_ai_fn(check_prompt)
-        if res and "TASK" in res.upper():
-            return True
-
-    return False
+    return is_autonomous_task(text, has_media)
 
 def extract_python_code(response_text):
     if not response_text:
@@ -575,7 +524,86 @@ def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script
 def synthesize_meme_extension_code(task_text, ext_slug, ext_desc):
     clean_theme = task_text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
     is_crossout = any(w in clean_theme.lower() for w in ["кросаут", "кроссаут", "crossout", "газген", "птур", "ховер", "утюг", "капкан", "мамонт", "скорпион"])
-    if is_crossout:
+    is_chess = any(w in clean_theme.lower() for w in ["шахмат", "доск", "слон", "ферз", "ладь"])
+    if is_chess:
+        return f'''# -*- coding: utf-8 -*-
+# EXTENSION: {ext_slug} | {ext_desc}
+import os, sys
+from PIL import Image, ImageDraw, ImageFont
+
+_cur_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_cur_dir)
+media_dir = os.path.join(_parent_dir, "media")
+os.makedirs(media_dir, exist_ok=True)
+
+width, height = 1080, 1080
+img = Image.new("RGB", (width, height), (22, 24, 29))
+draw = ImageDraw.Draw(img)
+
+board_size = 720
+bx0 = (width - board_size) // 2
+by0 = 160
+cell_size = board_size // 8
+
+light_color = (240, 217, 181)
+dark_color = (181, 136, 99)
+
+for r in range(8):
+    for c in range(8):
+        col = light_color if (r + c) % 2 == 0 else dark_color
+        draw.rectangle([bx0 + c * cell_size, by0 + r * cell_size, bx0 + (c + 1) * cell_size, by0 + (r + 1) * cell_size], fill=col)
+
+font_coords = None
+for f_path in [os.path.join(media_dir, "RussoOne-Regular.ttf"), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
+    if os.path.exists(f_path):
+        try: font_coords = ImageFont.truetype(f_path, 20); break
+        except Exception: pass
+if not font_coords: font_coords = ImageFont.load_default()
+
+letters = "ABCDEFGH"
+for i in range(8):
+    draw.text((bx0 + i * cell_size + cell_size // 2, by0 + board_size + 15), letters[i], font=font_coords, fill="#CCCCCC", anchor="mm")
+    draw.text((bx0 - 20, by0 + i * cell_size + cell_size // 2), str(8 - i), font=font_coords, fill="#CCCCCC", anchor="mm")
+
+bishop_cx = bx0 + 0 * cell_size + cell_size // 2
+bishop_cy = by0 + 7 * cell_size + cell_size // 2
+queen_cx = bx0 + 6 * cell_size + cell_size // 2
+queen_cy = by0 + 1 * cell_size + cell_size // 2
+
+# Draw pieces
+draw.ellipse([bishop_cx - 24, bishop_cy - 24, bishop_cx + 24, bishop_cy + 24], fill=(30, 30, 30), outline=(0, 255, 120), width=3)
+draw.ellipse([queen_cx - 26, queen_cy - 26, queen_cx + 26, queen_cy + 26], fill=(245, 245, 245), outline=(255, 30, 30), width=3)
+
+# Laser line & sniper crosshair
+draw.line([(bishop_cx, bishop_cy), (queen_cx, queen_cy)], fill=(255, 40, 40), width=4)
+draw.ellipse([queen_cx - 32, queen_cy - 32, queen_cx + 32, queen_cy + 32], outline=(255, 0, 0), width=3)
+draw.ellipse([queen_cx - 16, queen_cy - 16, queen_cx + 16, queen_cy + 16], outline=(255, 0, 0), width=2)
+draw.line([(queen_cx - 42, queen_cy), (queen_cx + 42, queen_cy)], fill=(255, 0, 0), width=2)
+draw.line([(queen_cx, queen_cy - 42), (queen_cx, queen_cy + 42)], fill=(255, 0, 0), width=2)
+
+draw.text((queen_cx, queen_cy - 50), "TARGET LOCKED: ФЕРЗЬ", font=font_coords, fill="#FF4444", anchor="mm")
+draw.text((bishop_cx + 35, bishop_cy + 5), "СЛОН СО СНАЙПЕРКОЙ", font=font_coords, fill="#00FF88", anchor="lm")
+
+font_title = None
+for f_path in [os.path.join(media_dir, "RussoOne-Regular.ttf"), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
+    if os.path.exists(f_path):
+        try: font_title = ImageFont.truetype(f_path, 32); break
+        except Exception: pass
+if not font_title: font_title = ImageFont.load_default()
+
+draw.rectangle([(40, 30), (width - 40, 125)], fill=(30, 35, 45), outline=(240, 160, 20), width=2)
+draw.text((width // 2, 65), "ШАХ И МАТ? НЕ ТАК БЫСТРО...", font=font_title, fill="#FFCC00", anchor="mm")
+draw.text((width // 2, 100), "Когда белые орут «Шах и мат!», но не заметили слона на диагонали", font=font_coords, fill="#E0E0E0", anchor="mm")
+
+draw.rectangle([(40, height - 120), (width - 40, height - 35)], fill=(30, 35, 45), outline=(70, 80, 100), width=2)
+draw.text((width // 2, height - 78), "Слон на A1 со снайперкой держит диагональ: «Минус ферзь!» ♟️🎯", font=font_title, fill="#FFFFFF", anchor="mm")
+
+out_path = os.path.join(media_dir, "chess_sniper_bishop.png")
+img.save(out_path, "PNG")
+print(out_path)
+print("Шахматная доска готова! Слон в засаде держит вражеского ферзя на прицеле со снайперкой ♟️🎯")
+'''
+    elif is_crossout:
         return f'''# -*- coding: utf-8 -*-
 # EXTENSION: {ext_slug} | {ext_desc}
 import os
