@@ -47,7 +47,8 @@ from db import (
     mark_message_handled,
     is_handled,
     add_handled_id,
-    configure_session_sqlite
+    configure_session_sqlite,
+    restore_dynamic_skills
 )
 
 def boost_cleanup_temp_files():
@@ -159,6 +160,7 @@ from dynamic_agent import (
     is_autonomous_task,
     check_or_classify_autonomous_task,
     execute_autonomous_task,
+    run_autonomous_task_async,
     find_existing_extension,
     set_pending_proposal,
     get_pending_proposal,
@@ -345,9 +347,13 @@ def setup_environment():
             except Exception:
                 pass
 
-    # 6. Initialize database & Telethon SQLite WAL mode
+    # 6. Initialize database, Telethon SQLite WAL mode, and restore dynamic skills
     init_db()
     configure_session_sqlite()
+    try:
+        restore_dynamic_skills()
+    except Exception as e:
+        print(f"[STARTUP] Warning during restore_dynamic_skills: {e}")
 
 class WebServerHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -885,19 +891,23 @@ def handle_owner_message(msg_data):
             ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             ack_msg_id = extract_sent_msg_id(ack_res.stdout)
 
-            try:
-                res_text, res_media = execute_autonomous_task(orig_task, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai, sender_key="owner", retry_context=pending)
-                cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
-                if res_media and os.path.exists(res_media):
-                    cmd_owner.extend(["--photo", res_media, "--text", res_text])
-                else:
-                    cmd_owner.extend(["--text", res_text])
-                subprocess.run(cmd_owner)
-            finally:
-                del_ids = [str(x) for x in [prop_msg_id, ack_msg_id] if x]
-                if del_ids:
-                    del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--delete"] + del_ids
-                    subprocess.run(del_cmd)
+            if prop_msg_id:
+                try:
+                    subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--delete", str(prop_msg_id)])
+                except Exception:
+                    pass
+
+            run_autonomous_task_async(
+                task_text=orig_task,
+                sender_name="Миша",
+                photo_path=photo,
+                ask_ai_fn=ask_ai,
+                sender_key="owner",
+                retry_context=pending,
+                recipient="owner",
+                ack_msg_id=ack_msg_id,
+                is_owner_sender=True
+            )
             return
 
         elif is_reject:
@@ -913,43 +923,6 @@ def handle_owner_message(msg_data):
                 "--text", "Понял, Миша, отбой! Не генерирую. Если что-то понадобится — обращайся 👍"
             ]
             subprocess.run(cmd_owner)
-            return
-
-    # 0.05. Команды /boost, /goal, /plan для владельца
-    if any(t_lower.startswith(p) for p in ["/boost", "!boost", "бот буст", "буст"]) or t_lower == "/boost":
-        purged = boost_cleanup_temp_files()
-        reply = (
-            "🚀 **Режим ускорения (BOOST) активен!**\n\n"
-            "• Приоритет AI-генератора: Максимальный (быстрый fallback & self-healing)\n"
-            f"• Кэш и временные файлы: Очищены ({purged} файлов удалено, сохраненные мемы в целости)\n"
-            "• Движок мемов Crossout: Готов к мгновенной генерации 🔥"
-        )
-        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply])
-        return
-
-    if any(t_lower.startswith(p) for p in ["/plan", "!plan", "бот план", "план"]) or t_lower == "/plan":
-        reply = get_tiraspol_cw_schedule()
-        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply])
-        return
-
-    if any(t_lower.startswith(p) for p in ["/goal", "!goal", "бот цель", "цель"]) or t_lower == "/goal":
-        goal_arg = re.sub(r"(?i)^[/!]?goal\s*|^бот\s+цель\s*", "", text).strip()
-        if goal_arg:
-            reply = f"🎯 **Новая цель принята:** «{goal_arg}»\nГотов реализовать и доделать модуль генерации! Напиши «делай» или «доделай модуль» 👍"
-            cmd_goal = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
-            proc = subprocess.run(cmd_goal, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            prop_id = extract_sent_msg_id(proc.stdout)
-            set_pending_proposal("owner", goal_arg, proposal_msg_id=prop_id)
-            return
-        else:
-            reply = (
-                "🎯 **Текущие цели и задачи бота:**\n\n"
-                "1. 🚜 **Crossout & Мемы:** Автономная генерация первоклассных мемов (Вереск, ПТУР, Газген, Махорага, Rain World).\n"
-                "2. 🛠️ **Antigravity Dynamic Engine:** Саморасширение — авто-исправление ошибок (self-healing), доработка модулей на лету при сбоях.\n"
-                "3. 💬 **Общение & Учеба:** Живой чат с корешами и решение задач без занудства.\n\n"
-                "Все модули активны и готовы к бою! 🔥"
-            )
-            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply])
             return
 
     meme_words = ["мем", "мэм", "пикч", "картинк", "гиф", "демотиватор", "мемасик", "мемчик", "мемы", "мэмы"]
@@ -1293,18 +1266,28 @@ def handle_owner_message(msg_data):
                 time.sleep(1.5)
         return
 
-    # 0.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
+    # 0.7. Автономная генерация динамических навыков (Dynamic Skill Engine)
     if check_or_classify_autonomous_task(text, has_media=bool(photo), ask_ai_fn=ask_ai):
-        log_event(f"[ORCHESTRATOR] Executing autonomous task for Owner: {text!r}")
-        res_text, res_media = execute_autonomous_task(text, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai, sender_key="owner")
-        log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
+        log_event(f"[ORCHESTRATOR] Executing autonomous skill for Owner (async): {text!r}")
+        ack_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "owner",
+            "--text", "Взял задачу в работу! Генерирую динамический навык... 🛠️⏳"
+        ]
+        ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ack_msg_id = extract_sent_msg_id(ack_res.stdout)
 
-        cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
-        if res_media and os.path.exists(res_media):
-            cmd_owner.extend(["--photo", res_media, "--text", res_text])
-        else:
-            cmd_owner.extend(["--text", res_text])
-        subprocess.run(cmd_owner)
+        run_autonomous_task_async(
+            task_text=text,
+            sender_name="Миша",
+            photo_path=photo,
+            ask_ai_fn=ask_ai,
+            sender_key="owner",
+            recipient="owner",
+            ack_msg_id=ack_msg_id,
+            is_owner_sender=True
+        )
         return
 
     # 5. Запрос на удаление сообщения в чате
@@ -1444,33 +1427,34 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 sys.executable,
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", "yarik",
-                "--text", "Принял, делаю! 🛠️⏳",
-                "--reply-to", str(msg_id)
+                "--no-copy",
+                "--reply-to", str(msg_id),
+                "--text", "Принял, делаю! 🛠️⏳"
             ]
             ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             ack_msg_id = extract_sent_msg_id(ack_res.stdout)
 
+            if prop_msg_id:
+                try:
+                    subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--delete", str(prop_msg_id)])
+                except Exception:
+                    pass
+
             target_name = "Миша" if is_owner_sender else "Ярик"
             photo_file = msg_data.get("photo")
-            try:
-                res_text, res_media = execute_autonomous_task(orig_task, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai, sender_key=sender_key, retry_context=pending)
-                send_cmd = [
-                    sys.executable,
-                    os.path.join(BASE_DIR, "send.py"),
-                    "--to", "yarik",
-                    "--no-copy",
-                    "--reply-to", str(msg_id)
-                ]
-                if res_media and os.path.exists(res_media):
-                    send_cmd.extend(["--photo", res_media, "--text", res_text])
-                else:
-                    send_cmd.extend(["--text", res_text])
-                subprocess.run(send_cmd)
-            finally:
-                del_ids = [str(x) for x in [prop_msg_id, ack_msg_id] if x]
-                if del_ids:
-                    del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--delete"] + del_ids
-                    subprocess.run(del_cmd)
+
+            run_autonomous_task_async(
+                task_text=orig_task,
+                sender_name=target_name,
+                photo_path=photo_file,
+                ask_ai_fn=ask_ai,
+                sender_key=sender_key,
+                retry_context=pending,
+                recipient="yarik",
+                reply_to_msg_id=msg_id,
+                ack_msg_id=ack_msg_id,
+                is_owner_sender=is_owner_sender
+            )
             return
 
         elif is_reject:
@@ -1490,44 +1474,6 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 "--reply-to", str(msg_id)
             ]
             subprocess.run(send_cmd)
-            return
-
-    # 0.05. Команды /boost, /goal, /plan в чате с Яриком
-    if any(t_lower.startswith(p) for p in ["/boost", "!boost", "бот буст", "буст"]) or t_lower == "/boost":
-        purged = boost_cleanup_temp_files()
-        reply = (
-            "🚀 **Режим ускорения (BOOST) активен!**\n\n"
-            "• Приоритет AI-генератора: Максимальный (быстрый fallback & self-healing)\n"
-            f"• Кэш и временные файлы: Очищены ({purged} файлов удалено, сохраненные мемы в целости)\n"
-            "• Движок мемов Crossout: Готов к мгновенной генерации 🔥"
-        )
-        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)])
-        return
-
-    if any(t_lower.startswith(p) for p in ["/plan", "!plan", "бот план", "план"]) or t_lower == "/plan":
-        reply = get_tiraspol_cw_schedule()
-        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)])
-        return
-
-    if any(t_lower.startswith(p) for p in ["/goal", "!goal", "бот цель", "цель"]) or t_lower == "/goal":
-        goal_arg = re.sub(r"(?i)^[/!]?goal\s*|^бот\s+цель\s*", "", text).strip()
-        target_name = "Миша" if is_owner_sender else "Ярик"
-        if goal_arg:
-            reply = f"🎯 **Новая цель принята ({target_name}):** «{goal_arg}»\nГотов реализовать и доделать модуль генерации! Напиши «делай» или «доделай модуль» 👍"
-            cmd_goal = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)]
-            proc = subprocess.run(cmd_goal, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            prop_id = extract_sent_msg_id(proc.stdout)
-            set_pending_proposal(sender_key, goal_arg, proposal_msg_id=prop_id)
-            return
-        else:
-            reply = (
-                f"🎯 **Текущие цели и задачи бота ({target_name}):**\n\n"
-                "1. 🚜 **Crossout & Мемы:** Автономная генерация первоклассных мемов (Вереск, ПТУР, Газген, Махорага, Rain World).\n"
-                "2. 🛠️ **Antigravity Dynamic Engine:** Саморасширение — авто-исправление ошибок (self-healing), доработка модулей на лету при сбоях.\n"
-                "3. 💬 **Общение & Учеба:** Живой чат с корешами и решение задач без занудства.\n\n"
-                "Все модули активны и готовы к бою! 🔥"
-            )
-            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)])
             return
 
     # 0. Специальный пасхалочный триггер от Ярика
@@ -2073,25 +2019,33 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             subprocess.run(confirm_cmd)
         return
 
-    # 1.7. Автономная генерация кода / создание новых функций / выполнение задач (Antigravity Agent)
+    # 1.7. Автономная генерация динамических навыков (Dynamic Skill Engine)
     is_auto_task = check_or_classify_autonomous_task(text, has_media=bool(photo_file), ask_ai_fn=ask_ai)
     if is_auto_task:
         target_name = "Миша" if is_owner_sender else "Ярик"
-        log_event(f"[ORCHESTRATOR] Executing autonomous task for {target_name}: {text!r}")
-        res_text, res_media = execute_autonomous_task(text, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai, sender_key=sender_key)
-        log_event(f"[ORCHESTRATOR] Autonomous task finished: {res_text[:80]!r} (media={res_media})")
-        send_cmd = [
+        log_event(f"[ORCHESTRATOR] Executing autonomous skill for {target_name} (async): {text!r}")
+        ack_cmd = [
             sys.executable,
             os.path.join(BASE_DIR, "send.py"),
             "--to", "yarik",
             "--no-copy",
-            "--reply-to", str(msg_id)
+            "--reply-to", str(msg_id),
+            "--text", f"Принял задачу, {target_name}! Генерирую динамический навык... 🛠️⏳"
         ]
-        if res_media and os.path.exists(res_media):
-            send_cmd.extend(["--photo", res_media, "--text", res_text])
-        else:
-            send_cmd.extend(["--text", res_text])
-        subprocess.run(send_cmd)
+        ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+
+        run_autonomous_task_async(
+            task_text=text,
+            sender_name=target_name,
+            photo_path=photo_file,
+            ask_ai_fn=ask_ai,
+            sender_key=sender_key,
+            recipient="yarik",
+            reply_to_msg_id=msg_id,
+            ack_msg_id=ack_msg_id,
+            is_owner_sender=is_owner_sender
+        )
         return
 
     # 5. Предложение создать дополнение или живой разговорный ответ

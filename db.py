@@ -1,17 +1,39 @@
 import sqlite3
 import os
 import time
+import json
 import fcntl
 import contextlib
 from config import DB_PATH
 
+@contextlib.contextmanager
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode = WAL")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def init_db():
     with get_db() as conn:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS dynamic_skills (
+            skill_name TEXT PRIMARY KEY,
+            file_path TEXT,
+            triggers TEXT,
+            description TEXT,
+            requirements TEXT,
+            code TEXT,
+            updated_at REAL
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_dynamic_skills_updated ON dynamic_skills(updated_at)")
+
         conn.execute("""
         CREATE TABLE IF NOT EXISTS chats (
             chat_id INTEGER PRIMARY KEY,
@@ -151,8 +173,12 @@ def create_confirmation(req_id, question, message_id=None, initiator=None):
         VALUES (?, ?, 'pending', NULL, ?, ?, ?, NULL)
         ON CONFLICT(req_id) DO UPDATE SET
             question = excluded.question,
+            status = 'pending',
+            comment = NULL,
+            resolved_at = NULL,
             message_id = COALESCE(excluded.message_id, confirmations.message_id),
-            initiator = COALESCE(excluded.initiator, confirmations.initiator)
+            initiator = COALESCE(excluded.initiator, confirmations.initiator),
+            created_at = excluded.created_at
         """, (req_id, question, message_id, initiator, time.time()))
 
 def update_confirmation_message_id(req_id, message_id):
@@ -183,6 +209,166 @@ def get_confirmation(req_id):
             "created_at": row[6],
             "resolved_at": row[7]
         }
+
+def get_latest_pending_confirmation():
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT req_id, question, status, comment, message_id, initiator, created_at, resolved_at FROM confirmations WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "req_id": row[0],
+            "question": row[1],
+            "status": row[2],
+            "comment": row[3],
+            "message_id": row[4],
+            "initiator": row[5],
+            "created_at": row[6],
+            "resolved_at": row[7]
+        }
+
+def save_dynamic_skill(skill_name, file_path, triggers, description, requirements, code):
+    """
+    Saves or updates dynamic skill in SQLite database.
+    triggers and requirements can be passed as list/set/tuple or JSON/string.
+    """
+    if isinstance(triggers, (list, tuple, set)):
+        triggers_str = json.dumps(list(triggers), ensure_ascii=False)
+    else:
+        triggers_str = str(triggers or "[]")
+
+    if isinstance(requirements, (list, tuple, set)):
+        reqs_str = json.dumps(list(requirements), ensure_ascii=False)
+    else:
+        reqs_str = str(requirements or "[]")
+
+    with get_db() as conn:
+        conn.execute("""
+        INSERT INTO dynamic_skills (skill_name, file_path, triggers, description, requirements, code, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(skill_name) DO UPDATE SET
+            file_path = excluded.file_path,
+            triggers = excluded.triggers,
+            description = excluded.description,
+            requirements = excluded.requirements,
+            code = excluded.code,
+            updated_at = excluded.updated_at
+        """, (skill_name, file_path, triggers_str, description, reqs_str, code, time.time()))
+
+def get_dynamic_skill(skill_name):
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT skill_name, file_path, triggers, description, requirements, code, updated_at FROM dynamic_skills WHERE skill_name = ?",
+            (skill_name,)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            triggers = json.loads(row[2]) if row[2] else []
+        except Exception:
+            triggers = [t.strip() for t in (row[2] or "").split(",") if t.strip()]
+        try:
+            requirements = json.loads(row[4]) if row[4] else []
+        except Exception:
+            requirements = [r.strip() for r in (row[4] or "").split(",") if r.strip()]
+        return {
+            "skill_name": row[0],
+            "file_path": row[1],
+            "triggers": triggers,
+            "description": row[3],
+            "requirements": requirements,
+            "code": row[5],
+            "updated_at": row[6]
+        }
+
+def list_dynamic_skills():
+    with get_db() as conn:
+        cur = conn.execute("SELECT skill_name, file_path, triggers, description, requirements, code, updated_at FROM dynamic_skills ORDER BY updated_at DESC")
+        skills = []
+        for row in cur.fetchall():
+            try:
+                triggers = json.loads(row[2]) if row[2] else []
+            except Exception:
+                triggers = [t.strip() for t in (row[2] or "").split(",") if t.strip()]
+            try:
+                requirements = json.loads(row[4]) if row[4] else []
+            except Exception:
+                requirements = [r.strip() for r in (row[4] or "").split(",") if r.strip()]
+            skills.append({
+                "skill_name": row[0],
+                "file_path": row[1],
+                "triggers": triggers,
+                "description": row[3],
+                "requirements": requirements,
+                "code": row[5],
+                "updated_at": row[6]
+            })
+        return skills
+
+def delete_dynamic_skill(skill_name):
+    with get_db() as conn:
+        conn.execute("DELETE FROM dynamic_skills WHERE skill_name = ?", (skill_name,))
+
+def restore_dynamic_skills(skills_dir=None, install_requirements=True):
+    """
+    Restores all dynamic skill .py files from SQLite into the skills/ folder
+    and installs missing pip requirements with strict timeout <= 45s.
+    """
+    import subprocess
+    import sys
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    s_dir = skills_dir or os.path.join(base_dir, "skills")
+    os.makedirs(s_dir, exist_ok=True)
+    init_file = os.path.join(s_dir, "__init__.py")
+    if not os.path.exists(init_file):
+        with open(init_file, "w", encoding="utf-8") as f:
+            f.write("# -*- coding: utf-8 -*-\n")
+
+    skills = list_dynamic_skills()
+    restored_count = 0
+    all_requirements = set()
+
+    for skill in skills:
+        fn = os.path.basename(skill["file_path"] or f"{skill['skill_name']}.py")
+        if not fn.endswith(".py"):
+            fn += ".py"
+        target_path = os.path.join(s_dir, fn)
+        code = skill.get("code") or ""
+        should_write = True
+        if os.path.exists(target_path):
+            try:
+                with open(target_path, "r", encoding="utf-8") as f:
+                    if f.read() == code:
+                        should_write = False
+            except Exception:
+                should_write = True
+        if should_write and code:
+            with open(target_path, "w", encoding="utf-8") as f:
+                f.write(code)
+            restored_count += 1
+
+        for req in skill.get("requirements", []):
+            if req and isinstance(req, str):
+                all_requirements.add(req.strip())
+
+    if install_requirements and all_requirements:
+        for pkg in all_requirements:
+            try:
+                print(f"[DYNAMIC SKILLS] Restoring requirement: {pkg}...")
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--break-system-packages", pkg],
+                    capture_output=True,
+                    timeout=45
+                )
+            except Exception as e:
+                print(f"[DYNAMIC SKILLS] Warning: failed to install {pkg}: {e}")
+
+    print(f"[DYNAMIC SKILLS] restore_dynamic_skills complete: {restored_count} files written, {len(skills)} skills active.")
+    return restored_count
+
 
 def get_kv(key, default=None):
     with get_db() as conn:

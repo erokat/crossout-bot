@@ -120,94 +120,20 @@ def main():
 
     timeout = 180
     start_time = time.time()
-    offset_str = get_kv("control_bot_offset", "0")
-    try:
-        offset = int(offset_str)
-    except ValueError:
-        offset = 0
-
     verdict = None
     comment = ""
 
     while time.time() - start_time < timeout:
-        # 1. Check SQLite database (in case confirmed via Web HTTP endpoint)
+        # Check SQLite database for resolution (from Web endpoint, inline buttons, or owner reply)
         conf = get_confirmation(req_id)
-        if conf and conf["status"] in ["approved", "rejected"]:
+        if conf and conf.get("status") in ["approved", "rejected"]:
             verdict = conf["status"].upper()
-            comment = conf.get("comment") or "Web link click"
+            comment = conf.get("comment") or ""
             if prompt_msg_id:
                 delete_bot_message(bot_token, owner_id, prompt_msg_id)
             break
 
-        # 2. Check Bot API updates for callback query or text message
-        try:
-            url = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={offset}&timeout=2"
-            req = urllib.request.Request(url, headers={"User-Agent": "CrossoutBot/1.0"})
-            with urllib.request.urlopen(req, timeout=5) as r:
-                data = json.loads(r.read().decode("utf-8"))
-
-            if data.get("ok"):
-                for upd in data.get("result", []):
-                    upd_id = upd["update_id"]
-                    offset = max(offset, upd_id + 1)
-                    set_kv("control_bot_offset", str(offset))
-
-                    # Check callback queries
-                    cb = upd.get("callback_query")
-                    if cb:
-                        cb_data = cb.get("data", "")
-                        cb_msg = cb.get("message", {})
-                        cb_msg_id = cb_msg.get("message_id") or prompt_msg_id
-                        if cb_data == f"approve_{req_id}":
-                            answer_callback(bot_token, cb["id"], "✅ Разрешено!")
-                            verdict = "APPROVED"
-                            comment = "Inline button"
-                            resolve_confirmation(req_id, "approved", comment)
-                            if cb_msg_id:
-                                delete_bot_message(bot_token, owner_id, cb_msg_id)
-                            break
-                        elif cb_data == f"reject_{req_id}":
-                            answer_callback(bot_token, cb["id"], "❌ Отклонено!")
-                            verdict = "REJECTED"
-                            comment = "Inline button"
-                            resolve_confirmation(req_id, "rejected", comment)
-                            if cb_msg_id:
-                                delete_bot_message(bot_token, owner_id, cb_msg_id)
-                            break
-
-                    # Check text messages from owner
-                    msg = upd.get("message")
-                    if msg and msg.get("from", {}).get("id") == owner_id:
-                        text = (msg.get("text") or "").strip()
-                        t_lower = text.lower()
-                        if any(w in t_lower for w in ["да", "разреш", "ок", "удаляй", "yes", "подтвержд"]):
-                            verdict = "APPROVED"
-                            comment = text
-                            resolve_confirmation(req_id, "approved", comment)
-                            if prompt_msg_id:
-                                delete_bot_message(bot_token, owner_id, prompt_msg_id)
-                            break
-                        elif any(w in t_lower for w in ["нет", "отказ", "не ", "нельзя", "отмен", "no"]):
-                            verdict = "REJECTED"
-                            comment = text
-                            resolve_confirmation(req_id, "rejected", comment)
-                            if prompt_msg_id:
-                                delete_bot_message(bot_token, owner_id, prompt_msg_id)
-                            break
-                        else:
-                            verdict = "APPROVED" if "не" not in t_lower else "REJECTED"
-                            comment = text
-                            resolve_confirmation(req_id, verdict.lower(), comment)
-                            if prompt_msg_id:
-                                delete_bot_message(bot_token, owner_id, prompt_msg_id)
-                            break
-        except Exception:
-            pass
-
-        if verdict:
-            break
-
-        time.sleep(1.5)
+        time.sleep(1.0)
 
     if not verdict:
         verdict = "REJECTED"

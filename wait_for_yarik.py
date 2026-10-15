@@ -29,7 +29,9 @@ from db import (
     is_handled,
     add_handled_id as db_add_handled_id,
     configure_session_sqlite,
-    session_flock
+    session_flock,
+    resolve_confirmation,
+    get_latest_pending_confirmation
 )
 
 def is_bot_mention(text):
@@ -154,7 +156,36 @@ async def poll_control_bot(cfg, exit_event, result_box):
                 offset = max(offset, upd_id + 1)
                 set_kv("control_bot_offset", str(offset))
 
-                # Check if it's an incoming message from the owner
+                # 1. Check callback queries from inline buttons (for confirmation approval/rejection)
+                cq = upd.get("callback_query")
+                if cq:
+                    cq_id = cq.get("id")
+                    cq_data = cq.get("data", "")
+                    cq_from_id = cq.get("from", {}).get("id")
+                    if cq_from_id == owner_id and (cq_data.startswith("approve_") or cq_data.startswith("reject_")):
+                        action, target_id = cq_data.split("_", 1)
+                        status = "approved" if action == "approve" else "rejected"
+                        resolve_confirmation(target_id, status, comment="Inline button")
+                        try:
+                            url_ans = f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery"
+                            pld = json.dumps({"callback_query_id": cq_id, "text": f"{'✅ Разрешено' if status == 'approved' else '❌ Отклонено'}!"}).encode("utf-8")
+                            req_ans = urllib.request.Request(url_ans, data=pld, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
+                            await loop.run_in_executor(None, lambda: urllib.request.urlopen(req_ans, timeout=5))
+                        except Exception:
+                            pass
+                        cq_msg = cq.get("message", {})
+                        cq_msg_id = cq_msg.get("message_id")
+                        if cq_msg_id:
+                            try:
+                                url_del = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+                                pld_del = json.dumps({"chat_id": owner_id, "message_id": int(cq_msg_id)}).encode("utf-8")
+                                req_del = urllib.request.Request(url_del, data=pld_del, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
+                                await loop.run_in_executor(None, lambda: urllib.request.urlopen(req_del, timeout=5))
+                            except Exception:
+                                pass
+                        continue
+
+                # 2. Check if it's an incoming message from the owner
                 msg = upd.get("message")
                 if not msg:
                     continue
@@ -169,6 +200,29 @@ async def poll_control_bot(cfg, exit_event, result_box):
                     add_handled_id(msg_id, owner_id)
                     text = msg.get("text") or msg.get("caption") or ""
                     date_str = str(msg.get("date", int(time.time())))
+
+                    # Check if this message resolves an active pending confirmation
+                    pending_conf = get_latest_pending_confirmation()
+                    if pending_conf and text:
+                        t_lower = text.strip().lower()
+                        reply_to = msg.get("reply_to_message", {})
+                        is_reply_to_prompt = bool(reply_to and pending_conf.get("message_id") and reply_to.get("message_id") == pending_conf.get("message_id"))
+                        is_approval = any(w in t_lower for w in ["да", "разреш", "ок", "удаляй", "подтвержд", "yes", "+"])
+                        is_rejection = any(w in t_lower for w in ["нет", "отказ", "не ", "нельзя", "отмен", "reject", "-"])
+
+                        if is_reply_to_prompt or is_approval or is_rejection:
+                            status = "approved" if is_approval or (not is_rejection and is_reply_to_prompt) else "rejected"
+                            resolve_confirmation(pending_conf["req_id"], status, comment=f"Текст владельца: {text}")
+                            p_msg_id = pending_conf.get("message_id")
+                            if p_msg_id:
+                                try:
+                                    url_del = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+                                    pld_del = json.dumps({"chat_id": owner_id, "message_id": int(p_msg_id)}).encode("utf-8")
+                                    req_del = urllib.request.Request(url_del, data=pld_del, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
+                                    await loop.run_in_executor(None, lambda: urllib.request.urlopen(req_del, timeout=5))
+                                except Exception:
+                                    pass
+                            continue
 
                     media_path = None
                     has_media = 0

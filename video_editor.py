@@ -272,10 +272,17 @@ def process_video_command(video_path, command_text):
 
         # 2. Ускорить / замедлить
         elif any(w in t for w in ["ускорь", "быстрее"]):
-            # Проверим множитель (например 2x, в 2 раза, 3x)
-            m = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:x|раз|раза)?", t)
-            speed = float(m.group(1).replace(",", ".")) if m else 2.0
-            speed = min(4.0, max(1.2, speed))
+            # Проверим множитель (например 2x, 2х, в 2 раза, 3x, на 1.5x)
+            # Не парсить годы (2024) или номера файлов без явного указания множителя
+            m = re.search(r"(?:(?:в|на)\s+)?(\d+(?:[.,]\d+)?)\s*(?:[xх]|раз[а-я]*)", t) or re.search(r"\b(?:в|на)\s+(\d+(?:[.,]\d+)?)\b", t)
+            speed = 2.0
+            if m:
+                try:
+                    val = float(m.group(1).replace(",", "."))
+                    if 1.0 <= val <= 10.0:
+                        speed = min(4.0, max(1.2, val))
+                except ValueError:
+                    speed = 2.0
             out_file = change_video_speed(video_path, speed=speed)
             reply_cap = f"Ускорил видео в {speed}x! 🏎️💨"
 

@@ -10,12 +10,47 @@ import subprocess
 import traceback
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SKILLS_DIR = os.path.join(BASE_DIR, "skills")
 EXTENSIONS_DIR = os.path.join(BASE_DIR, "extensions")
 MEDIA_DIR = os.path.join(BASE_DIR, "media")
+SAVED_MEMES_DIR = os.path.join(BASE_DIR, "saved_memes")
 REGISTRY_FILE = os.path.join(EXTENSIONS_DIR, "registry.json")
 
+os.makedirs(SKILLS_DIR, exist_ok=True)
 os.makedirs(EXTENSIONS_DIR, exist_ok=True)
 os.makedirs(MEDIA_DIR, exist_ok=True)
+os.makedirs(SAVED_MEMES_DIR, exist_ok=True)
+
+PROTECTED_CORE_FILES = {
+    "keep_alive.py",
+    "wait_for_yarik.py",
+    "db.py",
+    "send.py",
+    "session.session",
+    "crossout_session.session",
+    "config.py",
+    "config.json",
+    "Dockerfile",
+    "main.py",
+    "requirements.txt"
+}
+
+def is_safe_skill_path(filepath):
+    """
+    Ensures that the dynamic generator does not overwrite core system files.
+    Allowed locations: skills/, media/, saved_memes/, or new subdirectories.
+    Forbidden: core files in root directory.
+    """
+    if not filepath:
+        return False
+    abs_path = os.path.abspath(filepath)
+    base_name = os.path.basename(abs_path).lower()
+    if base_name in {f.lower() for f in PROTECTED_CORE_FILES}:
+        return False
+    dir_name = os.path.dirname(abs_path)
+    if dir_name == BASE_DIR and base_name in {f.lower() for f in PROTECTED_CORE_FILES}:
+        return False
+    return True
 
 def load_registry():
     if os.path.exists(REGISTRY_FILE):
@@ -44,26 +79,53 @@ def register_extension(slug, filename, description, triggers, produces_media=Fal
     }
     save_registry(reg)
 
-def find_existing_extension(task_text):
-    reg = load_registry()
-    t = (task_text or "").lower()
-
-    # Если пользователь просит создать что-то новое, другое или переделать — НЕ переиспользуем старый скрипт!
+def find_existing_skill(task_text):
+    """
+    Checks the registry of dynamic skills in SQLite (dynamic_skills table).
+    If found, ensures the file is present in skills/ and returns (script_path, skill_info).
+    """
+    if not task_text:
+        return None, None
+    t = task_text.lower().strip()
     if any(w in t for w in ["новый", "нового", "новеньк", "друг", "переделай", "заново", "по-другому", "реалистичн"]):
         return None, None
 
+    try:
+        from db import list_dynamic_skills
+        skills = list_dynamic_skills()
+        for s in skills:
+            s_name = s.get("skill_name", "")
+            triggers = s.get("triggers", [])
+            matching_count = sum(1 for tr in triggers if tr.lower() in t)
+            if (triggers and matching_count >= min(2, len(triggers))) or (len(s_name) >= 4 and s_name.lower() in t):
+                fn = os.path.basename(s.get("file_path") or f"{s_name}.py")
+                if not fn.endswith(".py"):
+                    fn += ".py"
+                fp = os.path.join(SKILLS_DIR, fn)
+                if not os.path.exists(fp) and s.get("code"):
+                    with open(fp, "w", encoding="utf-8") as f:
+                        f.write(s["code"])
+                if os.path.exists(fp):
+                    return fp, s
+    except Exception as e:
+        print(f"[DYNAMIC SKILL ENGINE] Error querying dynamic_skills: {e}")
+
+    # Fallback check in legacy registry
+    reg = load_registry()
     for slug, info in reg.items():
         triggers = info.get("triggers", [])
         if not triggers:
             continue
-        # Требуем совпадения хотя бы 2 триггеров (или точного названия slug)
         matching_count = sum(1 for tr in triggers if tr in t)
         if matching_count >= min(2, len(triggers)) or (len(slug) >= 4 and slug.lower() in t):
             fn = info.get("filename")
-            fp = os.path.join(EXTENSIONS_DIR, fn)
+            fp = os.path.join(SKILLS_DIR, fn) if os.path.exists(os.path.join(SKILLS_DIR, fn)) else os.path.join(EXTENSIONS_DIR, fn)
             if os.path.exists(fp):
                 return fp, info
+
     return None, None
+
+find_existing_extension = find_existing_skill
 
 def is_explicit_meme_request(text):
     if not text:
@@ -250,17 +312,17 @@ def auto_install_missing_packages(error_output):
         print(f"[DYNAMIC AGENT] Auto-installing missing dependency: {pkg_name} ...")
         try:
             cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", pkg_name]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
             if res.returncode != 0 and "no such option" in res.stderr.lower():
                 cmd = [sys.executable, "-m", "pip", "install", pkg_name]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
             if res.returncode == 0:
-                print(f"[DYNAMIC AGENT] Successfully auto-installed {pkg_name}!")
+                print(f"[DYNAMIC SKILL ENGINE] Successfully auto-installed {pkg_name}!")
                 installed_any = True
             else:
-                print(f"[DYNAMIC AGENT] Failed to install {pkg_name}: {res.stderr[:200]}")
+                print(f"[DYNAMIC SKILL ENGINE] Failed to install {pkg_name}: {res.stderr[:200]}")
         except Exception as e:
-            print(f"[DYNAMIC AGENT] Pip install error: {e}")
+            print(f"[DYNAMIC SKILL ENGINE] Pip install error: {e}")
 
     return installed_any
 
@@ -270,9 +332,9 @@ def run_script(script_path, input_file=None, task_text=None, timeout=60):
     ffmpeg_exe = get_ffmpeg_binary()
     env["FFMPEG_EXE"] = ffmpeg_exe
 
-    # Ensure parent project root is in PYTHONPATH so extensions can import project modules
+    # Ensure parent project root and skills/ are in PYTHONPATH so modules can import project files
     existing_pp = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = BASE_DIR + (os.pathsep + existing_pp if existing_pp else "")
+    env["PYTHONPATH"] = BASE_DIR + os.pathsep + SKILLS_DIR + (os.pathsep + existing_pp if existing_pp else "")
 
     if task_text:
         env["TASK_TEXT"] = str(task_text)
@@ -497,38 +559,51 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             prev_context = f"\nВНИМАНИЕ: Предыдущая попытка упала с ошибкой: {last_e}. Обязательно учти и исправь это!\n"
 
     # 2. Генерируем новое дополнение с нуля
+    # 2. Генерируем новый динамический модуль с нуля через Gemini
     prompt = (
-        f"Ты — автономный саморасширяющийся AI-движок Telegram-бота на базе Google Antigravity.\n"
-        f"Пользователь {sender_name} просит выполнить задачу, которой бот еще не умел: «{task_text}».\n"
+        f"Ты — автономный генератор динамических навыков (Dynamic Skill Engine) Telegram-бота Crossout на базе Gemini.\n"
+        f"Пользователь {sender_name} просит выполнить задачу: «{task_text}».\n"
         f"{file_context}{prev_context}\n"
-        "Инструкции для создания нового дополнения (модуля):\n"
-        "1. Напиши автономный скрипт на Python 3, который добавляет эту новую функцию и выполняет её прямо сейчас.\n"
-        "2. В первой строке комментария укажи краткий slug и описание модуля в формате:\n"
-        "   # EXTENSION: <slug_name> | <Краткое описание>\n"
-        "3. Если требуется обработка видео или звука (обрезка, монтаж, извлечение аудио, конвертация):\n"
-        f"   - Используй ffmpeg через `os.environ.get('FFMPEG_EXE', '{ffmpeg_bin}')` или модуль `subprocess`.\n"
-        "   - Или используй moviepy / pydub / opencv / PIL.\n"
-        "4. Если требуются сторонние библиотеки (например: openpyxl, pandas, qrcode, pillow, moviepy, pydub, matplotlib, reportlab):\n"
-        "   Смело импортируй их — движок автоматически установит их через pip!\n"
-        "5. Все создаваемые файлы сохраняй в папку `media/` и обязательно выводи путь к созданному файлу через `print(result_path)`.\n"
-        "6. Если требуется найти, сгенерировать или скачать фото/арт/картинку/персонажа/мем по теме:\n"
-        "   - Можешь импортировать `from media_finder import find_and_download_image` и вызвать `img_path, _ = find_and_download_image(query)`.\n"
-        "   - Или использовать PIL для коллажа, отрисовки, добавления надписи.\n"
-        "7. Результаты работы и пояснения выводи через `print(...)`.\n\n"
-        "Формат ответа:\n"
-        "Краткое пояснение (1 строка).\n"
-        "```python\n"
-        "# Рабочий, готовый к запуску Python-код\n"
-        "```\n"
+        "СПЕЦИФИКАЦИЯ ВНУТРЕННЕЙ АРХИТЕКТУРЫ И ОКРУЖЕНИЯ БОТА:\n"
+        "1. Корень проекта находится в PYTHONPATH. Тебе доступны модули:\n"
+        "   - `from db import get_db, get_kv, set_kv` — чтение и запись в базу данных SQLite.\n"
+        "   - `from media_finder import find_and_download_image` — поиск и скачивание артов/изображений.\n"
+        "   - `from meme_generator import generate_crossout_meme` — штатная генерация мемов Crossout.\n"
+        "2. Рабочие директории:\n"
+        "   - `./media/` — сохранение любых сгенерированных медиафайлов (картинки, графики, qr, видео, аудио).\n"
+        "   - `./saved_memes/` — сохраненные мемы Crossout.\n"
+        "   - `./skills/` — директория динамических навыков бота.\n"
+        "3. Отправка медиа и сообщений:\n"
+        "   - Модуль может напечатать абсолютный путь к готовому медиафайлу в stdout (например: `print('/path/to/media.png')`) и текст сообщения.\n"
+        "   - Также модуль может напрямую вызывать отправку через send.py:\n"
+        "     `python3 send.py --to yarik [--photo <path>] [--text <text>] [--reply-to <id>]`\n"
+        "     `python3 send.py --to owner [--photo <path>] [--text <text>]`\n"
+        "4. Входные аргументы скрипта:\n"
+        "   - Текст запроса: `os.environ.get('TASK_TEXT')` или `sys.argv[1]`.\n"
+        "   - Входной файл (если прикреплен): `os.environ.get('INPUT_FILE')`.\n"
+        "   - Исполняемый ffmpeg: `os.environ.get('FFMPEG_EXE', 'ffmpeg')`.\n"
+        "5. Библиотеки и зависимости:\n"
+        "   - Если нужны внешние пакеты (requests, beautifulsoup4, pillow, openpyxl, pandas, matplotlib, qrcode, pydub, moviepy, reportlab), свободно импортируй их!\n"
+        "   - Движок автоматически установит недостающие пакеты через pip.\n"
+        "6. ЗАЩИТА СИСТЕМНОГО ЯДРА (СТРОГИЙ ЗАПРЕТ):\n"
+        "   Никогда не изменяй и не перезаписывай файлы ядра бота:\n"
+        "   keep_alive.py, wait_for_yarik.py, db.py, send.py, session.session, crossout_session.session, config.py.\n"
+        "7. Метаданные навыка в начале файла:\n"
+        "   # SKILL_NAME: <slug_латиницей>\n"
+        "   # DESCRIPTION: <Краткое описание навыка>\n"
+        "   # TRIGGERS: <триггер1>, <триггер2>, <триггер3>\n"
+        "   # REQUIREMENTS: <пакет1>, <пакет2>\n\n"
+        "Напиши надежный, готовый к запуску Python 3 код.\n"
+        "Ответ должен содержать код строго внутри блока ```python ... ```."
     )
 
     ai_reply = ask_ai_fn(prompt, photo_path=photo_path)
     if not ai_reply:
-        # Попытка 2: более компактный и прямой промпт без длинных пояснений (для защиты от таймаута)
-        print("[DYNAMIC AGENT] Prompt 1 timed out or failed. Retrying with compact prompt...")
+        # Попытка 2: компактный промпт для защиты от таймаута
+        print("[DYNAMIC SKILL ENGINE] Prompt 1 timed out or failed. Retrying with compact prompt...")
         compact_prompt = (
-            f"Напиши автономный Python 3 скрипт для задачи Telegram-бота: «{task_text}».\n"
-            f"# EXTENSION: ext_mod | {task_text[:50]}\n"
+            f"Напиши автономный Python 3 скрипт в skills/ для задачи Telegram-бота: «{task_text}».\n"
+            f"# SKILL_NAME: skill_mod\n# DESCRIPTION: {task_text[:50]}\n"
             "Все созданные файлы сохраняй в media/ и выведи путь через print(result_path).\n"
             "Код верни строго в ```python ... ``` без лишних рассуждений."
         )
@@ -538,12 +613,11 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
 
     # Если AI не смог сгенерировать код
     if not code:
-        # Если это запрос на мем / графику / Crossout — спасаем ситуацию через надежный синтез модуля!
         if is_meme_or_media_request(task_text):
-            ext_slug = "ext_meme_" + hashlib.md5(task_text.encode()).hexdigest()[:6]
+            ext_slug = "skill_meme_" + hashlib.md5(task_text.encode()).hexdigest()[:6]
             ext_desc = f"Генератор мема: {task_text[:50]}"
             code = synthesize_meme_extension_code(task_text, ext_slug, ext_desc)
-            print(f"[DYNAMIC AGENT] Synthesized guaranteed meme extension code for: {task_text[:60]}")
+            print(f"[DYNAMIC SKILL ENGINE] Synthesized guaranteed meme extension code for: {task_text[:60]}")
         else:
             set_pending_proposal(proposal_user, task_text, last_err="Таймаут AI-генератора кода")
             return (
@@ -552,77 +626,117 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 f"Напиши «доделай модуль» или уточни требования 👍"
             ), None
 
-    # Извлекаем метаданные дополнения
-    slug_match = re.search(r"#\s*EXTENSION:\s*([a-zA-Z0-9_-]+)\s*\|\s*(.+)", code)
+    # Извлекаем метаданные навыка
+    slug_match = re.search(r"#\s*(?:SKILL_NAME|EXTENSION):\s*([a-zA-Z0-9_-]+)", code)
     if slug_match:
-        ext_slug = slug_match.group(1).strip()
-        ext_desc = slug_match.group(2).strip()
+        skill_name = slug_match.group(1).strip()
     else:
-        ext_slug = "ext_" + hashlib.md5(task_text.encode()).hexdigest()[:6]
-        ext_desc = f"Дополнение для задачи: {task_text[:60]}"
+        skill_name = "skill_" + hashlib.md5(task_text.encode()).hexdigest()[:6]
 
-    script_filename = f"{ext_slug}.py"
-    script_path = os.path.join(EXTENSIONS_DIR, script_filename)
+    desc_match = re.search(r"#\s*DESCRIPTION:\s*(.+)", code)
+    if desc_match:
+        skill_desc = desc_match.group(1).strip()
+    else:
+        slug_pipe = re.search(r"#\s*(?:SKILL_NAME|EXTENSION):\s*[a-zA-Z0-9_-]+\s*\|\s*(.+)", code)
+        skill_desc = slug_pipe.group(1).strip() if slug_pipe else f"Навык: {task_text[:60]}"
+
+    trig_match = re.search(r"#\s*TRIGGERS:\s*(.+)", code)
+    if trig_match:
+        triggers = [t.strip().lower() for t in trig_match.group(1).split(",") if t.strip()]
+    else:
+        stopwords = {"бот", "пожалуйста", "скинь", "сделай", "напиши", "сгенерируй", "создай", "дополнение", "навык", "чтобы", "можешь", "умеешь", "давай", "хочу"}
+        triggers = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", task_text.lower()) if w not in stopwords]
+        for part in re.split(r"[_-]", skill_name):
+            if len(part) >= 3 and part.lower() not in triggers:
+                triggers.append(part.lower())
+
+    req_match = re.search(r"#\s*REQUIREMENTS:\s*(.+)", code)
+    requirements = [r.strip() for r in req_match.group(1).split(",") if r.strip()] if req_match else []
+
+    script_filename = f"{skill_name}.py"
+    script_path = os.path.join(SKILLS_DIR, script_filename)
+
+    # Защита системного ядра: проверяем допустимость пути
+    if not is_safe_skill_path(script_path):
+        return f"⚠️ Ошибка безопасности: недопустимый путь для навыка `{script_path}`.", None
 
     with open(script_path, "w", encoding="utf-8") as f:
         f.write("# -*- coding: utf-8 -*-\n")
-        f.write(f"# Auto-generated Antigravity Extension: {ext_desc}\n\n")
+        f.write(f"# Auto-generated Dynamic Skill: {skill_desc}\n\n")
         f.write(code)
 
     before_files = get_all_media_snapshot()
     start_time = time.time()
 
-    # Первый запуск
-    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
+    # Первый запуск (таймаут 60 секунд)
+    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
 
-    # Если не хватило модуля — авто-устанавливаем через pip и перезапускаем
+    # Если не хватило модуля — авто-устанавливаем через pip (таймаут 45с) и перезапускаем
     if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
         installed = auto_install_missing_packages(stderr)
         if installed:
-            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
+            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
 
-    # Self-healing / самоотладка при ошибках (до 2 попыток)
+    # Self-healing / самоотладка при ошибках (до 3 итераций!)
     if code_rc != 0 and stderr:
-        for attempt in range(2):
+        for attempt in range(1, 4):
+            print(f"[DYNAMIC SKILL ENGINE] Self-healing attempt {attempt}/3 for {skill_name} (rc={code_rc})...")
             fix_prompt = (
-                f"Скрипт дополнения для «{task_text}» упал с кодом {code_rc}.\n"
-                f"Ошибка:\n```\n{stderr[:900]}\n```\n\n"
+                f"Скрипт навыка '{skill_name}' для задачи «{task_text}» упал с кодом {code_rc}.\n"
+                f"Ошибка / Traceback:\n```\n{stderr[:1500]}\n{stdout[:500]}\n```\n\n"
                 f"Исходный код:\n```python\n{code}\n```\n\n"
-                "Устрани ошибку, исправь логику и верни исправленный, полностью работающий Python-код строго внутри ```python ... ```."
+                "Инструкции по исправлению:\n"
+                "1. Проанализируй причину ошибки и устрани её.\n"
+                "2. Сохрани комментарии с метаданными (# SKILL_NAME, # DESCRIPTION, # TRIGGERS, # REQUIREMENTS).\n"
+                "3. Не изменяй файлы системного ядра бота.\n"
+                "4. Верни исправленный, полностью работающий Python-код строго внутри ```python ... ```."
             )
             fixed_reply = ask_ai_fn(fix_prompt)
             fixed_code = extract_python_code(fixed_reply)
-            if fixed_code:
+            if fixed_code and is_safe_skill_path(script_path):
                 with open(script_path, "w", encoding="utf-8") as f:
                     f.write("# -*- coding: utf-8 -*-\n")
-                    f.write(f"# Auto-fixed Antigravity Extension: {ext_desc} (attempt {attempt + 1})\n\n")
+                    f.write(f"# Auto-fixed Dynamic Skill: {skill_desc} (self-healing attempt {attempt})\n\n")
                     f.write(fixed_code)
                 code = fixed_code
-                code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
+                code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
                 if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
                     if auto_install_missing_packages(stderr):
-                        code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text)
+                        code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
                 if code_rc == 0:
-                    print(f"[DYNAMIC AGENT] Self-healing succeeded on attempt {attempt + 1}!")
+                    print(f"[DYNAMIC SKILL ENGINE] Self-healing succeeded on attempt {attempt}/3!")
                     break
 
     # Ищем созданный медиафайл (если задача не чисто текстовая)
     new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=script_path)
 
-    # Если скрипт успешно отработал — регистрируем его как постоянное дополнение к боту!
+    # Если скрипт успешно отработал — персистентно сохраняем в SQLite dynamic_skills и Google Диск!
     if code_rc == 0:
-        stopwords = {"бот", "пожалуйста", "скинь", "сделай", "напиши", "сгенерируй", "создай", "дополнение", "чтобы", "можешь", "умеешь", "давай", "хочу"}
-        words = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", task_text.lower()) if w not in stopwords]
-        # Добавляем части slug
-        for part in re.split(r"[_-]", ext_slug):
-            if len(part) >= 3 and part.lower() not in words:
-                words.append(part.lower())
-        register_extension(ext_slug, script_filename, ext_desc, words[:7], produces_media=bool(new_media))
-        print(f"[DYNAMIC AGENT] Successfully registered new extension: {ext_slug} (triggers: {words[:7]}, produces_media={bool(new_media)})")
+        try:
+            from db import save_dynamic_skill
+            save_dynamic_skill(
+                skill_name=skill_name,
+                file_path=script_path,
+                triggers=triggers,
+                description=skill_desc,
+                requirements=requirements,
+                code=code
+            )
+            print(f"[DYNAMIC SKILL ENGINE] Persisted skill '{skill_name}' in SQLite dynamic_skills table.")
+        except Exception as dbe:
+            print(f"[DYNAMIC SKILL ENGINE] Error saving skill to SQLite: {dbe}")
+
+        try:
+            from gdrive import upload_file_to_drive
+            upload_file_to_drive(script_path, folder_type="skills")
+        except Exception as ge:
+            print(f"[DYNAMIC SKILL ENGINE] GDrive backup notice: {ge}")
+
+        register_extension(skill_name, script_filename, skill_desc, triggers[:7], produces_media=bool(new_media))
+        print(f"[DYNAMIC SKILL ENGINE] Successfully registered dynamic skill: {skill_name} (triggers: {triggers[:7]}, produces_media={bool(new_media)})")
 
     # Формируем естественный, живой ответ пользователю без технического спама
     if new_media and os.path.exists(new_media):
-        # Если создано медиа (мем, картинка, трек, видео) — отправляем файл и чистую 1-строчную подпись
         clean_lines = []
         if stdout:
             for line in stdout.splitlines():
@@ -633,7 +747,6 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                     continue
                 clean_lines.append(line_str)
 
-        # Проверяем, есть ли готовый естественный панчлайн / подпись из вывода скрипта
         natural_caption = " ".join(clean_lines).strip() if (clean_lines and len(" ".join(clean_lines)) < 160) else ""
 
         if not natural_caption:
@@ -668,7 +781,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             if fallback_meme and os.path.exists(fallback_meme):
                 return f"Сгенерировал свежий мем по теме «{task_text}», {sender_name}! 🔥", fallback_meme
         except Exception as e:
-            print(f"[DYNAMIC AGENT] Fallback meme generation failed: {e}")
+            print(f"[DYNAMIC SKILL ENGINE] Fallback meme generation failed: {e}")
 
     # Обработка ошибки выполнения скрипта: сообщаем суть ошибки и предлагаем доделать модуль
     err_lines = [l.strip() for l in (stderr or "").strip().splitlines() if l.strip()]
@@ -682,16 +795,16 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             if fallback_meme and os.path.exists(fallback_meme):
                 report = (
                     f"⚠️ Модуль генерации завершился с ошибкой: `{last_err}`.\n"
-                    f"Я попытался исправить код автоматически (2 попытки self-healing), а пока держи готовый мем через штатный генератор! 🔥\n\n"
+                    f"Я попытался исправить код автоматически (3 попытки self-healing), а пока держи готовый мем через штатный генератор! 🔥\n\n"
                     f"💡 Хочешь, чтобы я доделал и отладил этот модуль? Напиши «доделай модуль»!"
                 )
                 return report, fallback_meme
         except Exception as e:
-            print(f"[DYNAMIC AGENT] Fallback meme generation failed after script error: {e}")
+            print(f"[DYNAMIC SKILL ENGINE] Fallback meme generation failed after script error: {e}")
 
     return (
         f"⚠️ Ошибка выполнения модуля для «{task_text}»:\n`{last_err}`\n\n"
-        f"Я попытался исправить скрипт через самоотладку (2 итерации self-healing), но ошибка осталась.\n"
+        f"Я попытался исправить скрипт через самоотладку (3 итерации self-healing), но ошибка осталась.\n"
         f"Предлагаю доделать этот модуль генерации! Напиши «доделай модуль» или «исправь» 👍"
     ), None
 
@@ -768,3 +881,67 @@ def is_pure_chitchat(text):
     if len(t_clean) < 4 and not any(w in t_clean for w in ["да", "нет", "го", "не"]):
         return True
     return False
+
+def run_autonomous_task_async(
+    task_text,
+    sender_name,
+    photo_path=None,
+    ask_ai_fn=None,
+    sender_key=None,
+    retry_context=None,
+    recipient="owner",
+    reply_to_msg_id=None,
+    ack_msg_id=None,
+    is_owner_sender=False
+):
+    """
+    Executes an autonomous task or dynamic skill in a non-blocking background thread.
+    The caller (keep_alive loop) returns immediately and does not hang.
+    When complete, the background worker sends the result via send.py and cleans up ack_msg_id.
+    """
+    import threading
+
+    def _worker():
+        try:
+            print(f"[DYNAMIC ASYNC WORKER] Starting task for {sender_name}: {task_text[:60]}")
+            res_text, res_media = execute_autonomous_task(
+                task_text,
+                sender_name=sender_name,
+                photo_path=photo_path,
+                ask_ai_fn=ask_ai_fn,
+                sender_key=sender_key,
+                retry_context=retry_context
+            )
+            print(f"[DYNAMIC ASYNC WORKER] Finished task for {sender_name}. Delivering result...")
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", recipient
+            ]
+            if not is_owner_sender:
+                send_cmd.append("--no-copy")
+            if reply_to_msg_id:
+                send_cmd.extend(["--reply-to", str(reply_to_msg_id)])
+
+            if res_media and os.path.exists(res_media):
+                send_cmd.extend(["--photo", res_media, "--text", res_text])
+            else:
+                send_cmd.extend(["--text", res_text])
+
+            subprocess.run(send_cmd)
+
+            if ack_msg_id:
+                try:
+                    del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", recipient, "--delete", str(ack_msg_id)]
+                    subprocess.run(del_cmd)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            traceback.print_exc()
+            err_msg = f"⚠️ Ошибка выполнения автономного навыка: {e}"
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", recipient, "--text", err_msg])
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return t
