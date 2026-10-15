@@ -11,6 +11,8 @@ from PIL import Image, ImageDraw, ImageFont
 from config import MEDIA_DIR, SAVED_MEMES_DIR
 from db import is_meme_already_sent, record_sent_meme, get_last_sent_meme
 
+ANDROID_PHOTOS_DIR = "/storage/emulated/0/Pictures/PhotosEditor"
+
 def get_font(size):
     font_paths = [
         os.path.join(MEDIA_DIR, "RussoOne-Regular.ttf"),
@@ -605,24 +607,17 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
             print(f"[MEME] Repeat allowed and requested. Returning last meme: {last['file_path']}")
             return last["file_path"]
 
-    # 1. ALWAYS use the multi-style meme engine (Demotivator, Caption, Breaking News, Tweet, POV, Impact)
-    try:
-        from meme_engine import generate_universal_meme
-        out_path, headline = generate_universal_meme(theme=theme, allow_repeat=allow_repeat, recipient=recipient)
-        h = hashlib.sha256(headline.encode("utf-8") + str(time.time()).encode()).hexdigest()
-        record_sent_meme(h, "universal_engine", headline, out_path, sent_to=recipient)
-        print(f"[MEME ENGINE] Successfully generated diverse meme: {out_path} ({headline})")
-        return out_path
-    except Exception as e:
-        print(f"[MEME ENGINE] Universal engine error: {e}, falling back to local pool")
-
-    # 2. Local fallback pool if meme_engine completely fails
     is_crossout_topic = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "ховер", "автосборк", "птур", "скорп", "мамонт", "жнец", "вереск", "кларнет"])
-
     is_rw_topic = any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
     is_crossover_topic = is_crossout_topic and is_rw_topic
-
     is_heather_topic = ("вереск" in theme_lower) or (("птур" in theme_lower or "ракета" in theme_lower) and any(w in theme_lower for w in ["сравнен", "vs", "геймплей"]))
+
+    has_targeted = (
+        is_crossover_topic
+        or is_rw_topic
+        or is_heather_topic
+        or any(w in theme_lower for w in ["автосборк", "газген", "взрыв", "птур", "ракета", "скорп", "мамонт", "жнец", "ховер", "клоун", "доге"])
+    )
 
     candidates = []
     if is_crossover_topic:
@@ -658,31 +653,60 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         random.shuffle(cands)
         candidates = cands
 
-    chosen_img = None
-    chosen_tpl = None
-    chosen_hl = None
-    chosen_hash = None
+    # 1. Если тема точно соответствует целевому генератору (Вереск vs ПТУР, Газген, Скорпион и т.д.) — генерируем точный тематический мем!
+    if has_targeted:
+        for gen_func in candidates:
+            try:
+                img, tpl_name, headline = gen_func()
+            except Exception as e:
+                continue
 
+            h = hashlib.sha256(headline.encode("utf-8") + img.tobytes()).hexdigest()
+            if not allow_repeat and is_meme_already_sent(meme_hash=h, headline=headline):
+                continue
+
+            out_name = f"meme_{int(time.time())}_{random.randint(1000, 9999)}.png"
+            out_path = os.path.join(MEDIA_DIR, out_name)
+            img.save(out_path, "PNG")
+
+            saved_copy = os.path.join(SAVED_MEMES_DIR, out_name)
+            try: shutil.copy2(out_path, saved_copy)
+            except Exception: pass
+
+            if os.path.exists(ANDROID_PHOTOS_DIR):
+                try: shutil.copy2(out_path, os.path.join(ANDROID_PHOTOS_DIR, out_name))
+                except Exception: pass
+
+            record_sent_meme(h, tpl_name, headline, out_path, sent_to=recipient)
+            print(f"[MEME GENERATOR] Generated targeted in-theme meme: {out_path} ({headline})")
+            return out_path
+
+    # 2. Если точного совпадения нет — используем универсальный AI-генератор мемов
+    try:
+        from meme_engine import generate_universal_meme
+        out_path, headline = generate_universal_meme(theme=theme, allow_repeat=allow_repeat, recipient=recipient)
+        h = hashlib.sha256(headline.encode("utf-8") + str(time.time()).encode()).hexdigest()
+        record_sent_meme(h, "universal_engine", headline, out_path, sent_to=recipient)
+        print(f"[MEME ENGINE] Successfully generated diverse meme: {out_path} ({headline})")
+        return out_path
+    except Exception as e:
+        print(f"[MEME ENGINE] Universal engine error: {e}, falling back to local pool")
+
+    # 3. Локальный резервный пул
     for gen_func in candidates:
         try:
             img, tpl_name, headline = gen_func()
-        except Exception as e:
+            out_name = f"meme_{int(time.time())}_{random.randint(1000, 9999)}.png"
+            out_path = os.path.join(MEDIA_DIR, out_name)
+            img.save(out_path, "PNG")
+            record_sent_meme(hashlib.sha256(headline.encode("utf-8")).hexdigest(), tpl_name, headline, out_path, sent_to=recipient)
+            return out_path
+        except Exception:
             continue
 
-        h = hashlib.sha256(headline.encode("utf-8") + img.tobytes()).hexdigest()
-        if not allow_repeat and is_meme_already_sent(meme_hash=h, headline=headline):
-            continue
-
-        chosen_img = img
-        chosen_tpl = tpl_name
-        chosen_hl = headline
-        chosen_hash = h
-        break
-
-    if not chosen_img:
-        from meme_engine import generate_universal_meme
-        out_path, headline = generate_universal_meme(theme=theme or "Crossout Пустоши", allow_repeat=allow_repeat, recipient=recipient)
-        return out_path
+    from meme_engine import generate_universal_meme
+    out_path, headline = generate_universal_meme(theme=theme or "Crossout Пустоши", allow_repeat=True, recipient=recipient)
+    return out_path
 
     # Save to media and saved_memes
     out_name = f"meme_{int(time.time())}_{random.randint(1000, 9999)}.png"
