@@ -408,9 +408,6 @@ def render_caption_meme(base_img, text_top, text_bottom=None, sound_text=None):
     """
     W, H = base_img.size
     target_w = 1000
-    target_h = int(H * (target_w / W))
-    base_resized = base_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-    W, H = base_resized.size
 
     font_header = get_font("russo", 36)
     font_bottom = get_font("russo", 44)
@@ -418,21 +415,31 @@ def render_caption_meme(base_img, text_top, text_bottom=None, sound_text=None):
 
     # Calculate header height
     dummy_draw = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-    lines = wrap_text(dummy_draw, text_top, font_header, W - 100)
+    lines = wrap_text(dummy_draw, text_top, font_header, target_w - 100)
     line_h = 46
     header_h = max(160, len(lines) * line_h + 80)
-    sound_lines = wrap_text(dummy_draw, sound_text, font_sound, W - 60) if sound_text else []
+    sound_lines = wrap_text(dummy_draw, sound_text, font_sound, target_w - 60) if sound_text else []
     sound_margin = max(70, len(sound_lines) * 40 + 20) if sound_text else 0
 
-    canvas_h = H + header_h + sound_margin
-    canvas = Image.new("RGB", (W, canvas_h), (0, 0, 0))
+    # Ensure total height does not exceed safe preview limit (1200px)
+    max_safe_h = 1200
+    avail_img_h = max_safe_h - header_h - sound_margin
+    scale = min(target_w / W, avail_img_h / H) if (H * (target_w / W) > avail_img_h) else (target_w / W)
+    new_w = max(300, int(W * scale))
+    new_h = max(300, int(H * scale))
+    base_resized = base_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+    canvas_w = max(new_w, target_w)
+    canvas_h = new_h + header_h + sound_margin
+    canvas = Image.new("RGB", (canvas_w, canvas_h), (0, 0, 0))
 
     # White top card
-    header_box = Image.new("RGB", (W, header_h), (255, 255, 255))
+    header_box = Image.new("RGB", (canvas_w, header_h), (255, 255, 255))
     canvas.paste(header_box, (0, 0))
 
-    # Paste base image
-    canvas.paste(base_resized, (0, header_h + sound_margin))
+    # Paste base image centered
+    offset_x = (canvas_w - new_w) // 2
+    canvas.paste(base_resized, (offset_x, header_h + sound_margin))
 
     draw = ImageDraw.Draw(canvas)
 

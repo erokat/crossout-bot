@@ -24,8 +24,23 @@ HEADERS = {
 
 def clean_query(text, media_type="music"):
     t = text.strip()
-    t = re.sub(r"(?:!бот|!bot|бот,|бот|пожалуйста|найди|скинь|скачай|загрузи|поставь|включи|отправь|видео|видос|клип|гиф|гифку|гифка|музыку|музыка|трек|песню|песня)\s*", "", t, flags=re.I).strip()
-    return t or ("DNCE Cake by the ocean" if media_type == "music" else "funny cat")
+    prefix_pattern = r"(?i)^(?:!бот|!bot|бот[,\s]*|ботик[,\s]*|пожалуйста[,\s]*|плиз[,\s]*|найди|скинь|скачай|загрузи|поставь|включи|отправь|сочини|сыграй|сделай|запили|сгенерируй)\s*"
+    while True:
+        new_t = re.sub(prefix_pattern, "", t).strip()
+        if new_t == t:
+            break
+        t = new_t
+
+    t_lower = t.lower()
+    if media_type == "music":
+        if any(w in t_lower for w in ["симфони", "symphony", "оркестр"]):
+            if len(t) < 20:
+                return "Beethoven symphony 5 orchestra epic"
+        t = re.sub(r"(?i)^(?:музыку|музыка|трек|песню|песня|бит|симфонию|симфония)\s*", "", t).strip()
+        return t or "DNCE Cake by the ocean"
+    else:
+        t = re.sub(r"(?i)^(?:видео|видос|клип|гиф|гифку|гифка)\s*", "", t).strip()
+        return t or "funny cat"
 
 def find_and_download_music(query, max_filesize="30M"):
     clean_q = clean_query(query, "music")

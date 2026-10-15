@@ -756,16 +756,21 @@ def handle_owner_message(msg_data):
             "--to", "owner",
             "--text", "Всё, запулил этот мем Ярику в чат! Ждем реакцию 🔥🚜"
         ]
-    # 0.4. Скачивание и отправка музыки / треков / песен для владельца
-    is_music_owner = any(w in t_lower for w in ["музык", "песн", "трек", "песен", "music", "song", "mp3"]) and any(w in t_lower for w in ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь"])
+    # 0.4. Скачивание и отправка музыки / треков / песен / симфоний для владельца
+    music_kws = ["музык", "песн", "трек", "песен", "симфони", "мелоди", "бит", "саунд", "оркестр", "music", "song", "symphony", "melody", "beat", "soundtrack", "mp3"]
+    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "сочини", "сыграй", "сделай", "сгенерируй", "запили"]
+    is_music_owner = (any(w in t_lower for w in music_kws) and any(w in t_lower for w in music_verbs)) or any(p in t_lower for p in ["сочини симфонию", "сочини музыку", "сыграй симфонию", "включи симфонию", "скинь симфонию", "скинь трек", "поставь музыку"])
     if is_music_owner:
         from media_finder import find_and_download_music
         track_path, track_title = find_and_download_music(text)
         if track_path and os.path.exists(track_path):
-            cap = f"🎵 Держи трек, Миша: {track_title}"
+            if any(s in t_lower for s in ["симфони", "symphony", "оркестр"]):
+                cap = f"🎻 Держи симфонию, Миша! Оркестровая мощь: {track_title}"
+            else:
+                cap = f"🎵 Держи трек, Миша: {track_title}"
             subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--photo", track_path, "--text", cap])
         else:
-            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", f"Не удалось скачать трек по запросу: {track_title}"])
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", f"Миша, не удалось найти трек: {track_title}"])
         return
 
     # 0.45. Поиск и отправка GIF анимаций для владельца
@@ -1029,12 +1034,11 @@ def handle_owner_message(msg_data):
 
     # 8. Живой разговорный ответ владельцу (Antigravity AI) или предложение создать дополнение
     if not is_pure_chitchat(text):
+        clean_task = re.sub(r"(?i)^(?:[!/]?бот[,\s]*|ботик[,\s]*|bot[,\s]*)", "", text).strip()
         proposal_text = (
-            f"Миша, я пока такого не умею, но могу сгенерировать дополнение под эту задачу! 🛠️\n\n"
-            f"📌 **Задача:** _{text}_\n\n"
-            "Ответь на это сообщение:\n"
-            "👉 **«Да, сгенерируй»** — и я напишу модуль и выполню\n"
-            "👉 **«Нет, не генерируй»** — если не нужно"
+            f"Миша, такой встроенной функции пока нет, но я могу на лету написать дополнение и выполнить! ⚡🛠️\n\n"
+            f"📌 **Задача:** _{clean_task}_\n\n"
+            "Напиши **«Да, делай»** (или просто **«да»**), если запускаем!"
         )
         set_pending_proposal("owner", text)
         cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", proposal_text]
@@ -1227,16 +1231,22 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
-    # 1.4. Скачивание и отправка музыки / треков / песен в чат
-    is_music_chat = any(w in t_lower for w in ["музык", "песн", "трек", "песен", "music", "song", "mp3"]) and any(w in t_lower for w in ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь"])
+    # 1.4. Скачивание и отправка музыки / треков / песен / симфоний в чат
+    music_kws = ["музык", "песн", "трек", "песен", "симфони", "мелоди", "бит", "саунд", "оркестр", "music", "song", "symphony", "melody", "beat", "soundtrack", "mp3"]
+    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "сочини", "сыграй", "сделай", "сгенерируй", "запили"]
+    is_music_chat = (any(w in t_lower for w in music_kws) and any(w in t_lower for w in music_verbs)) or any(p in t_lower for p in ["сочини симфонию", "сочини музыку", "сыграй симфонию", "включи симфонию", "скинь симфонию", "скинь трек", "поставь музыку"])
     if is_music_chat:
         from media_finder import find_and_download_music
         track_path, track_title = find_and_download_music(text)
+        target_name = "Миша" if is_owner_sender else "Ярик"
         if track_path and os.path.exists(track_path):
-            cap = f"🎵 Держи трек: {track_title}"
+            if any(s in t_lower for s in ["симфони", "symphony", "оркестр"]):
+                cap = f"🎻 {target_name}, лови симфонию! Настоящая оркестровая мощь: {track_title}"
+            else:
+                cap = f"🎵 Держи трек, {target_name}: {track_title}"
             subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--photo", track_path, "--text", cap, "--reply-to", str(msg_id)])
         else:
-            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", f"Не удалось найти или скачать трек по запросу: {track_title}", "--reply-to", str(msg_id)])
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", f"{target_name}, не удалось найти или скачать трек: {track_title}", "--reply-to", str(msg_id)])
         return
 
     # 1.45. Поиск и отправка GIF анимаций в чат
@@ -1612,13 +1622,19 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     # 5. Предложение создать дополнение или живой разговорный ответ
     if not is_pure_chitchat(text):
         target_name = "Миша" if is_owner_sender else "Ярик"
-        proposal_text = (
-            f"{target_name}, я пока такого не умею, но могу сгенерировать дополнение под эту задачу! 🛠️\n\n"
-            f"📌 **Задача:** _{text}_\n\n"
-            "Ответь на это сообщение:\n"
-            "👉 **«Да, сгенерируй»** — и я напишу модуль и выполню\n"
-            "👉 **«Нет, не генерируй»** — если не нужно"
-        )
+        clean_task = re.sub(r"(?i)^(?:[!/]?бот[,\s]*|ботик[,\s]*|bot[,\s]*)", "", text).strip()
+        if is_owner_sender:
+            proposal_text = (
+                f"Миша, такой встроенной функции пока нет, но я могу на лету написать дополнение и выполнить! ⚡🛠️\n\n"
+                f"📌 **Задача:** _{clean_task}_\n\n"
+                "Напиши **«Да, делай»** (или просто **«да»**), если запускаем!"
+            )
+        else:
+            proposal_text = (
+                f"Ярик, в моем арсенале пока нет такой фичи, но я могу прямо сейчас накодить новое дополнение и выполнить! 🚜🛠️\n\n"
+                f"📌 **Задача:** _{clean_task}_\n\n"
+                "Черкани **«Да, сделай»** (или просто **«да»**), если пилим!"
+            )
         set_pending_proposal(sender_key, text, bot_msg_id=msg_id)
         send_cmd = [
             sys.executable,

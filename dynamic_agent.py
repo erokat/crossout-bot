@@ -489,27 +489,47 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         register_extension(ext_slug, script_filename, ext_desc, words[:7], produces_media=bool(new_media))
         print(f"[DYNAMIC AGENT] Successfully registered new extension: {ext_slug} (triggers: {words[:7]}, produces_media={bool(new_media)})")
 
-    final_text_parts = []
-    final_text_parts.append(f"🧩 **Сгенерировано новое дополнение к боту:** `{script_filename}`")
-    final_text_parts.append(f"💡 _{ext_desc}_\n")
+    # Формируем естественный, живой ответ пользователю без технического спама
+    if new_media and os.path.exists(new_media):
+        # Если создано медиа (мем, картинка, трек, видео) — отправляем файл и чистую 1-строчную подпись
+        clean_lines = []
+        if stdout:
+            for line in stdout.splitlines():
+                line_str = line.strip()
+                if not line_str or line_str.startswith("/") or line_str.startswith("media/") or line_str.endswith((".png", ".jpg", ".mp4", ".mp3", ".xlsx", ".pdf", ".gif")):
+                    continue
+                if any(tech_w in line_str.lower() for tech_w in ["traceback", "module", "saved to", "successfully", "extension"]):
+                    continue
+                clean_lines.append(line_str)
 
+        # Проверяем, есть ли готовый естественный панчлайн / подпись из вывода скрипта
+        natural_caption = " ".join(clean_lines).strip() if (clean_lines and len(" ".join(clean_lines)) < 160) else ""
+
+        if not natural_caption:
+            clean_topic = re.sub(
+                r"(?i)^(?:бот[,\s]*)*(?:пожалуйста[,\s]*)*(?:создай|сделай|запили|скинь|сгенерируй)?\s*(?:мем|мемасик|мемчик)?\s*(?:по|про|о)?\s*",
+                "", task_text
+            ).strip()
+            if any(w in task_text.lower() for w in ["мем", "мэм", "мемасик", "прикол"]):
+                if clean_topic:
+                    natural_caption = f"Держи свежий мем по {clean_topic}, {sender_name}! 🔥"
+                else:
+                    natural_caption = f"Лови свежий мем, {sender_name}! 🔥"
+            else:
+                natural_caption = f"Готово, {sender_name}! Лови результат 🔥"
+
+        return natural_caption, new_media
+
+    # Если чисто текстовый результат
     if stdout:
         clean_out = "\n".join([line for line in stdout.splitlines() if not line.startswith("/") and not line.endswith((".png", ".jpg", ".mp4", ".mp3", ".xlsx", ".pdf"))])
         if clean_out.strip():
-            if any(marker in clean_out for marker in ["📍", "🌡️", "📊", "☀️", "🌤️", "☁️", "#", "*"]):
-                final_text_parts.append(clean_out[:2000])
-            else:
-                final_text_parts.append(f"📊 **Результат:**\n```\n{clean_out[:1200]}\n```")
+            return clean_out.strip(), None
 
-    if code_rc == 0 and not new_media and not stdout:
-        final_text_parts.append("✅ Дополнение успешно скомпилировано, зарегистрировано в системе и выполнено!")
-    elif code_rc != 0 and not new_media:
-        final_text_parts.append(f"⚠️ Ошибка при выполнении:\n`{stderr[:300]}`")
-
-    if new_media:
-        final_text_parts.append(f"\n📁 Создан готовый файл: `{os.path.basename(new_media)}`")
-
-    return "\n".join(final_text_parts), new_media
+    if code_rc == 0:
+        return f"Готово, {sender_name}! Всё четко сработало 👍", None
+    else:
+        return f"{sender_name}, при выполнении возникла заминка. Попробуй уточнить запрос!", None
 
 def set_pending_proposal(user_id, task_text, bot_msg_id=None):
     from db import set_kv
