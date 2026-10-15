@@ -172,6 +172,41 @@ async def poll_control_bot(cfg, exit_event, result_box):
                         media_path = await download_bot_file(bot_token, doc["file_id"], dest)
                         media_type = "video" if fname.lower().endswith((".mp4", ".mov", ".avi", ".webm")) else "document"
 
+                    reply_msg = msg.get("reply_to_message")
+                    reply_to_id = reply_msg.get("message_id") if reply_msg else None
+                    if not media_path and reply_msg:
+                        if "photo" in reply_msg and reply_msg["photo"]:
+                            has_media = 1
+                            media_type = "photo"
+                            largest_photo = reply_msg["photo"][-1]
+                            dest = os.path.join(MEDIA_DIR, f"owner_reply_{reply_to_id}.jpg")
+                            media_path = await download_bot_file(bot_token, largest_photo["file_id"], dest)
+                        elif "video" in reply_msg and reply_msg["video"]:
+                            has_media = 1
+                            media_type = "video"
+                            vid = reply_msg["video"]
+                            dest = os.path.join(MEDIA_DIR, f"owner_reply_{reply_to_id}.mp4")
+                            media_path = await download_bot_file(bot_token, vid["file_id"], dest)
+                        elif "animation" in reply_msg and reply_msg["animation"]:
+                            has_media = 1
+                            media_type = "video"
+                            anim = reply_msg["animation"]
+                            dest = os.path.join(MEDIA_DIR, f"owner_reply_{reply_to_id}.mp4")
+                            media_path = await download_bot_file(bot_token, anim["file_id"], dest)
+                        elif "document" in reply_msg and reply_msg["document"]:
+                            doc = reply_msg["document"]
+                            fname = doc.get("file_name", f"doc_{reply_to_id}.bin")
+                            dest = os.path.join(MEDIA_DIR, f"owner_reply_{reply_to_id}_{fname}")
+                            dl_path = await download_bot_file(bot_token, doc["file_id"], dest)
+                            if dl_path:
+                                media_path = dl_path
+                                if fname.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                                    has_media = 1
+                                    media_type = "photo"
+                                elif fname.lower().endswith((".mp4", ".mov", ".avi", ".webm")):
+                                    has_media = 1
+                                    media_type = "video"
+
                     save_message(
                         chat_id=owner_id,
                         message_id=msg_id,
@@ -194,6 +229,9 @@ async def poll_control_bot(cfg, exit_event, result_box):
                             "date": date_str,
                             "text": text,
                             "photo": media_path,
+                            "video": media_path if media_type == "video" else None,
+                            "media_type": media_type,
+                            "reply_to_msg_id": reply_to_id,
                             "sender": "owner"
                         }]
                     }
@@ -203,6 +241,67 @@ async def poll_control_bot(cfg, exit_event, result_box):
         except Exception as e:
             # sys.stderr.write(f"Bot polling error: {e}\n")
             await asyncio.sleep(2)
+
+async def download_reply_media(client, entity, msg, yarik_chat_id):
+    media_path = None
+    media_type = None
+    has_media = 0
+    reply_to_id = None
+    try:
+        replied_m = None
+        if hasattr(msg, "get_reply_message"):
+            try:
+                replied_m = await msg.get_reply_message()
+            except Exception:
+                pass
+
+        reply_to_id = getattr(msg, "reply_to_msg_id", None) or (msg.reply_to.reply_to_msg_id if getattr(msg, "reply_to", None) else None)
+        if not replied_m and reply_to_id and client and entity:
+            try:
+                replied_m = await client.get_messages(entity, ids=reply_to_id)
+            except Exception:
+                pass
+
+        if replied_m:
+            if not reply_to_id:
+                reply_to_id = replied_m.id
+
+            is_img = replied_m.photo or (replied_m.document and getattr(replied_m.document, "mime_type", "").startswith("image/")) or (hasattr(replied_m, 'file') and getattr(replied_m.file, 'ext', '').lower() in ['.jpg', '.jpeg', '.png', '.webp'])
+            is_vid = replied_m.video or (replied_m.document and getattr(replied_m.document, "mime_type", "").startswith("video/")) or (hasattr(replied_m, 'file') and getattr(replied_m.file, 'ext', '').lower() in ['.mp4', '.mov', '.webm', '.avi'])
+
+            if is_img:
+                has_media = 1
+                media_type = "photo"
+                dest = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.jpg")
+                if not os.path.exists(dest) or os.path.getsize(dest) == 0:
+                    dl = await replied_m.download_media(file=dest)
+                    if dl and os.path.exists(dl) and os.path.getsize(dl) > 0:
+                        media_path = dl
+                else:
+                    media_path = dest
+            elif is_vid:
+                has_media = 1
+                media_type = "video"
+                dest = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.mp4")
+                if not os.path.exists(dest) or os.path.getsize(dest) == 0:
+                    dl = await replied_m.download_media(file=dest)
+                    if dl and os.path.exists(dl) and os.path.getsize(dl) > 0:
+                        media_path = dl
+                else:
+                    media_path = dest
+            elif replied_m.media:
+                try:
+                    dl = await replied_m.download_media(file=MEDIA_DIR)
+                    if dl and os.path.exists(dl) and os.path.getsize(dl) > 0:
+                        has_media = 1
+                        ext = os.path.splitext(dl)[1].lower()
+                        media_type = "video" if ext in ['.mp4', '.mov', '.webm', '.avi'] else "photo"
+                        media_path = dl
+                except Exception:
+                    pass
+    except Exception as e:
+        sys.stderr.write(f"[WAIT_FOR_YARIK] Error in download_reply_media: {e}\n")
+    return media_path, media_type, has_media, reply_to_id
 
 async def main():
     parser = argparse.ArgumentParser(description="Ожидание сообщений от Ярика и владельца")
@@ -346,24 +445,14 @@ async def main():
                     )
 
                     reply_to_id = getattr(m, "reply_to_msg_id", None) or (m.reply_to.reply_to_msg_id if getattr(m, "reply_to", None) else None)
-                    if not media_path and reply_to_id:
-                        try:
-                            replied_m = await client.get_messages(entity, ids=reply_to_id)
-                            if replied_m:
-                                if replied_m.photo or (replied_m.document and getattr(replied_m.document, "mime_type", "").startswith("image/")):
-                                    has_media = 1
-                                    media_type = "photo"
-                                    media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.jpg")
-                                    if not os.path.exists(media_path):
-                                        await replied_m.download_media(file=media_path)
-                                elif replied_m.video or (replied_m.document and getattr(replied_m.document, "mime_type", "").startswith("video/")):
-                                    has_media = 1
-                                    media_type = "video"
-                                    media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.mp4")
-                                    if not os.path.exists(media_path):
-                                        await replied_m.download_media(file=media_path)
-                        except Exception as e:
-                            print(f"[WAIT_FOR_YARIK] Error downloading replied media: {e}")
+                    if not media_path:
+                        r_path, r_type, r_has, r_id = await download_reply_media(client, entity, m, yarik_chat_id)
+                        if r_path:
+                            media_path = r_path
+                            media_type = r_type
+                            has_media = r_has
+                        if r_id and not reply_to_id:
+                            reply_to_id = r_id
 
                     result_box["data"] = {
                         "status": "new_messages",
@@ -465,24 +554,14 @@ async def main():
                     )
 
                     reply_to_id = getattr(msg, "reply_to_msg_id", None) or (msg.reply_to.reply_to_msg_id if getattr(msg, "reply_to", None) else None)
-                    if not media_path and reply_to_id:
-                        try:
-                            replied_m = await client.get_messages(entity, ids=reply_to_id)
-                            if replied_m:
-                                if replied_m.photo or (replied_m.document and getattr(replied_m.document, "mime_type", "").startswith("image/")):
-                                    has_media = 1
-                                    media_type = "photo"
-                                    media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.jpg")
-                                    if not os.path.exists(media_path):
-                                        await replied_m.download_media(file=media_path)
-                                elif replied_m.video or (replied_m.document and getattr(replied_m.document, "mime_type", "").startswith("video/")):
-                                    has_media = 1
-                                    media_type = "video"
-                                    media_path = os.path.join(MEDIA_DIR, f"{yarik_chat_id}_{replied_m.id}.mp4")
-                                    if not os.path.exists(media_path):
-                                        await replied_m.download_media(file=media_path)
-                        except Exception as e:
-                            print(f"[WAIT_FOR_YARIK] Error downloading replied media: {e}")
+                    if not media_path:
+                        r_path, r_type, r_has, r_id = await download_reply_media(client, entity, msg, yarik_chat_id)
+                        if r_path:
+                            media_path = r_path
+                            media_type = r_type
+                            has_media = r_has
+                        if r_id and not reply_to_id:
+                            reply_to_id = r_id
 
                     result_box["data"] = {
                         "status": "new_messages",

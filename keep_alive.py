@@ -952,6 +952,73 @@ def handle_owner_message(msg_data):
                 subprocess.run(cmd_owner)
                 return
 
+    # 0.54. Стикерпак: Добавление в стикерпак и запрос ссылки от владельца
+    is_owner_stk_req = any(w in t_lower for w in ["стикерпак", "стикер пак", "стикеры", "стикер"]) or "пак" in t_lower
+    is_owner_stk_send = any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "покажи", "кинь", "сбрось", "отправь", "поделись"])
+    is_owner_stk_add = (
+        any(w in t_lower for w in ["добавь", "закинь", "запили", "засунь", "сохрани", "вставь", "пихни", "пули", "залей"])
+        and any(w in t_lower for w in ["стикерпак", "стикер пак", "в пак", "в стикерпак", "в стикеры", "в стикер", "стикер", "картин"])
+    ) or any(w in t_lower for w in [
+        "добавь в стикер", "закинь в стикер", "добавь в пак", "закинь в пак", "в стикерпак", "в стикер пак", "добавь в стикерпак", "закинь в стикерпак"
+    ]) or (
+        bool(photo) and any(w in t_lower for w in [
+            "добавь эту картинку", "добавь это фото", "добавь эту фотку", "добавь именно эту",
+            "закинь эту картинку", "закинь это фото", "сохрани эту картинку", "добавь в стикеры"
+        ])
+    )
+
+    if is_owner_stk_add:
+        target_img = None
+        if photo and os.path.exists(photo):
+            target_img = photo
+        else:
+            recent_memes = sorted([
+                os.path.join(SAVED_MEMES_DIR, f) for f in os.listdir(SAVED_MEMES_DIR)
+                if f.endswith((".png", ".jpg"))
+            ], key=os.path.getmtime, reverse=True) if os.path.exists(SAVED_MEMES_DIR) else []
+            if recent_memes:
+                target_img = recent_memes[0]
+
+        if target_img and os.path.exists(target_img):
+            log_event(f"[STICKER PACK] Adding image {target_img} to sticker pack by request from Owner: {text!r}")
+            sticker_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "add_to_sticker_pack.py"),
+                "--image", target_img
+            ]
+            proc = subprocess.run(sticker_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if proc.returncode == 0:
+                reply = "Добавил этот мем в стикерпак! 🔥\nОфициальный стикерпак: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat"
+                # Keep copy in saved_memes if not already there
+                try:
+                    if not target_img.startswith(SAVED_MEMES_DIR):
+                        base_name = f"sticker_{int(time.time())}_{os.path.basename(target_img)}"
+                        shutil.copy2(target_img, os.path.join(SAVED_MEMES_DIR, base_name))
+                except Exception:
+                    pass
+            else:
+                log_event(f"[STICKER PACK ERROR] {proc.stderr}")
+                reply = f"Не удалось закинуть в стикерпак: {proc.stderr[:100]} 💀"
+        else:
+            reply = "Так прикрепи фото или ответь на сообщение с картинкой, Миша, чтобы закинуть в стикерпак! 🚜"
+
+        cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
+        subprocess.run(cmd)
+        return
+
+    if is_owner_stk_req and not is_owner_stk_add and (is_owner_stk_send or "стикерпак" in t_lower or "стикеры" in t_lower):
+        prompt_stk = (
+            "Владелец бота Миша попросил скинуть ссылку на наш стикерпак Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+            "Ответь живо, дружелюбно, по-товарищески (1-2 коротких предложения), мол держи коллекцию, Миша. Обращайся к нему по имени Миша. "
+            "Обязательно включи ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat"
+        )
+        reply = ask_ai(prompt_stk)
+        if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
+            reply = "Держи наш стикерпак, Миша! Раздавай стиль в чатах: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
+        cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
+        subprocess.run(cmd)
+        return
+
     # 0.55. Фоторедактор: Добавление стикеров/надписи/фильтров/эффектов на фото
     if is_photo_editor_request(text, has_photo=bool(photo)):
         if photo and os.path.exists(photo):
@@ -1082,44 +1149,6 @@ def handle_owner_message(msg_data):
         else:
             cmd_owner.extend(["--text", res_text])
         subprocess.run(cmd_owner)
-        return
-
-    # 3. Запрос ссылки на стикерпак от владельца
-    is_owner_stk_req = any(w in t_lower for w in ["стикерпак", "стикеры", "стикер"]) or "пак" in t_lower
-    is_owner_stk_send = any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "покажи", "кинь", "сбрось", "отправь", "поделись"])
-    is_owner_stk_add = any(w in t_lower for w in ["добавь", "закинь", "запили", "в пак", "в стикерпак"])
-
-    if is_owner_stk_req and not is_owner_stk_add and (is_owner_stk_send or "стикерпак" in t_lower or "стикеры" in t_lower):
-        prompt_stk = (
-            "Владелец бота Миша попросил скинуть ссылку на наш стикерпак Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
-            "Ответь живо, дружелюбно, по-товарищески (1-2 коротких предложения), мол держи коллекцию, Миша. Обращайся к нему по имени Миша. "
-            "Обязательно включи ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat"
-        )
-        reply = ask_ai(prompt_stk)
-        if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
-            reply = "Держи наш стикерпак, Миша! Раздавай стиль в чатах: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
-        cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
-        subprocess.run(cmd)
-        return
-
-    # 4. Добавление мема в стикерпак по просьбе владельца
-    if is_owner_stk_req and is_owner_stk_add:
-        recent_memes = sorted([
-            os.path.join(SAVED_MEMES_DIR, f) for f in os.listdir(SAVED_MEMES_DIR)
-            if f.endswith((".png", ".jpg"))
-        ], key=os.path.getmtime, reverse=True) if os.path.exists(SAVED_MEMES_DIR) else []
-        if recent_memes:
-            sticker_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "add_to_sticker_pack.py"),
-                "--image", recent_memes[0]
-            ]
-            subprocess.run(sticker_cmd)
-            reply = "Добавил последний мем в стикерпак! 🔥"
-        else:
-            reply = "В папке saved_memes пока нет мемов для добавления в стикерпак."
-        cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
-        subprocess.run(cmd)
         return
 
     # 5. Запрос на удаление сообщения в чате
@@ -1552,6 +1581,111 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 subprocess.run(err_cmd)
                 return
 
+    # 1.54. Стикерпак: Добавление в стикерпак и запрос ссылки
+    is_stk_req = any(w in t_lower for w in ["стикерпак", "стикер пак", "стикеры", "стикер"]) or ("пак" in t_lower and any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "кинь", "в пак", "добавь"]))
+    is_stk_send = any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "покажи", "кинь", "сбрось", "отправь", "поделись", "кидай", "скидывай"])
+    is_stk_add = (
+        any(w in t_lower for w in ["добавь", "закинь", "запили", "засунь", "сохрани", "вставь", "пихни", "пули", "залей"])
+        and any(w in t_lower for w in ["стикерпак", "стикер пак", "в пак", "в стикерпак", "в стикеры", "в стикер", "стикер", "картин"])
+    ) or any(w in t_lower for w in [
+        "добавь в стикер", "закинь в стикер", "добавь в пак", "закинь в пак", "в стикерпак", "в стикер пак", "добавь в стикерпак", "закинь в стикерпак"
+    ]) or (
+        bool(photo_file) and any(w in t_lower for w in [
+            "добавь эту картинку", "добавь это фото", "добавь эту фотку", "добавь именно эту",
+            "закинь эту картинку", "закинь это фото", "сохрани эту картинку", "добавь в стикеры"
+        ])
+    )
+
+    if is_stk_add:
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        target_img = None
+
+        # Приоритет 1: фото из текущего сообщения или сообщения, на которое ответили (reply)
+        if photo_file and os.path.exists(photo_file):
+            target_img = photo_file
+        else:
+            recent_memes = sorted([
+                os.path.join(SAVED_MEMES_DIR, f) for f in os.listdir(SAVED_MEMES_DIR)
+                if f.endswith((".png", ".jpg"))
+            ], key=os.path.getmtime, reverse=True) if os.path.exists(SAVED_MEMES_DIR) else []
+            if recent_memes:
+                target_img = recent_memes[0]
+
+        if target_img and os.path.exists(target_img):
+            log_event(f"[STICKER PACK] Adding image {target_img} to sticker pack by request from {target_name}: {text!r}")
+            sticker_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "add_to_sticker_pack.py"),
+                "--image", target_img
+            ]
+            proc = subprocess.run(sticker_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if proc.returncode == 0:
+                stk_reply = "Добавил этот мем в стикерпак! 🔥\nОфициальный стикерпак: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat"
+                # Keep copy in saved_memes if not already there
+                try:
+                    if not target_img.startswith(SAVED_MEMES_DIR):
+                        base_name = f"sticker_{int(time.time())}_{os.path.basename(target_img)}"
+                        shutil.copy2(target_img, os.path.join(SAVED_MEMES_DIR, base_name))
+                except Exception:
+                    pass
+            else:
+                log_event(f"[STICKER PACK ERROR] {proc.stderr}")
+                stk_reply = f"{target_name}, не удалось добавить стикер: {proc.stderr[:100]} 💀"
+        else:
+            stk_reply = f"{target_name}, чтобы закинуть картинку в стикерпак — ответь (reply) на сообщение с фото или прикрепи картинку! 🚜"
+
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--text", stk_reply,
+            "--reply-to", str(msg_id)
+        ]
+        subprocess.run(send_cmd)
+        return
+
+    if is_stk_req and not is_stk_add and (is_stk_send or "стикерпак" in t_lower or "стикеры" in t_lower):
+        if is_owner_sender:
+            prompt_stk_share = (
+                "Владелец бота МИША в чате попросил скинуть ссылку на наш стикерпак по игре Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+                f"Его сообщение: «{text}»\n"
+                "Напиши бодрый, живой, пацанский ответ Мише (1-2 предложения), мол держи коллекцию, Миша. "
+                "СТРОЖАЙШЕ ЗАПРЕЩЕНО НАЗЫВАТЬ ЕГО ЯРИКОМ, ШЕФОМ ИЛИ БОССОМ! Обращайся по имени: Миша. "
+                "ОБЯЗАТЕЛЬНО включи саму ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+                "Выдай ТОЛЬКО чистый текст реплики."
+            )
+            fallback_stk = "Держи наш склад отборного позора и детонаций, Миша: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
+        else:
+            prompt_stk_share = (
+                "Ярик в чате попросил скинуть ссылку на наш стикерпак по игре Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+                f"Его сообщение: «{text}»\n"
+                "Напиши угарный, живой, пацанский ответ корешу Ярику в чат (1-2 предложения), как реальный заядлый игрок в Crossout "
+                "(с юмором, сарказмом и иронией про взрывы Газгенов, рандомных раков, позор Пустошей, мол держи святой артефакт и спамь на здоровье). "
+                "Категорически без официоза, без шаблонных фраз роботов. "
+                "ОБЯЗАТЕЛЬНО включи саму ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+                "Выдай ТОЛЬКО чистый текст реплики в чат."
+            )
+            fallback_stk = "Держи наш склад отборного позора и детонаций, Ярик, спамь пока раму не оторвало: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
+
+        reply = ask_ai(prompt_stk_share)
+        if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
+            reply = fallback_stk
+        if is_owner_sender:
+            reply = re.sub(r"\bшеф[а-я]*\b", "Миша", reply, flags=re.I)
+            reply = re.sub(r"\bбосс[а-я]*\b", "Миша", reply, flags=re.I)
+            if any(w in reply.lower() for w in ["ярик", "ярику", "ярика"]):
+                reply = fallback_stk
+
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--text", reply,
+            "--reply-to", str(msg_id)
+        ]
+        subprocess.run(send_cmd)
+        return
+
     # 1.55. Фоторедактор: Добавление стикеров/надписи/фильтров/эффектов на фото
     if is_photo_editor_request(text, has_photo=bool(photo_file)):
         target_name = "Миша" if is_owner_sender else "Ярик"
@@ -1796,92 +1930,6 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         else:
             send_cmd.extend(["--text", res_text])
         subprocess.run(send_cmd)
-        return
-
-    # 3. Запрос на отправку ссылки на стикерпак (живой разговорный ответ)
-    is_stk_req = any(w in t_lower for w in ["стикерпак", "стикеры", "стикер"]) or ("пак" in t_lower and any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "кинь"]))
-    is_stk_send = any(w in t_lower for w in ["скинь", "дай", "где", "ссылк", "линк", "покажи", "кинь", "сбрось", "отправь", "поделись", "кидай", "скидывай"])
-    is_stk_add = any(w in t_lower for w in ["добавь", "закинь", "запили", "засунь", "в пак", "в стикерпак"])
-
-    if is_stk_req and not is_stk_add and (is_stk_send or "стикерпак" in t_lower or "стикеры" in t_lower):
-        if is_owner_sender:
-            prompt_stk_share = (
-                "Владелец бота МИША в чате попросил скинуть ссылку на наш стикерпак по игре Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
-                f"Его сообщение: «{text}»\n"
-                "Напиши бодрый, живой, пацанский ответ Мише (1-2 предложения), мол держи коллекцию, Миша. "
-                "СТРОЖАЙШЕ ЗАПРЕЩЕНО НАЗЫВАТЬ ЕГО ЯРИКОМ, ШЕФОМ ИЛИ БОССОМ! Обращайся по имени: Миша. "
-                "ОБЯЗАТЕЛЬНО включи саму ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
-                "Выдай ТОЛЬКО чистый текст реплики."
-            )
-            fallback_stk = "Держи наш склад отборного позора и детонаций, Миша: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
-        else:
-            prompt_stk_share = (
-                "Ярик в чате попросил скинуть ссылку на наш стикерпак по игре Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
-                f"Его сообщение: «{text}»\n"
-                "Напиши угарный, живой, пацанский ответ корешу Ярику в чат (1-2 предложения), как реальный заядлый игрок в Crossout "
-                "(с юмором, сарказмом и иронией про взрывы Газгенов, рандомных раков, позор Пустошей, мол держи святой артефакт и спамь на здоровье). "
-                "Категорически без официоза, без шаблонных фраз роботов. "
-                "ОБЯЗАТЕЛЬНО включи саму ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
-                "Выдай ТОЛЬКО чистый текст реплики в чат."
-            )
-            fallback_stk = "Держи наш склад отборного позора и детонаций, Ярик, спамь пока раму не оторвало: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
-
-        reply = ask_ai(prompt_stk_share)
-        if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:
-            reply = fallback_stk
-        if is_owner_sender:
-            reply = re.sub(r"\bшеф[а-я]*\b", "Миша", reply, flags=re.I)
-            reply = re.sub(r"\bбосс[а-я]*\b", "Миша", reply, flags=re.I)
-            if any(w in reply.lower() for w in ["ярик", "ярику", "ярика"]):
-                reply = fallback_stk
-
-        send_cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "yarik",
-            "--text", reply,
-            "--reply-to", str(msg_id)
-        ]
-        subprocess.run(send_cmd)
-        return
-
-    # 4. Добавление в стикерпак отдельной командой (добавь в стикерпак)
-    if is_stk_req and is_stk_add:
-        recent_memes = sorted([
-            os.path.join(SAVED_MEMES_DIR, f) for f in os.listdir(SAVED_MEMES_DIR)
-            if f.endswith((".png", ".jpg"))
-        ], key=os.path.getmtime, reverse=True) if os.path.exists(SAVED_MEMES_DIR) else []
-
-        if recent_memes:
-            sticker_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "add_to_sticker_pack.py"),
-                "--image", recent_memes[0]
-            ]
-            subprocess.run(sticker_cmd)
-            if is_owner_sender:
-                stk_reply = "Закинул этот угар в стикерпак, Миша! Шедевр зафиксирован в ангаре 🔥"
-            else:
-                prompt_stk = "Ты только что добавил последний мем в стикерпак по просьбе Ярика. Напиши живую, короткую фразу (1 предложение) в стиле Crossout про добавление в стикерпак."
-                stk_reply = ask_ai(prompt_stk) or "Закинул этот угар в стикерпак, шедевр зафиксирован в ангаре! 🔥"
-            confirm_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "yarik",
-                "--text", stk_reply,
-                "--reply-to", str(msg_id)
-            ]
-            subprocess.run(confirm_cmd)
-        else:
-            empty_reply = "Так у нас в ангаре пока пусто, Миша! Сначала сгенерируй мем 🚜" if is_owner_sender else "Так у нас в ангаре пусто, Ярик! Сначала сделай мем, а потом уже в стикерпак пихать будем 🚜"
-            send_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "yarik",
-                "--text", empty_reply,
-                "--reply-to", str(msg_id)
-            ]
-            subprocess.run(send_cmd)
         return
 
     # 5. Предложение создать дополнение или живой разговорный ответ
