@@ -76,13 +76,44 @@ def init_db():
             value TEXT
         )
         """)
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS handled_messages (
-            message_id INTEGER PRIMARY KEY,
-            chat_id INTEGER,
-            handled_at REAL
-        )
-        """)
+
+        # Migration and schema for handled_messages with composite PRIMARY KEY (chat_id, message_id)
+        cur = conn.execute("PRAGMA table_info(handled_messages)")
+        cols_info = cur.fetchall()
+        if cols_info:
+            col_names = [c[1] for c in cols_info]
+            pk_cols = [c[1] for c in cols_info if c[5] > 0]
+            if "chat_id" not in col_names or set(pk_cols) != {"chat_id", "message_id"}:
+                conn.execute("""
+                CREATE TABLE handled_messages_new (
+                    chat_id INTEGER DEFAULT 0,
+                    message_id INTEGER,
+                    handled_at REAL,
+                    PRIMARY KEY (chat_id, message_id)
+                )
+                """)
+                if "chat_id" in col_names:
+                    conn.execute("""
+                    INSERT OR IGNORE INTO handled_messages_new (chat_id, message_id, handled_at)
+                    SELECT COALESCE(chat_id, 0), message_id, handled_at FROM handled_messages
+                    """)
+                else:
+                    conn.execute("""
+                    INSERT OR IGNORE INTO handled_messages_new (chat_id, message_id, handled_at)
+                    SELECT 0, message_id, handled_at FROM handled_messages
+                    """)
+                conn.execute("DROP TABLE handled_messages")
+                conn.execute("ALTER TABLE handled_messages_new RENAME TO handled_messages")
+        else:
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS handled_messages (
+                chat_id INTEGER DEFAULT 0,
+                message_id INTEGER,
+                handled_at REAL,
+                PRIMARY KEY (chat_id, message_id)
+            )
+            """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_handled_msgs ON handled_messages(chat_id, message_id)")
 
 def save_chat(chat_id, title, username, chat_type, last_synced=None):
     with get_db() as conn:
@@ -160,28 +191,75 @@ def set_kv(key, value):
     with get_db() as conn:
         conn.execute("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
 
-def is_message_handled(msg_id):
+def is_message_handled(msg_id, chat_id=0):
     if not msg_id:
         return False
     try:
+        cid = int(chat_id) if chat_id is not None else 0
         with get_db() as conn:
-            cur = conn.execute("SELECT 1 FROM handled_messages WHERE message_id = ?", (int(msg_id),))
+            if cid == 0:
+                cur = conn.execute("SELECT 1 FROM handled_messages WHERE message_id = ?", (int(msg_id),))
+            else:
+                cur = conn.execute(
+                    "SELECT 1 FROM handled_messages WHERE message_id = ? AND (chat_id = ? OR chat_id = 0)",
+                    (int(msg_id), cid)
+                )
             return cur.fetchone() is not None
     except Exception:
         return False
 
-def mark_message_handled(msg_id, chat_id=None):
+is_handled = is_message_handled
+
+def mark_message_handled(msg_id, chat_id=0):
     if not msg_id:
         return
     try:
+        cid = int(chat_id) if chat_id is not None else 0
         with get_db() as conn:
             conn.execute("""
-            INSERT INTO handled_messages (message_id, chat_id, handled_at)
+            INSERT INTO handled_messages (chat_id, message_id, handled_at)
             VALUES (?, ?, ?)
-            ON CONFLICT(message_id) DO NOTHING
-            """, (int(msg_id), int(chat_id) if chat_id else None, time.time()))
+            ON CONFLICT(chat_id, message_id) DO NOTHING
+            """, (cid, int(msg_id), time.time()))
     except Exception:
         pass
+
+add_handled_id = mark_message_handled
+
+def configure_session_sqlite(session_path=None):
+    """Ensure WAL journal mode and busy_timeout=10000 for Telethon SQLite session."""
+    try:
+        from config import SESSION_PATH
+        path = session_path or SESSION_PATH
+        session_file = path if path.endswith(".session") else (path + ".session")
+        if os.path.exists(session_file):
+            try:
+                conn = sqlite3.connect(session_file, timeout=10.0)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=10000;")
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+        try:
+            from telethon.sessions import SQLiteSession
+            if not getattr(SQLiteSession, "_wal_patched", False):
+                def safe_cursor(self):
+                    if self._conn is None:
+                        self._conn = sqlite3.connect(self.filename, timeout=10.0, check_same_thread=False)
+                        try:
+                            self._conn.execute("PRAGMA journal_mode=WAL;")
+                            self._conn.execute("PRAGMA busy_timeout=10000;")
+                        except Exception:
+                            pass
+                    return self._conn.cursor()
+                SQLiteSession._cursor = safe_cursor
+                SQLiteSession._wal_patched = True
+        except Exception:
+            pass
+    except Exception:
+        pass
+
 
 def is_meme_already_sent(meme_hash=None, headline=None, max_age_seconds=7200):
     if not meme_hash and not headline:

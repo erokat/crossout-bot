@@ -17,7 +17,19 @@ from config import (
     BOT_SENT_FILE,
     LOCK_PATH
 )
-from db import init_db, save_message, save_chat, get_kv, set_kv, is_message_handled, mark_message_handled
+import fcntl
+from db import (
+    init_db,
+    save_message,
+    save_chat,
+    get_kv,
+    set_kv,
+    is_message_handled,
+    mark_message_handled,
+    is_handled,
+    add_handled_id as db_add_handled_id,
+    configure_session_sqlite
+)
 
 def is_bot_mention(text):
     if not text:
@@ -56,12 +68,14 @@ def get_handled_ids():
             pass
     return ids
 
-def add_handled_id(msg_id):
+def add_handled_id(msg_id, chat_id=0):
     try:
         with open(HANDLED_MSGS_FILE, "a") as f:
             f.write(f"{msg_id}\n")
     except Exception:
         pass
+    db_add_handled_id(msg_id, chat_id)
+
 
 async def download_bot_file(bot_token, file_id, dest_path):
     try:
@@ -137,7 +151,7 @@ async def poll_control_bot(cfg, exit_event, result_box):
                 
                 if from_id == owner_id:
                     msg_id = msg.get("message_id")
-                    if is_message_handled(msg_id):
+                    if is_handled(msg_id, owner_id) or is_message_handled(msg_id, owner_id):
                         continue
                     add_handled_id(msg_id, owner_id)
                     text = msg.get("text") or msg.get("caption") or ""
@@ -315,6 +329,7 @@ async def main():
     cfg = load_config()
 
     if args.get_latest_id:
+        configure_session_sqlite()
         client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
         await client.connect()
         try:
@@ -344,6 +359,7 @@ async def main():
     poll_messages_task = None
 
     # Initialize Telethon client for Yarik
+    configure_session_sqlite()
     client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
     await client.connect()
 
@@ -373,7 +389,7 @@ async def main():
 
                 # Check recent unhandled messages
                 async for m in check_stream:
-                    if m.id in bot_sent or m.id in handled_ids or is_message_handled(m.id):
+                    if m.id in bot_sent or m.id in handled_ids or is_handled(m.id, yarik_chat_id) or is_message_handled(m.id, yarik_chat_id):
                         continue
                     if after_id is not None and m.id <= after_id:
                         continue
@@ -384,7 +400,7 @@ async def main():
                     is_mention = is_bot_mention(m.message)
 
                     if not is_mention:
-                        add_handled_id(m.id)
+                        add_handled_id(m.id, yarik_chat_id)
                         mark_message_handled(m.id, yarik_chat_id)
                         if is_from_yarik:
                             save_message(
@@ -401,7 +417,7 @@ async def main():
                             )
                         continue
 
-                    add_handled_id(m.id)
+                    add_handled_id(m.id, yarik_chat_id)
 
                     # Triggered by mention
                     media_path = None
@@ -479,7 +495,7 @@ async def main():
                 async def handle_candidate_message(msg):
                     if exit_event.is_set():
                         return
-                    if msg.id in get_bot_sent_ids() or msg.id in get_handled_ids() or is_message_handled(msg.id):
+                    if msg.id in get_bot_sent_ids() or msg.id in get_handled_ids() or is_handled(msg.id, yarik_chat_id) or is_message_handled(msg.id, yarik_chat_id):
                         return
                     if after_id is not None and msg.id <= after_id:
                         return
@@ -490,7 +506,7 @@ async def main():
                     is_mention = is_bot_mention(msg.message)
 
                     if not is_mention:
-                        add_handled_id(msg.id)
+                        add_handled_id(msg.id, yarik_chat_id)
                         mark_message_handled(msg.id, yarik_chat_id)
                         if is_from_yarik:
                             save_message(
@@ -507,7 +523,7 @@ async def main():
                             )
                         return
 
-                    add_handled_id(msg.id)
+                    add_handled_id(msg.id, yarik_chat_id)
 
                     media_path = None
                     has_media = 0
@@ -594,7 +610,7 @@ async def main():
                         try:
                             recent = await client.get_messages(entity, limit=4)
                             for rm in recent:
-                                if rm.id in get_bot_sent_ids() or rm.id in get_handled_ids() or is_message_handled(rm.id):
+                                if rm.id in get_bot_sent_ids() or rm.id in get_handled_ids() or is_handled(rm.id, yarik_chat_id) or is_message_handled(rm.id, yarik_chat_id):
                                     continue
                                 if after_id is not None and rm.id <= after_id:
                                     continue

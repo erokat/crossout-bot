@@ -31,12 +31,129 @@ from config import (
     BOT_SENT_FILE,
     load_config
 )
+from gdrive import get_auth_url, exchange_code, upload_file_to_drive
 
 CFG = load_config()
 YARIK_CHAT_ID = int(CFG.get("yarik_chat_id", 6271387044))
 OWNER_ID = int(CFG.get("owner_id", 5067025016))
 
-from db import init_db, resolve_confirmation, get_confirmation, get_kv, set_kv, is_message_handled, mark_message_handled
+from db import (
+    init_db,
+    resolve_confirmation,
+    get_confirmation,
+    get_kv,
+    set_kv,
+    is_message_handled,
+    mark_message_handled,
+    is_handled,
+    add_handled_id,
+    configure_session_sqlite
+)
+
+def boost_cleanup_temp_files():
+    """Cleans temporary files and cache while strictly preserving ./saved_memes/ and assets."""
+    purged = 0
+    try:
+        if os.path.exists(MEDIA_DIR):
+            for f in os.listdir(MEDIA_DIR):
+                fpath = os.path.join(MEDIA_DIR, f)
+                # NEVER touch saved_memes or non-files
+                if not os.path.isfile(fpath) or "saved_memes" in fpath:
+                    continue
+                ext = os.path.splitext(f)[1].lower()
+                # Purge downloaded temporary videos/audio or tmp_ generated files
+                if ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".ts", ".mp3", ".wav", ".m4a"] or f.startswith("tmp_"):
+                    try:
+                        os.remove(fpath)
+                        purged += 1
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return purged
+
+def get_tiraspol_cw_schedule():
+    """Calculate Crossout Clan Wars schedule with countdown using Europe/Tiraspol timezone."""
+    from datetime import datetime, timezone, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Europe/Tiraspol")
+        datetime.now(tz)
+    except Exception:
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("Europe/Chisinau")
+            datetime.now(tz)
+        except Exception:
+            # Robust fallback for EET/EEST
+            now_u = datetime.now(timezone.utc)
+            year = now_u.year
+            march_last = max(d for d in range(25, 32) if datetime(year, 3, d).weekday() == 6)
+            dst_start = datetime(year, 3, march_last, 1, 0, tzinfo=timezone.utc)
+            oct_last = max(d for d in range(25, 32) if datetime(year, 10, d).weekday() == 6)
+            dst_end = datetime(year, 10, oct_last, 1, 0, tzinfo=timezone.utc)
+            offset_hours = 3 if dst_start <= now_u < dst_end else 2
+            tz = timezone(timedelta(hours=offset_hours))
+
+    now_utc = datetime.now(timezone.utc)
+    now_local = now_utc.astimezone(tz)
+
+    utc_windows = [(0, 4), (11, 15), (17, 21)]
+    intervals = []
+    base_date = now_utc.date()
+    for day_offset in [0, 1]:
+        d = base_date + timedelta(days=day_offset)
+        for sh, eh in utc_windows:
+            start_dt = datetime(d.year, d.month, d.day, sh, 0, 0, tzinfo=timezone.utc)
+            end_dt = datetime(d.year, d.month, d.day, eh, 0, 0, tzinfo=timezone.utc)
+            intervals.append((start_dt, end_dt))
+
+    active_win = None
+    next_win = None
+    for s, e in intervals:
+        if s <= now_utc < e:
+            active_win = (s, e)
+            break
+        if now_utc < s:
+            if next_win is None:
+                next_win = (s, e)
+                break
+
+    time_str = now_local.strftime("%H:%M:%S")
+    tz_label = now_local.strftime("UTC%z")
+
+    msg_lines = [
+        "⚔️ **Расписание Клановых Войн (КВ) Crossout**",
+        f"🕒 **Текущее время (Europe/Tiraspol):** {time_str} ({tz_label})\n"
+    ]
+
+    if active_win:
+        rem = active_win[1] - now_utc
+        hrs, rem_sec = divmod(int(rem.total_seconds()), 3600)
+        mins = rem_sec // 60
+        end_local = active_win[1].astimezone(tz).strftime("%H:%M")
+        msg_lines.append("🟢 **КВ СЕЙЧАС ИДЕТ!**")
+        msg_lines.append(f"⏳ До конца текущего окна: **{hrs}ч {mins}мин** (до {end_local} по Тирасполю)\n")
+    elif next_win:
+        until = next_win[0] - now_utc
+        hrs, rem_sec = divmod(int(until.total_seconds()), 3600)
+        mins = rem_sec // 60
+        start_local = next_win[0].astimezone(tz).strftime("%H:%M")
+        msg_lines.append("🔴 **Сейчас бои на паузе.**")
+        msg_lines.append(f"⏳ До следующего окна КВ: **{hrs}ч {mins}мин** (старт в {start_local} по Тирасполю)\n")
+
+    today_local_windows = []
+    for sh, eh in utc_windows:
+        s_dt = datetime(base_date.year, base_date.month, base_date.day, sh, 0, 0, tzinfo=timezone.utc).astimezone(tz)
+        e_dt = datetime(base_date.year, base_date.month, base_date.day, eh, 0, 0, tzinfo=timezone.utc).astimezone(tz)
+        today_local_windows.append(f"• {s_dt.strftime('%H:%M')} — {e_dt.strftime('%H:%M')}")
+
+    msg_lines.append("📋 **Окна боев на сегодня (Тирасполь):**")
+    msg_lines.extend(today_local_windows)
+    msg_lines.append("\n🚜 *Готовь ховеры, прячь Газген под раму и смазывай шестерни — руда сама себя не нафармит!*")
+
+    return "\n".join(msg_lines)
+
 from meme_generator import generate_crossout_meme
 from dynamic_agent import (
     is_autonomous_task,
@@ -228,8 +345,9 @@ def setup_environment():
             except Exception:
                 pass
 
-    # 6. Initialize database
+    # 6. Initialize database & Telethon SQLite WAL mode
     init_db()
+    configure_session_sqlite()
 
 class WebServerHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -466,7 +584,7 @@ def ask_gemini_api(prompt, photo_path=None, system_instruction=None):
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not gemini_key:
         return None
-    models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite"]
+    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
     for model in models:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
@@ -797,14 +915,20 @@ def handle_owner_message(msg_data):
             subprocess.run(cmd_owner)
             return
 
-    # 0.05. Команды /boost и /goal для владельца
+    # 0.05. Команды /boost, /goal, /plan для владельца
     if any(t_lower.startswith(p) for p in ["/boost", "!boost", "бот буст", "буст"]) or t_lower == "/boost":
+        purged = boost_cleanup_temp_files()
         reply = (
             "🚀 **Режим ускорения (BOOST) активен!**\n\n"
             "• Приоритет AI-генератора: Максимальный (быстрый fallback & self-healing)\n"
-            "• Кэш и временные файлы: Очищены\n"
+            f"• Кэш и временные файлы: Очищены ({purged} файлов удалено, сохраненные мемы в целости)\n"
             "• Движок мемов Crossout: Готов к мгновенной генерации 🔥"
         )
+        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply])
+        return
+
+    if any(t_lower.startswith(p) for p in ["/plan", "!plan", "бот план", "план"]) or t_lower == "/plan":
+        reply = get_tiraspol_cw_schedule()
         subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply])
         return
 
@@ -867,6 +991,8 @@ def handle_owner_message(msg_data):
             "--to", "owner",
             "--text", "Всё, запулил этот мем Ярику в чат! Ждем реакцию 🔥🚜"
         ]
+        subprocess.run(cmd_owner)
+        return
     # 0.4. Скачивание и отправка музыки / треков / песен / симфоний для владельца
     music_kws = ["музык", "песн", "трек", "песен", "симфони", "мелоди", "бит", "саунд", "оркестр", "бетховен", "моцарт", "баха", "чайковск", "music", "song", "symphony", "melody", "beat", "soundtrack", "mp3"]
     music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "сочини", "сыграй", "сделай", "сгенерируй", "запили", "вруби"]
@@ -1366,14 +1492,20 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             subprocess.run(send_cmd)
             return
 
-    # 0.05. Команды /boost и /goal в чате с Яриком
+    # 0.05. Команды /boost, /goal, /plan в чате с Яриком
     if any(t_lower.startswith(p) for p in ["/boost", "!boost", "бот буст", "буст"]) or t_lower == "/boost":
+        purged = boost_cleanup_temp_files()
         reply = (
             "🚀 **Режим ускорения (BOOST) активен!**\n\n"
             "• Приоритет AI-генератора: Максимальный (быстрый fallback & self-healing)\n"
-            "• Кэш и временные файлы: Очищены\n"
+            f"• Кэш и временные файлы: Очищены ({purged} файлов удалено, сохраненные мемы в целости)\n"
             "• Движок мемов Crossout: Готов к мгновенной генерации 🔥"
         )
+        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)])
+        return
+
+    if any(t_lower.startswith(p) for p in ["/plan", "!plan", "бот план", "план"]) or t_lower == "/plan":
+        reply = get_tiraspol_cw_schedule()
         subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)])
         return
 
@@ -2065,7 +2197,7 @@ def main():
                         latest_id = int(d["latest_id"])
                         if last_processed_id is None or latest_id > last_processed_id:
                             last_processed_id = latest_id
-                        mark_message_handled(last_processed_id)
+                        mark_message_handled(last_processed_id, YARIK_CHAT_ID)
                         set_kv("last_processed_id", str(last_processed_id))
                         log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id}. Ignoring prior messages.")
                         break
@@ -2117,13 +2249,15 @@ def main():
             for m in messages:
                 mid = m.get("id")
                 if mid:
-                    if is_message_handled(mid):
-                        log_event(f"[ORCHESTRATOR] Skipping already handled message id={mid}")
+                    chat_id = m.get("chat_id") or (cfg.get("owner_id") if source == "owner" else cfg.get("yarik_chat_id"))
+                    if is_handled(mid, chat_id) or is_message_handled(mid, chat_id):
+                        log_event(f"[ORCHESTRATOR] Skipping already handled message id={mid} chat_id={chat_id}")
                         continue
-                    mark_message_handled(mid, m.get("chat_id") or (cfg.get("owner_id") if source == "owner" else cfg.get("yarik_chat_id")))
-                    if last_processed_id is None or mid > last_processed_id:
-                        last_processed_id = mid
-                        set_kv("last_processed_id", str(mid))
+                    mark_message_handled(mid, chat_id)
+                    if source == "yarik":
+                        if last_processed_id is None or mid > last_processed_id:
+                            last_processed_id = mid
+                            set_kv("last_processed_id", str(mid))
                 try:
                     if source == "owner":
                         handle_owner_message(m)

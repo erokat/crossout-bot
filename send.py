@@ -17,6 +17,7 @@ from config import (
     LOCK_PATH,
     BOT_SENT_FILE
 )
+from db import configure_session_sqlite
 
 def make_multipart_body(fields, files):
     boundary = uuid.uuid4().hex
@@ -111,6 +112,7 @@ async def delete_via_telethon(cfg, chat_id, message_ids):
     lock_file = open(LOCK_PATH, "w")
     fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 
+    configure_session_sqlite()
     client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
     await client.connect()
 
@@ -134,6 +136,7 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
     lock_file = open(LOCK_PATH, "w")
     fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
 
+    configure_session_sqlite()
     client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
     await client.connect()
 
@@ -180,9 +183,9 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
                     file_path=photo_path
                 )
 
-            # 3. Upload to Google Drive and clean up local storage
+            # 3. Upload to Google Drive and clean up local storage (preserving saved_memes)
             try:
-                from gdrive import upload_and_cleanup
+                from gdrive import upload_file_to_drive, upload_and_cleanup
                 ext = os.path.splitext(photo_path)[1].lower()
                 if ext in [".mp3", ".ogg", ".wav", ".m4a", ".flac"]:
                     folder_type = "music"
@@ -191,12 +194,11 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
                 else:
                     folder_type = "memes"
 
-                upload_and_cleanup(photo_path, folder_type=folder_type)
-                if dest_file != photo_path and os.path.exists(dest_file):
-                    try:
-                        os.remove(dest_file)
-                    except Exception:
-                        pass
+                # If photo_path is already inside saved_memes, upload without deleting
+                if "saved_memes" in os.path.abspath(photo_path):
+                    upload_file_to_drive(photo_path, folder_type=folder_type)
+                else:
+                    upload_and_cleanup(photo_path, folder_type=folder_type)
             except Exception as e:
                 print(f"[GDRIVE UPLOAD WARNING] {e}")
 
