@@ -43,31 +43,21 @@ def is_bot_mention(text):
         return True
     if re.search(r"\bбот\b", t):
         return True
-    if re.search(r"х+у+е+с+о+с+", t):
-        return True
-    if any(m in t for m in ["музык", "трек", "песн", "гиф", "gif", "видос", "видео"]) and any(a in t for a in ["скинь", "найди", "скачай", "включи", "поставь", "сгенерируй", "пришли", "вруби", "скидывай"]):
-        return True
     return False
 
 def check_is_mention_or_proposal(text, reply_to_id=None, sender_uid=None, yarik_chat_id=None, bot_sent=None):
     if not text and not reply_to_id:
         return False
 
-    # 1. Прямое упоминание бота
+    # 1. Прямое упоминание бота по официальным триггерам (Правило 2)
     if is_bot_mention(text):
         return True
 
-    # 2. Ответ (reply) на любое сообщение, отправленное ботом
-    all_bot_ids = get_bot_sent_ids()
-    if bot_sent:
-        all_bot_ids = all_bot_ids | bot_sent
-    if reply_to_id and reply_to_id in all_bot_ids:
-        return True
-
-    # 3. Подтверждение или отказ при наличии активного предложения создать навык/дополнение
+    # 2. Подтверждение или отказ при наличии активного предложения создать навык/дополнение
+    # Срабатывает ТОЛЬКО если есть активное предложение И пользователь ответил (reply) на сообщение с предложением!
     t = (text or "").lower().strip()
     is_confirm_or_reject = bool(re.search(r"^(?:да|делай|давай|сделай|го|ок|ага|да делай|да сгенерируй|да создай|делай давай|конечно|генерируй|создавай|пилим|нет|не надо|отмена|отбой|не делай|забей|yes|no)\b", t))
-    if is_confirm_or_reject:
+    if is_confirm_or_reject and reply_to_id:
         try:
             from dynamic_agent import get_pending_proposal
             keys = ["yarik", "owner"]
@@ -78,10 +68,13 @@ def check_is_mention_or_proposal(text, reply_to_id=None, sender_uid=None, yarik_
             for k in keys:
                 p = get_pending_proposal(k)
                 if p and p.get("task_text"):
-                    return True
+                    prop_id = p.get("proposal_msg_id")
+                    if prop_id and reply_to_id == prop_id:
+                        return True
         except Exception:
             pass
 
+    # Во всех остальных случаях при отсутствии слова "бот" — строгое радиомолчание (Правило 2)!
     return False
 
 

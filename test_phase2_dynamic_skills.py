@@ -307,6 +307,15 @@ time.sleep(100)
     def test_real_execute_autonomous_task_self_healing(self):
         # Verify execute_autonomous_task's real self-healing loop
         skill_name = "test_autoheal_unit"
+        db.delete_dynamic_skill(skill_name)
+        target_file = os.path.join(BASE_DIR, "skills", f"{skill_name}.py")
+        if os.path.exists(target_file):
+            os.remove(target_file)
+        reg = dynamic_agent.load_registry()
+        if skill_name in reg:
+            del reg[skill_name]
+            dynamic_agent.save_registry(reg)
+
         calls = []
 
         def mock_ai(prompt, photo_path=None):

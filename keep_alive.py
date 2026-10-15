@@ -1362,21 +1362,7 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # 8. Живой разговорный ответ владельцу (Antigravity AI) или предложение создать дополнение
-    if not is_pure_chitchat(text):
-        clean_task = re.sub(r"(?i)^(?:[!/]?бот[,\s]*|ботик[,\s]*|bot[,\s]*)", "", text).strip()
-        proposal_text = (
-            f"Миша, такой встроенной функции пока нет, но я могу на лету написать дополнение и выполнить! ⚡🛠️\n\n"
-            f"📌 **Задача:** _{clean_task}_\n\n"
-            "Напиши **«Да, делай»** (или просто **«да»**), если запускаем!"
-        )
-        cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", proposal_text]
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        prop_id = extract_sent_msg_id(proc.stdout)
-        set_pending_proposal("owner", text, proposal_msg_id=prop_id)
-        return
-
-    # Если это чистый разговор / приветствие
+    # 8. Живой разговорный ответ владельцу (Antigravity AI)
     response = None
     if text:
         prompt = (
@@ -1420,8 +1406,13 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         else:
             pending = get_pending_proposal("owner")
 
+    reply_to_id = msg_data.get("reply_to_msg_id")
     if pending and text:
         t_low = text.lower().strip()
+        prop_msg_id = pending.get("proposal_msg_id")
+        is_reply_to_proposal = bool(prop_msg_id and reply_to_id and str(reply_to_id) == str(prop_msg_id))
+        is_direct_bot_confirm = bool("бот" in t_low)
+
         is_confirm = any(re.search(p, t_low) for p in [
             r"\bда\b", r"\bдавай\b", r"\bсгенерируй\b", r"\bделай\b", r"\bсоздай\b",
             r"\bнапиши\b", r"\bго\b", r"\bок\b", r"\bага\b", r"\bда сгенерируй\b",
@@ -1434,6 +1425,10 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             r"\bнет\b", r"\bне надо\b", r"\bне генерируй\b", r"\bотмена\b", r"\bотбой\b",
             r"\bне делай\b", r"\bзабей\b", r"\bне стоит\b", r"\bне\b"
         ])
+        if (is_confirm or is_reject) and not (is_reply_to_proposal or is_direct_bot_confirm):
+            is_confirm = False
+            is_reject = False
+
         if is_confirm:
             clear_pending_proposal(sender_key)
             clear_pending_proposal("yarik")
@@ -2009,35 +2004,7 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         )
         return
 
-    # 5. Предложение создать дополнение или живой разговорный ответ
-    if not is_pure_chitchat(text):
-        target_name = "Миша" if is_owner_sender else "Ярик"
-        clean_task = re.sub(r"(?i)^(?:[!/]?бот[,\s]*|ботик[,\s]*|bot[,\s]*)", "", text).strip()
-        if is_owner_sender:
-            proposal_text = (
-                f"Миша, такой встроенной функции пока нет, но я могу на лету написать дополнение и выполнить! ⚡🛠️\n\n"
-                f"📌 **Задача:** _{clean_task}_\n\n"
-                "Напиши **«Да, делай»** (или просто **«да»**), если запускаем!"
-            )
-        else:
-            proposal_text = (
-                f"Ярик, в моем арсенале пока нет такой фичи, но я могу прямо сейчас накодить новое дополнение и выполнить! 🚜🛠️\n\n"
-                f"📌 **Задача:** _{clean_task}_\n\n"
-                "Черкани **«Да, сделай»** (или просто **«да»**), если пилим!"
-            )
-        send_cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "yarik",
-            "--text", proposal_text,
-            "--reply-to", str(msg_id)
-        ]
-        proc = subprocess.run(send_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        prop_id = extract_sent_msg_id(proc.stdout)
-        set_pending_proposal(sender_key, text, bot_msg_id=msg_id, proposal_msg_id=prop_id)
-        return
-
-    # Чистый диалог / приветствия
+    # 5. Чистый диалог / приветствия / реакции (живой ответ от ИИ)
     if is_owner_sender:
         prompt = (
             f"Тебе написал твой друг и создатель МИША: «{text}». "
