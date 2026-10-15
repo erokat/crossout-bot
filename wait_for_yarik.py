@@ -28,7 +28,8 @@ from db import (
     mark_message_handled,
     is_handled,
     add_handled_id as db_add_handled_id,
-    configure_session_sqlite
+    configure_session_sqlite,
+    session_flock
 )
 
 def is_bot_mention(text):
@@ -58,20 +59,32 @@ def get_bot_sent_ids():
 
 HANDLED_MSGS_FILE = os.path.join(os.path.dirname(BOT_SENT_FILE), "handled_msg_ids.txt")
 
-def get_handled_ids():
+def get_handled_ids(target_chat_id=None):
     ids = set()
     if os.path.exists(HANDLED_MSGS_FILE):
         try:
             with open(HANDLED_MSGS_FILE, "r") as f:
-                ids = {int(line.strip()) for line in f if line.strip().isdigit()}
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if ":" in line:
+                        parts = line.split(":", 1)
+                        if parts[0].lstrip("-").isdigit() and parts[1].isdigit():
+                            cid, mid = int(parts[0]), int(parts[1])
+                            if target_chat_id is None or cid == int(target_chat_id) or cid == 0:
+                                ids.add(mid)
+                    elif line.isdigit():
+                        ids.add(int(line))
         except Exception:
             pass
     return ids
 
 def add_handled_id(msg_id, chat_id=0):
     try:
+        cid = int(chat_id) if chat_id is not None else 0
         with open(HANDLED_MSGS_FILE, "a") as f:
-            f.write(f"{msg_id}\n")
+            f.write(f"{cid}:{msg_id}\n")
     except Exception:
         pass
     db_add_handled_id(msg_id, chat_id)
@@ -151,7 +164,7 @@ async def poll_control_bot(cfg, exit_event, result_box):
                 
                 if from_id == owner_id:
                     msg_id = msg.get("message_id")
-                    if is_handled(msg_id, owner_id) or is_message_handled(msg_id, owner_id):
+                    if is_handled(msg_id, owner_id) or is_message_handled(msg_id, owner_id) or msg_id in get_handled_ids(owner_id):
                         continue
                     add_handled_id(msg_id, owner_id)
                     text = msg.get("text") or msg.get("caption") or ""

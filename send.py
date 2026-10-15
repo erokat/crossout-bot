@@ -17,7 +17,7 @@ from config import (
     LOCK_PATH,
     BOT_SENT_FILE
 )
-from db import configure_session_sqlite
+from db import configure_session_sqlite, session_flock
 
 def make_multipart_body(fields, files):
     boundary = uuid.uuid4().hex
@@ -109,115 +109,103 @@ def delete_via_bot_api(bot_token, chat_id, message_id):
         return False
 
 async def delete_via_telethon(cfg, chat_id, message_ids):
-    lock_file = open(LOCK_PATH, "w")
-    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    with session_flock():
+        configure_session_sqlite()
+        client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
+        await client.connect()
 
-    configure_session_sqlite()
-    client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
-    await client.connect()
+        if not await client.is_user_authorized():
+            sys.stderr.write("Error: Telethon session not authorized\n")
+            sys.exit(1)
 
-    if not await client.is_user_authorized():
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        lock_file.close()
-        sys.stderr.write("Error: Telethon session not authorized\n")
-        sys.exit(1)
-
-    try:
-        entity = await client.get_entity(chat_id)
-        await client.delete_messages(entity, message_ids, revoke=True)
-        print(f"Telethon deleted messages {message_ids} in chat {chat_id} (revoke=True for everyone)")
-        return True
-    finally:
-        await client.disconnect()
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        lock_file.close()
+        try:
+            entity = await client.get_entity(chat_id)
+            await client.delete_messages(entity, message_ids, revoke=True)
+            print(f"Telethon deleted messages {message_ids} in chat {chat_id} (revoke=True for everyone)")
+            return True
+        finally:
+            await client.disconnect()
 
 async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=None, no_copy=False):
-    lock_file = open(LOCK_PATH, "w")
-    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    with session_flock():
+        configure_session_sqlite()
+        client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
+        await client.connect()
 
-    configure_session_sqlite()
-    client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
-    await client.connect()
+        if not await client.is_user_authorized():
+            sys.stderr.write("Error: Telethon session not authorized\n")
+            sys.exit(1)
 
-    if not await client.is_user_authorized():
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        lock_file.close()
-        sys.stderr.write("Error: Telethon session not authorized\n")
-        sys.exit(1)
+        try:
+            entity = await client.get_entity(chat_id)
+            msg = None
+            if photo_path:
+                if not os.path.exists(photo_path):
+                    sys.stderr.write(f"Error: Photo path not found: {photo_path}\n")
+                    sys.exit(1)
 
-    try:
-        entity = await client.get_entity(chat_id)
-        msg = None
-        if photo_path:
-            if not os.path.exists(photo_path):
-                sys.stderr.write(f"Error: Photo path not found: {photo_path}\n")
-                sys.exit(1)
+                # 1. Save local copy into SAVED_MEMES_DIR
+                os.makedirs(SAVED_MEMES_DIR, exist_ok=True)
+                dest_file = os.path.join(SAVED_MEMES_DIR, os.path.basename(photo_path))
+                if os.path.abspath(photo_path) != os.path.abspath(dest_file):
+                    shutil.copy2(photo_path, dest_file)
+                print(f"Meme copy saved: {dest_file}")
 
-            # 1. Save local copy into SAVED_MEMES_DIR
-            os.makedirs(SAVED_MEMES_DIR, exist_ok=True)
-            dest_file = os.path.join(SAVED_MEMES_DIR, os.path.basename(photo_path))
-            if os.path.abspath(photo_path) != os.path.abspath(dest_file):
-                shutil.copy2(photo_path, dest_file)
-            print(f"Meme copy saved: {dest_file}")
-
-            # 1. Send to chat (Yarik) via Telethon
-            msg = await client.send_file(
-                entity,
-                photo_path,
-                caption=text or "",
-                reply_to=reply_to
-            )
-            print(f"Telethon file sent (msg_id={msg.id})")
-
-            # 2. Forward copy to Owner only if allowed (never for weather, tasks, or utilities)
-            is_task_or_weather = any(m in (text or "").lower() for m in [
-                "погода", "метеостанция", "дополнение", "результат:", "тираспол", "прогноз", "градус"
-            ])
-            if not no_copy and not is_task_or_weather and cfg.get("bot_token") and cfg.get("owner_id"):
-                caption = f"🚀 Копия отправленного Ярику медиа:\n{text or ''}".strip()
-                send_via_bot_api(
-                    cfg["bot_token"],
-                    cfg["owner_id"],
-                    text=caption,
-                    file_path=photo_path
+                # 1. Send to chat (Yarik) via Telethon
+                msg = await client.send_file(
+                    entity,
+                    photo_path,
+                    caption=text or "",
+                    reply_to=reply_to
                 )
+                print(f"Telethon file sent (msg_id={msg.id})")
 
-            # 3. Upload to Google Drive and clean up local storage (preserving saved_memes)
-            try:
-                from gdrive import upload_file_to_drive, upload_and_cleanup
-                ext = os.path.splitext(photo_path)[1].lower()
-                if ext in [".mp3", ".ogg", ".wav", ".m4a", ".flac"]:
-                    folder_type = "music"
-                elif ext in [".mp4", ".mov", ".mkv", ".webm", ".avi", ".gif"]:
-                    folder_type = "videos"
-                else:
-                    folder_type = "memes"
+                # 2. Forward copy to Owner only if allowed (never for weather, tasks, or utilities)
+                is_task_or_weather = any(m in (text or "").lower() for m in [
+                    "погода", "метеостанция", "дополнение", "результат:", "тираспол", "прогноз", "градус"
+                ])
+                if not no_copy and not is_task_or_weather and cfg.get("bot_token") and cfg.get("owner_id"):
+                    caption = f"🚀 Копия отправленного Ярику медиа:\n{text or ''}".strip()
+                    send_via_bot_api(
+                        cfg["bot_token"],
+                        cfg["owner_id"],
+                        text=caption,
+                        file_path=photo_path
+                    )
 
-                # If photo_path is already inside saved_memes, upload without deleting
-                if "saved_memes" in os.path.abspath(photo_path):
-                    upload_file_to_drive(photo_path, folder_type=folder_type)
-                else:
-                    upload_and_cleanup(photo_path, folder_type=folder_type)
-            except Exception as e:
-                print(f"[GDRIVE UPLOAD WARNING] {e}")
+                # 3. Upload to Google Drive and clean up local storage (preserving saved_memes)
+                try:
+                    from gdrive import upload_file_to_drive, upload_and_cleanup
+                    ext = os.path.splitext(photo_path)[1].lower()
+                    if ext in [".mp3", ".ogg", ".wav", ".m4a", ".flac"]:
+                        folder_type = "music"
+                    elif ext in [".mp4", ".mov", ".mkv", ".webm", ".avi", ".gif"]:
+                        folder_type = "videos"
+                    else:
+                        folder_type = "memes"
 
-        else:
-            msg = await client.send_message(
-                entity,
-                text,
-                reply_to=reply_to
-            )
-            print(f"Telethon text sent (msg_id={msg.id})")
+                    # If photo_path is already inside saved_memes, upload without deleting
+                    if "saved_memes" in os.path.abspath(photo_path):
+                        upload_file_to_drive(photo_path, folder_type=folder_type)
+                    else:
+                        upload_and_cleanup(photo_path, folder_type=folder_type)
+                except Exception as e:
+                    print(f"[GDRIVE UPLOAD WARNING] {e}")
 
-        if msg:
-            with open(BOT_SENT_FILE, "a") as f:
-                f.write(f"{msg.id}\n")
+            else:
+                msg = await client.send_message(
+                    entity,
+                    text,
+                    reply_to=reply_to
+                )
+                print(f"Telethon text sent (msg_id={msg.id})")
 
-    finally:
-        await client.disconnect()
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        lock_file.close()
+            if msg:
+                with open(BOT_SENT_FILE, "a") as f:
+                    f.write(f"{msg.id}\n")
+
+        finally:
+            await client.disconnect()
 
 def main():
     parser = argparse.ArgumentParser(description="Отправка сообщений в Telegram (Bot API или Telethon)")

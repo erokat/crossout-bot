@@ -1,6 +1,8 @@
 import sqlite3
 import os
 import time
+import fcntl
+import contextlib
 from config import DB_PATH
 
 def get_db():
@@ -84,6 +86,7 @@ def init_db():
             col_names = [c[1] for c in cols_info]
             pk_cols = [c[1] for c in cols_info if c[5] > 0]
             if "chat_id" not in col_names or set(pk_cols) != {"chat_id", "message_id"}:
+                conn.execute("DROP TABLE IF EXISTS handled_messages_new")
                 conn.execute("""
                 CREATE TABLE handled_messages_new (
                     chat_id INTEGER DEFAULT 0,
@@ -197,13 +200,10 @@ def is_message_handled(msg_id, chat_id=0):
     try:
         cid = int(chat_id) if chat_id is not None else 0
         with get_db() as conn:
-            if cid == 0:
-                cur = conn.execute("SELECT 1 FROM handled_messages WHERE message_id = ?", (int(msg_id),))
-            else:
-                cur = conn.execute(
-                    "SELECT 1 FROM handled_messages WHERE message_id = ? AND (chat_id = ? OR chat_id = 0)",
-                    (int(msg_id), cid)
-                )
+            cur = conn.execute(
+                "SELECT 1 FROM handled_messages WHERE chat_id = ? AND message_id = ?",
+                (cid, int(msg_id))
+            )
             return cur.fetchone() is not None
     except Exception:
         return False
@@ -227,7 +227,7 @@ def mark_message_handled(msg_id, chat_id=0):
 add_handled_id = mark_message_handled
 
 def configure_session_sqlite(session_path=None):
-    """Ensure WAL journal mode and busy_timeout=10000 for Telethon SQLite session."""
+    """Ensure WAL journal mode, autocommit, and busy_timeout=10000 for Telethon SQLite session."""
     try:
         from config import SESSION_PATH
         path = session_path or SESSION_PATH
@@ -237,6 +237,7 @@ def configure_session_sqlite(session_path=None):
                 conn = sqlite3.connect(session_file, timeout=10.0)
                 conn.execute("PRAGMA journal_mode=WAL;")
                 conn.execute("PRAGMA busy_timeout=10000;")
+                conn.execute("PRAGMA synchronous=NORMAL;")
                 conn.commit()
                 conn.close()
             except Exception:
@@ -247,18 +248,64 @@ def configure_session_sqlite(session_path=None):
                 def safe_cursor(self):
                     if self._conn is None:
                         self._conn = sqlite3.connect(self.filename, timeout=10.0, check_same_thread=False)
+                        self._conn.isolation_level = None  # Autocommit: immediately releases write locks
                         try:
                             self._conn.execute("PRAGMA journal_mode=WAL;")
                             self._conn.execute("PRAGMA busy_timeout=10000;")
+                            self._conn.execute("PRAGMA synchronous=NORMAL;")
                         except Exception:
                             pass
                     return self._conn.cursor()
+
+                def safe_create_table(c, *definitions):
+                    for definition in definitions:
+                        c.execute('create table if not exists {}'.format(definition))
+
                 SQLiteSession._cursor = safe_cursor
+                SQLiteSession._create_table = staticmethod(safe_create_table)
                 SQLiteSession._wal_patched = True
         except Exception:
             pass
     except Exception:
         pass
+
+@contextlib.contextmanager
+def session_flock(lock_path=None, timeout=10.0):
+    """File lock context manager with timeout retry to coordinate Telethon session access."""
+    try:
+        from config import LOCK_PATH
+        lp = lock_path or LOCK_PATH
+    except Exception:
+        lp = "send.lock"
+    lock_file = None
+    try:
+        lock_file = open(lp, "w")
+        start = time.time()
+        locked = False
+        while time.time() - start < timeout:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+                break
+            except (BlockingIOError, OSError):
+                time.sleep(0.02)
+        if not locked:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                locked = True
+            except Exception:
+                pass
+        yield
+    finally:
+        if lock_file:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                lock_file.close()
+            except Exception:
+                pass
 
 
 def is_meme_already_sent(meme_hash=None, headline=None, max_age_seconds=7200):

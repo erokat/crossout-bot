@@ -2234,7 +2234,7 @@ def main():
                         continue
 
             if not data or data.get("status") != "new_messages":
-                if data and "latest_id" in data and data["latest_id"]:
+                if data and "latest_id" in data and data["latest_id"] and data.get("source", "yarik") == "yarik":
                     lid = int(data["latest_id"])
                     if last_processed_id is None or lid > last_processed_id:
                         last_processed_id = lid

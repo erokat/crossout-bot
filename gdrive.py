@@ -311,6 +311,9 @@ def upload_and_cleanup(file_path, folder_type="memes"):
     """
     res = upload_file_to_drive(file_path, folder_type)
     if res and os.path.exists(file_path):
+        if "saved_memes" in os.path.abspath(file_path):
+            print(f"[STORAGE PRESERVED] Kept local file {file_path} in saved_memes after Google Drive upload.")
+            return res
         try:
             os.remove(file_path)
             print(f"[STORAGE CLEANUP] Removed local file {file_path} after successful Google Drive upload.")
