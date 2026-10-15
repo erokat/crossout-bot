@@ -757,9 +757,9 @@ def handle_owner_message(msg_data):
             "--text", "Всё, запулил этот мем Ярику в чат! Ждем реакцию 🔥🚜"
         ]
     # 0.4. Скачивание и отправка музыки / треков / песен / симфоний для владельца
-    music_kws = ["музык", "песн", "трек", "песен", "симфони", "мелоди", "бит", "саунд", "оркестр", "music", "song", "symphony", "melody", "beat", "soundtrack", "mp3"]
-    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "сочини", "сыграй", "сделай", "сгенерируй", "запили"]
-    is_music_owner = (any(w in t_lower for w in music_kws) and any(w in t_lower for w in music_verbs)) or any(p in t_lower for p in ["сочини симфонию", "сочини музыку", "сыграй симфонию", "включи симфонию", "скинь симфонию", "скинь трек", "поставь музыку"])
+    music_kws = ["музык", "песн", "трек", "песен", "симфони", "мелоди", "бит", "саунд", "оркестр", "бетховен", "моцарт", "баха", "чайковск", "music", "song", "symphony", "melody", "beat", "soundtrack", "mp3"]
+    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "сочини", "сыграй", "сделай", "сгенерируй", "запили", "вруби"]
+    is_music_owner = (any(w in t_lower for w in music_kws) and any(w in t_lower for w in music_verbs)) or any(p in t_lower for p in ["сочини симфонию", "сочини музыку", "сыграй симфонию", "включи симфонию", "скинь симфонию", "скинь трек", "поставь музыку"]) or any(w in t_lower for w in ["сыграй", "вруби"])
     if is_music_owner:
         from media_finder import find_and_download_music
         track_path, track_title = find_and_download_music(text)
@@ -1232,9 +1232,9 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         return
 
     # 1.4. Скачивание и отправка музыки / треков / песен / симфоний в чат
-    music_kws = ["музык", "песн", "трек", "песен", "симфони", "мелоди", "бит", "саунд", "оркестр", "music", "song", "symphony", "melody", "beat", "soundtrack", "mp3"]
-    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "сочини", "сыграй", "сделай", "сгенерируй", "запили"]
-    is_music_chat = (any(w in t_lower for w in music_kws) and any(w in t_lower for w in music_verbs)) or any(p in t_lower for p in ["сочини симфонию", "сочини музыку", "сыграй симфонию", "включи симфонию", "скинь симфонию", "скинь трек", "поставь музыку"])
+    music_kws = ["музык", "песн", "трек", "песен", "симфони", "мелоди", "бит", "саунд", "оркестр", "бетховен", "моцарт", "баха", "чайковск", "music", "song", "symphony", "melody", "beat", "soundtrack", "mp3"]
+    music_verbs = ["скинь", "найди", "скачай", "включи", "поставь", "дай", "кинь", "отправь", "сочини", "сыграй", "сделай", "сгенерируй", "запили", "вруби"]
+    is_music_chat = (any(w in t_lower for w in music_kws) and any(w in t_lower for w in music_verbs)) or any(p in t_lower for p in ["сочини симфонию", "сочини музыку", "сыграй симфонию", "включи симфонию", "скинь симфонию", "скинь трек", "поставь музыку"]) or any(w in t_lower for w in ["сыграй", "вруби"])
     if is_music_chat:
         from media_finder import find_and_download_music
         track_path, track_title = find_and_download_music(text)
