@@ -31,7 +31,8 @@ from meme_engine import (
     draw_outlined_text,
     render_caption_meme,
     render_impact_meme,
-    render_demotivator
+    render_demotivator,
+    clean_canvas_text
 )
 
 def is_photo_editor_request(text, has_photo=False):
@@ -117,74 +118,60 @@ def parse_caption_parts(raw_caption):
 
 def render_photo_overlay(base_img, top_text="", bottom_text="", single_text=""):
     """
-    Накладывает стильный, читаемый текст прямо на фото (Instagram/Telegram Stories/VK style).
-    - Масштабирует изображение под безопасное соотношение для Telegram mobile (макс 1000x1200),
-      чтобы текст никогда не обрезался при просмотре в чате без открытия на весь экран!
-    - Добавляет полупрозрачную стильную плашку и жирный текст с обводкой.
-    - Размещает в безопасной зоне видимости (10-85% по высоте).
+    Накладывает читаемый текст прямо на фото (Instagram/Telegram Stories/VK style).
+    - Масштабирует изображение под комфортный размер для Telegram mobile (макс 1000-1200).
+    - Текст накладывается прямо на фото с четкой контрастной обводкой (stroke), без черного фона и плашек.
+    - Размещает в безопасной зоне видимости (8-85% по высоте).
     """
     W, H = base_img.size
     target_w = 1000
-    # Safe max ratio for Telegram mobile preview is 1:1.2 (1000x1200)
     scale = min(target_w / W, 1200 / H)
     new_w, new_h = max(300, int(W * scale)), max(300, int(H * scale))
-    im_resized = base_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    canvas = base_img.resize((new_w, new_h), Image.Resampling.LANCZOS).convert("RGB")
 
-    canvas_w = max(new_w, target_w)
-    canvas_h = new_h
-    canvas = Image.new("RGB", (canvas_w, canvas_h), (18, 18, 18))
-    offset_x = (canvas_w - new_w) // 2
-    canvas.paste(im_resized, (offset_x, 0))
-
-    draw = ImageDraw.Draw(canvas, "RGBA")
-    font_size = max(28, int(canvas_w * 0.046))
+    canvas_w, canvas_h = canvas.size
+    draw = ImageDraw.Draw(canvas)
+    font_size = max(28, int(canvas_w * 0.048))
     font = get_font("russo", font_size)
 
-    top = top_text.strip()
-    bot = bottom_text.strip()
-    single = single_text.strip()
+    top = clean_canvas_text(top_text.strip())
+    bot = clean_canvas_text(bottom_text.strip())
+    single = clean_canvas_text(single_text.strip())
 
     if not top and not bot and single:
         t_cand, b_cand = parse_caption_parts(single)
         if b_cand:
-            top, bot = t_cand, b_cand
+            top, bot = clean_canvas_text(t_cand), clean_canvas_text(b_cand)
         else:
             bot = single
 
-    pad_x = 20
-    pad_y = 10
+    stroke_w = max(4, int(font_size * 0.09))
     line_h = int(font_size * 1.35)
 
     if top:
-        lines = wrap_text(draw, top, font, new_w - 80)
+        lines = wrap_text(draw, top, font, canvas_w - 80)
         y_start = max(24, int(canvas_h * 0.08))
         for i, l in enumerate(lines):
-            bb = draw.textbbox((0, 0), l, font=font)
+            clean_l = clean_canvas_text(l)
+            bb = draw.textbbox((0, 0), clean_l, font=font, stroke_width=stroke_w)
             lw = bb[2] - bb[0]
-            lx = offset_x + (new_w - lw) // 2
+            lx = (canvas_w - lw) // 2 - bb[0]
             ly = y_start + i * line_h
-            draw.rectangle(
-                [lx - pad_x, ly - pad_y, lx + lw + pad_x, ly + font_size + pad_y],
-                fill=(0, 0, 0, 190)
-            )
-            draw_outlined_text(draw, (lx, ly), l, font=font, fill="#FFFFFF", stroke_fill="#000000", stroke_width=3)
+            draw_outlined_text(draw, (lx, ly), clean_l, font=font, fill="#FFFFFF", stroke_fill="#000000", stroke_width=stroke_w)
 
     if bot:
-        lines = wrap_text(draw, bot, font, new_w - 80)
+        lines = wrap_text(draw, bot, font, canvas_w - 80)
         total_text_h = len(lines) * line_h
         y_start = max(canvas_h - total_text_h - int(canvas_h * 0.10), int(canvas_h * 0.45))
         for i, l in enumerate(lines):
-            bb = draw.textbbox((0, 0), l, font=font)
+            clean_l = clean_canvas_text(l)
+            bb = draw.textbbox((0, 0), clean_l, font=font, stroke_width=stroke_w)
             lw = bb[2] - bb[0]
-            lx = offset_x + (new_w - lw) // 2
+            lx = (canvas_w - lw) // 2 - bb[0]
             ly = y_start + i * line_h
-            draw.rectangle(
-                [lx - pad_x, ly - pad_y, lx + lw + pad_x, ly + font_size + pad_y],
-                fill=(0, 0, 0, 190)
-            )
-            draw_outlined_text(draw, (lx, ly), l, font=font, fill="#FFD700", stroke_fill="#000000", stroke_width=3)
+            draw_outlined_text(draw, (lx, ly), clean_l, font=font, fill="#FFFFFF", stroke_fill="#000000", stroke_width=stroke_w)
 
-    return canvas.convert("RGB")
+    return canvas
 
 def edit_photo_with_caption(photo_path, user_instruction, style="auto"):
     """
