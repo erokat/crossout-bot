@@ -38,6 +38,11 @@ def is_bot_mention(text):
     if not text:
         return False
     t = text.lower().strip()
+    # Игнорируем собственные системные/исходящие ответы бота
+    if any(t.startswith(prefix) for prefix in [
+        "не удалось найти", "держи трек", "держи симфонию", "⚠️", "принял,", "запустил", "отправил", "закинул", "🎻", "🎵", "🎨"
+    ]):
+        return False
     triggers = ["!бот", "!bot", "/бот", "/bot", "бот ответь", "бот,", "ботяра", "ботик", "робот", "стикерпак", "стикеры"]
     if any(tr in t for tr in triggers):
         return True

@@ -201,6 +201,12 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
                 print(f"Telethon text sent (msg_id={msg.id})")
 
             if msg:
+                try:
+                    from db import add_handled_id, mark_message_handled
+                    add_handled_id(msg.id, chat_id)
+                    mark_message_handled(msg.id, chat_id)
+                except Exception:
+                    pass
                 with open(BOT_SENT_FILE, "a") as f:
                     f.write(f"{msg.id}\n")
 
