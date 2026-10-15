@@ -46,10 +46,19 @@ def register_extension(slug, filename, description, triggers, produces_media=Fal
 
 def find_existing_extension(task_text):
     reg = load_registry()
-    t = task_text.lower()
+    t = (task_text or "").lower()
+
+    # Если пользователь просит создать что-то новое, другое или переделать — НЕ переиспользуем старый скрипт!
+    if any(w in t for w in ["новый", "нового", "новеньк", "друг", "переделай", "заново", "по-другому", "реалистичн"]):
+        return None, None
+
     for slug, info in reg.items():
         triggers = info.get("triggers", [])
-        if any(tr in t for tr in triggers):
+        if not triggers:
+            continue
+        # Требуем совпадения хотя бы 2 триггеров (или точного названия slug)
+        matching_count = sum(1 for tr in triggers if tr in t)
+        if matching_count >= min(2, len(triggers)) or (len(slug) >= 4 and slug.lower() in t):
             fn = info.get("filename")
             fp = os.path.join(EXTENSIONS_DIR, fn)
             if os.path.exists(fp):
@@ -348,18 +357,21 @@ def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script
     # 1. Проверяем явный путь в stdout
     if stdout:
         m = re.findall(r"([/\w.-]+\.(?:png|jpg|jpeg|gif|webp|mp4|webm|mov|mp3|ogg|wav|xlsx|pdf))", stdout, re.IGNORECASE)
-        for cand in reversed(m):
-            if is_blacklisted_media(cand):
-                continue
-            if os.path.exists(cand) and os.path.isfile(cand) and cand not in before_files:
-                if min_mtime <= 0 or os.path.getmtime(cand) >= min_mtime:
-                    return cand
-            full_cand = os.path.join(BASE_DIR, cand.lstrip("/"))
-            if is_blacklisted_media(full_cand):
-                continue
-            if os.path.exists(full_cand) and os.path.isfile(full_cand) and full_cand not in before_files:
-                if min_mtime <= 0 or os.path.getmtime(full_cand) >= min_mtime:
-                    return full_cand
+        for raw_cand in reversed(m):
+            test_paths = [raw_cand]
+            if not os.path.isabs(raw_cand):
+                test_paths.append(os.path.join(BASE_DIR, raw_cand))
+            else:
+                if raw_cand.startswith("/app/"):
+                    test_paths.append(os.path.join(BASE_DIR, raw_cand[len("/app/"):].lstrip("/")))
+                test_paths.append(os.path.join(BASE_DIR, raw_cand.lstrip("/")))
+
+            for cand in test_paths:
+                if is_blacklisted_media(cand):
+                    continue
+                if os.path.exists(cand) and os.path.isfile(cand) and os.path.getsize(cand) > 0:
+                    # Если путь явно выведен скриптом в stdout — это и есть готовый результат!
+                    return os.path.abspath(cand)
 
     # 2. Если в stdout путь не был напечатан, ищем в папках ТОЛЬКО если задача явно просила файл/медиа
     if not is_media_task(task_text):
@@ -376,9 +388,10 @@ def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script
                         fp = os.path.join(root, f)
                         if is_blacklisted_media(fp):
                             continue
-                        if os.path.isfile(fp) and fp not in before_files:
+                        if os.path.isfile(fp) and os.path.getsize(fp) > 0:
                             mtime = os.path.getmtime(fp)
-                            if min_mtime > 0 and mtime >= min_mtime and os.path.getsize(fp) > 0:
+                            # Либо файл новый, либо был перезаписан скриптом во время работы
+                            if fp not in before_files or (min_mtime > 0 and mtime >= min_mtime - 5):
                                 all_candidates.append(fp)
 
     if all_candidates:
@@ -434,6 +447,23 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 new_media = None
             else:
                 new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=existing_script)
+
+            if new_media and os.path.exists(new_media):
+                clean_lines = []
+                if stdout:
+                    for line in stdout.splitlines():
+                        line_str = line.strip()
+                        if not line_str or line_str.startswith("/") or line_str.startswith("media/") or line_str.endswith((".png", ".jpg", ".mp4", ".mp3", ".xlsx", ".pdf", ".gif")):
+                            continue
+                        if any(tech_w in line_str.lower() for tech_w in ["traceback", "module", "saved to", "successfully", "extension", "/app/"]):
+                            continue
+                        clean_lines.append(line_str)
+
+                natural_caption = " ".join(clean_lines).strip() if (clean_lines and len(" ".join(clean_lines)) < 160) else ""
+                if not natural_caption:
+                    natural_caption = f"Готово, {sender_name}! Лови результат 🔥"
+                return natural_caption, new_media
+
             if any(marker in stdout for marker in ["📍", "🌡️", "📊", "☀️", "🌤️", "☁️"]):
                 report = stdout
             else:
@@ -443,9 +473,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 )
                 if stdout:
                     report += f"📊 **Результат:**\n```\n{stdout[:2000]}\n```\n"
-            if new_media:
-                report += f"\n📁 Готовый файл: `{os.path.basename(new_media)}`"
-            return report, new_media
+            return report, None
 
     # 2. Если дополнения еще нет — требуется AI для генерации нового модуля
     if not ask_ai_fn:
@@ -483,7 +511,10 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         "4. Если требуются сторонние библиотеки (например: openpyxl, pandas, qrcode, pillow, moviepy, pydub, matplotlib, reportlab):\n"
         "   Смело импортируй их — движок автоматически установит их через pip!\n"
         "5. Все создаваемые файлы сохраняй в папку `media/` и обязательно выводи путь к созданному файлу через `print(result_path)`.\n"
-        "6. Результаты работы и пояснения выводи через `print(...)`.\n\n"
+        "6. Если требуется найти, сгенерировать или скачать фото/арт/картинку/персонажа/мем по теме:\n"
+        "   - Можешь импортировать `from media_finder import find_and_download_image` и вызвать `img_path, _ = find_and_download_image(query)`.\n"
+        "   - Или использовать PIL для коллажа, отрисовки, добавления надписи.\n"
+        "7. Результаты работы и пояснения выводи через `print(...)`.\n\n"
         "Формат ответа:\n"
         "Краткое пояснение (1 строка).\n"
         "```python\n"
