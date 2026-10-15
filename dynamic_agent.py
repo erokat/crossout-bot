@@ -900,16 +900,20 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
 
     ai_reply = ask_ai_fn(prompt, photo_path=photo_path)
     if not ai_reply:
-        # Попытка 2: компактный промпт для защиты от таймаута
-        print("[DYNAMIC SKILL ENGINE] Prompt 1 timed out or failed. Retrying with compact prompt...")
-        compact_prompt = (
-            f"Напиши надежный автономный Python 3 скрипт для задачи: «{task_text}».\n"
-            f"# SKILL_NAME: task_exec\n# DESCRIPTION: {task_text[:120]}\n"
-            "ВАЖНОЕ ПРАВИЛО: Делай СТРОГО по теме задачи пользователя! НЕ приплетай Crossout, если о нем прямо не просили!\n"
-            "Если требуется графика/картинка/мем или фотомонтаж входного файла INPUT_FILE — используй Pillow (PIL) и сохрани результат в media/, напечатав путь в stdout.\n"
-            "Код верни строго внутри ```python ... ``` без лишних рассуждений."
-        )
-        ai_reply = ask_ai_fn(compact_prompt, photo_path=photo_path)
+        if is_meme_or_media_request(task_text):
+            print("[DYNAMIC SKILL ENGINE] AI generation timed out for media/meme task. Falling back to guaranteed synthesized extension immediately!")
+            ai_reply = None
+        else:
+            # Попытка 2: компактный промпт для не-медиа задач для защиты от таймаута
+            print("[DYNAMIC SKILL ENGINE] Prompt 1 timed out or failed. Retrying with compact prompt...")
+            compact_prompt = (
+                f"Напиши надежный автономный Python 3 скрипт для задачи: «{task_text}».\n"
+                f"# SKILL_NAME: task_exec\n# DESCRIPTION: {task_text[:120]}\n"
+                "ВАЖНОЕ ПРАВИЛО: Делай СТРОГО по теме задачи пользователя! НЕ приплетай Crossout, если о нем прямо не просили!\n"
+                "Если требуется графика/картинка/мем или фотомонтаж входного файла INPUT_FILE — используй Pillow (PIL) и сохрани результат в media/, напечатав путь в stdout.\n"
+                "Код верни строго внутри ```python ... ``` без лишних рассуждений."
+            )
+            ai_reply = ask_ai_fn(compact_prompt, photo_path=photo_path)
 
     code = extract_python_code(ai_reply) if ai_reply else None
 

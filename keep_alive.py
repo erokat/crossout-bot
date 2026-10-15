@@ -276,6 +276,19 @@ def setup_environment():
     except Exception as e:
         print(f"[STARTUP] Warning during restore_dynamic_skills: {e}")
 
+    # 7. Restore Google Drive token if GDRIVE_REFRESH_TOKEN is present in env
+    gdrive_rt = os.environ.get("GDRIVE_REFRESH_TOKEN", "").strip()
+    if gdrive_rt:
+        try:
+            token_file = os.path.join(BASE_DIR, "gdrive_token.json")
+            with open(token_file, "w", encoding="utf-8") as tf:
+                json.dump({"refresh_token": gdrive_rt}, tf)
+            from db import set_kv
+            set_kv("gdrive_refresh_token", gdrive_rt)
+            print("[INIT] Google Drive token restored from GDRIVE_REFRESH_TOKEN env-var!")
+        except Exception as e:
+            print(f"[INIT ERROR] Failed to restore Google Drive token: {e}")
+
 class WebServerHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Suppress routine access logs to keep stdout clean
@@ -573,7 +586,7 @@ def run_antigravity_cli(prompt, timeout=40):
     cmd = [agy_bin, "--model", "gemini-3.8-flash-medium", "--dangerously-skip-permissions", "--disable-slash-commands", "-p", prompt]
     env = dict(os.environ)
     env["CI"] = "1"
-    env["AGY_AUTO_UPDATE"] = "1"
+    env["AGY_AUTO_UPDATE"] = "0"
     env["ANTIGRAVITY_SKIP_UPDATE_CHECK"] = "1"
     env["DEBIAN_FRONTEND"] = "noninteractive"
 
@@ -622,9 +635,14 @@ def ask_ai(prompt, photo_path=None, system_instruction=None):
     ])
     if is_search_or_code:
         search_prompt = prompt if not system_instruction else f"{system_instruction}\n\n{prompt}"
-        res = run_antigravity_cli(search_prompt, timeout=60)
+        res = run_antigravity_cli(search_prompt, timeout=100)
         if res:
             return res
+        # Если CLI не ответил, пробуем прямой Gemini API (если настроен ключ)
+        gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction=system_instruction)
+        if gemini_res:
+            return gemini_res
+        return None
 
     # 1. Try Gemini API directly if configured
     gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction=system_instruction)
@@ -642,17 +660,10 @@ def ask_ai(prompt, photo_path=None, system_instruction=None):
     if system_instruction:
         combined_prompt = f"{system_instruction}\n\n{combined_prompt}"
 
-    # 3. Call Antigravity CLI
-    res = run_antigravity_cli(combined_prompt, timeout=90)
+    # 3. Call Antigravity CLI with adequate timeout
+    res = run_antigravity_cli(combined_prompt, timeout=60)
     if res:
         return res
-
-    # 4. Fallback: if long prompt failed, retry with a direct compact instruction (preserving full user prompt!)
-    if len(combined_prompt) > 400:
-        compact_prompt = f"Выполни задачу пользователя строго по инструкции: «{prompt}»\nВыдай готовый результат без лишних рассуждений."
-        res_compact = run_antigravity_cli(compact_prompt, timeout=60)
-        if res_compact:
-            return res_compact
 
     return None
 
