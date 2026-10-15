@@ -73,87 +73,7 @@ def boost_cleanup_temp_files():
         pass
     return purged
 
-def get_tiraspol_cw_schedule():
-    """Calculate Crossout Clan Wars schedule with countdown using Europe/Tiraspol timezone."""
-    from datetime import datetime, timezone, timedelta
-    try:
-        from zoneinfo import ZoneInfo
-        tz = ZoneInfo("Europe/Tiraspol")
-        datetime.now(tz)
-    except Exception:
-        try:
-            from zoneinfo import ZoneInfo
-            tz = ZoneInfo("Europe/Chisinau")
-            datetime.now(tz)
-        except Exception:
-            # Robust fallback for EET/EEST
-            now_u = datetime.now(timezone.utc)
-            year = now_u.year
-            march_last = max(d for d in range(25, 32) if datetime(year, 3, d).weekday() == 6)
-            dst_start = datetime(year, 3, march_last, 1, 0, tzinfo=timezone.utc)
-            oct_last = max(d for d in range(25, 32) if datetime(year, 10, d).weekday() == 6)
-            dst_end = datetime(year, 10, oct_last, 1, 0, tzinfo=timezone.utc)
-            offset_hours = 3 if dst_start <= now_u < dst_end else 2
-            tz = timezone(timedelta(hours=offset_hours))
 
-    now_utc = datetime.now(timezone.utc)
-    now_local = now_utc.astimezone(tz)
-
-    utc_windows = [(0, 4), (11, 15), (17, 21)]
-    intervals = []
-    base_date = now_utc.date()
-    for day_offset in [0, 1]:
-        d = base_date + timedelta(days=day_offset)
-        for sh, eh in utc_windows:
-            start_dt = datetime(d.year, d.month, d.day, sh, 0, 0, tzinfo=timezone.utc)
-            end_dt = datetime(d.year, d.month, d.day, eh, 0, 0, tzinfo=timezone.utc)
-            intervals.append((start_dt, end_dt))
-
-    active_win = None
-    next_win = None
-    for s, e in intervals:
-        if s <= now_utc < e:
-            active_win = (s, e)
-            break
-        if now_utc < s:
-            if next_win is None:
-                next_win = (s, e)
-                break
-
-    time_str = now_local.strftime("%H:%M:%S")
-    tz_label = now_local.strftime("UTC%z")
-
-    msg_lines = [
-        "⚔️ **Расписание Клановых Войн (КВ) Crossout**",
-        f"🕒 **Текущее время (Europe/Tiraspol):** {time_str} ({tz_label})\n"
-    ]
-
-    if active_win:
-        rem = active_win[1] - now_utc
-        hrs, rem_sec = divmod(int(rem.total_seconds()), 3600)
-        mins = rem_sec // 60
-        end_local = active_win[1].astimezone(tz).strftime("%H:%M")
-        msg_lines.append("🟢 **КВ СЕЙЧАС ИДЕТ!**")
-        msg_lines.append(f"⏳ До конца текущего окна: **{hrs}ч {mins}мин** (до {end_local} по Тирасполю)\n")
-    elif next_win:
-        until = next_win[0] - now_utc
-        hrs, rem_sec = divmod(int(until.total_seconds()), 3600)
-        mins = rem_sec // 60
-        start_local = next_win[0].astimezone(tz).strftime("%H:%M")
-        msg_lines.append("🔴 **Сейчас бои на паузе.**")
-        msg_lines.append(f"⏳ До следующего окна КВ: **{hrs}ч {mins}мин** (старт в {start_local} по Тирасполю)\n")
-
-    today_local_windows = []
-    for sh, eh in utc_windows:
-        s_dt = datetime(base_date.year, base_date.month, base_date.day, sh, 0, 0, tzinfo=timezone.utc).astimezone(tz)
-        e_dt = datetime(base_date.year, base_date.month, base_date.day, eh, 0, 0, tzinfo=timezone.utc).astimezone(tz)
-        today_local_windows.append(f"• {s_dt.strftime('%H:%M')} — {e_dt.strftime('%H:%M')}")
-
-    msg_lines.append("📋 **Окна боев на сегодня (Тирасполь):**")
-    msg_lines.extend(today_local_windows)
-    msg_lines.append("\n🚜 *Готовь ховеры, прячь Газген под раму и смазывай шестерни — руда сама себя не нафармит!*")
-
-    return "\n".join(msg_lines)
 
 from meme_generator import generate_crossout_meme
 from dynamic_agent import (
@@ -169,6 +89,7 @@ from dynamic_agent import (
 )
 from photo_editor import (
     is_photo_editor_request,
+    is_complex_photo_request,
     edit_photo_with_caption,
     process_universal_photo_command
 )
@@ -694,6 +615,17 @@ def run_antigravity_cli(prompt, timeout=40):
     return None
 
 def ask_ai(prompt, photo_path=None, system_instruction=None):
+    # 0. Приоритет Antigravity CLI (Gemini 3.8 Flash Medium) для веб-поиска, фактов, новостей и кода
+    is_search_or_code = any(w in prompt.lower() for w in [
+        "найди в интернете", "поищи в интернете", "погугли", "в сети", "интернет", "новости", "онлайн",
+        "код", "скрипт", "напиши python", "python 3", "динамический", "сгенерируй", "сочини"
+    ])
+    if is_search_or_code:
+        search_prompt = prompt if not system_instruction else f"{system_instruction}\n\n{prompt}"
+        res = run_antigravity_cli(search_prompt, timeout=60)
+        if res:
+            return res
+
     # 1. Try Gemini API directly if configured
     gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction=system_instruction)
     if gemini_res:
@@ -1010,10 +942,29 @@ def handle_owner_message(msg_data):
                 cap = f"🎻 Держи симфонию, Миша! Оркестровая мощь: {track_title}"
             else:
                 cap = f"🎵 Держи трек, Миша: {track_title}"
-            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--photo", track_path, "--text", cap])
         else:
-            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", f"Миша, не удалось найти трек: {track_title}"])
-        return
+            log_event(f"[ORCHESTRATOR] Music search didn't find file, delegating to AI music generator for owner: {text!r}")
+            ack_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--no-copy",
+                "--text", "Принял, Миша! Генерирую музыкальный трек через ИИ... 🎵⏳"
+            ]
+            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+            run_autonomous_task_async(
+                task_text=text,
+                sender_name="Миша",
+                photo_path=None,
+                ask_ai_fn=ask_ai,
+                sender_key="owner",
+                recipient="owner",
+                reply_to_msg_id=None,
+                ack_msg_id=ack_msg_id,
+                is_owner_sender=True
+            )
+            return
 
     # 0.45. Поиск и отправка GIF анимаций для владельца
     is_gif_owner = any(w in t_lower for w in ["гиф", "гифк", "gif", "анимац"]) and any(w in t_lower for w in ["скинь", "найди", "скачай", "дай", "кинь", "отправь"])
@@ -1183,6 +1134,30 @@ def handle_owner_message(msg_data):
     # 0.55. Фоторедактор: Добавление стикеров/надписи/фильтров/эффектов на фото
     if is_photo_editor_request(text, has_photo=bool(photo)):
         if photo and os.path.exists(photo):
+            if is_complex_photo_request(text):
+                log_event(f"[ORCHESTRATOR] Routing complex photo task to AI Dynamic Skill Engine for owner: {text!r}")
+                ack_cmd = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "owner",
+                    "--no-copy",
+                    "--text", "Принял, Миша! Запускаю ИИ для сложного фотомонтажа... 🎨⏳"
+                ]
+                ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+                run_autonomous_task_async(
+                    task_text=text,
+                    sender_name="Миша",
+                    photo_path=photo,
+                    ask_ai_fn=ask_ai,
+                    sender_key="owner",
+                    recipient="owner",
+                    reply_to_msg_id=None,
+                    ack_msg_id=ack_msg_id,
+                    is_owner_sender=True
+                )
+                return
+
             try:
                 edited_img, reply_cap = process_universal_photo_command(photo, text)
                 cmd_owner = [
@@ -1621,8 +1596,29 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 cap = f"🎵 Держи трек, {target_name}: {track_title}"
             subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--audio", track_path, "--text", cap, "--reply-to", str(msg_id)])
         else:
-            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", f"{target_name}, не удалось найти или скачать трек: {track_title}", "--reply-to", str(msg_id)])
-        return
+            log_event(f"[ORCHESTRATOR] Music search didn't find file, delegating to AI music generator for {target_name}: {text!r}")
+            ack_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--no-copy",
+                "--reply-to", str(msg_id),
+                "--text", f"Принял, {target_name}! Генерирую музыкальный трек через ИИ... 🎵⏳"
+            ]
+            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+            run_autonomous_task_async(
+                task_text=text,
+                sender_name=target_name,
+                photo_path=None,
+                ask_ai_fn=ask_ai,
+                sender_key=sender_key,
+                recipient="yarik",
+                reply_to_msg_id=msg_id,
+                ack_msg_id=ack_msg_id,
+                is_owner_sender=is_owner_sender
+            )
+            return
 
     # 1.45. Поиск и отправка GIF анимаций в чат
     is_gif_chat = any(w in t_lower for w in ["гиф", "гифк", "gif", "анимац"]) and any(w in t_lower for w in ["скинь", "найди", "скачай", "дай", "кинь", "отправь"])
@@ -1834,6 +1830,31 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     if is_photo_editor_request(text, has_photo=bool(photo_file)):
         target_name = "Миша" if is_owner_sender else "Ярик"
         if photo_file and os.path.exists(photo_file):
+            if is_complex_photo_request(text):
+                log_event(f"[ORCHESTRATOR] Routing complex photo task to AI Dynamic Skill Engine for {target_name}: {text!r}")
+                ack_cmd = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "yarik",
+                    "--no-copy",
+                    "--reply-to", str(msg_id),
+                    "--text", f"Принял, {target_name}! Запускаю ИИ для сложного фотомонтажа... 🎨⏳"
+                ]
+                ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+                run_autonomous_task_async(
+                    task_text=text,
+                    sender_name=target_name,
+                    photo_path=photo_file,
+                    ask_ai_fn=ask_ai,
+                    sender_key=sender_key,
+                    recipient="yarik",
+                    reply_to_msg_id=msg_id,
+                    ack_msg_id=ack_msg_id,
+                    is_owner_sender=is_owner_sender
+                )
+                return
+
             log_event(f"[ORCHESTRATOR] Photo editor triggered for {target_name}: {text!r} (photo={photo_file})")
             try:
                 edited_img, reply_cap = process_universal_photo_command(photo_file, text)
@@ -1888,8 +1909,36 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     # 1.65. Запрос на мем / картинку / генерацию визуального контента
     is_explicit_meme = any(w in t_lower for w in ["мем", "мэм", "пикч", "картинк", "гиф", "демотиватор", "мемасик", "мемчик", "мемы", "мэмы"])
     is_meme_action = any(w in t_lower for w in ["сделай", "склепай", "запили", "нарисуй", "сгенерируй", "создай", "скинь", "кинь", "выдай"]) and is_explicit_meme
-    is_visual_gen = any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and any(w in t_lower for w in ["доск", "шахмат", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "персонаж", "кота", "собаку", "машин", "фото", "изображен", "пикч", "картинк", "мем"])
-    is_meme_word = is_explicit_meme or is_meme_action or is_visual_gen
+    is_visual_gen = any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and any(w in t_lower for w in ["доск", "шахмат", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "персонаж", "кота", "собаку", "машин", "фото", "изображен"])
+
+    # Если запрошена именно творческая генерация сцены / арта / доски (не стандартный мем) — запускаем ИИ!
+    if is_visual_gen and not is_explicit_meme:
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        log_event(f"[ORCHESTRATOR] Routing creative visual generation to AI Dynamic Skill Engine for {target_name}: {text!r}")
+        ack_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--no-copy",
+            "--reply-to", str(msg_id),
+            "--text", f"Принял, {target_name}! Генерирую изображение через ИИ... 🎨⏳"
+        ]
+        ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+        run_autonomous_task_async(
+            task_text=text,
+            sender_name=target_name,
+            photo_path=photo_file,
+            ask_ai_fn=ask_ai,
+            sender_key=sender_key,
+            recipient="yarik",
+            reply_to_msg_id=msg_id,
+            ack_msg_id=ack_msg_id,
+            is_owner_sender=is_owner_sender
+        )
+        return
+
+    is_meme_word = is_explicit_meme or is_meme_action
     is_another_word = any(w in t_lower for w in ["другое", "другой", "следующ", "новеньк", "переделай", "еще", "ещё"]) and any(w in t_lower for w in ["скинь", "давай", "дай", "покажи", "кинь", "сделай", "ботик", "бот", "выдай"])
     is_reply_to_media = bool(msg_data.get("reply_to_msg_id")) and any(w in t_lower for w in ["скинь", "давай", "другое", "другой", "еще", "ещё", "переделай", "не то", "фигня", "хуйня", "говно", "заново", "повтори"])
 

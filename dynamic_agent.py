@@ -877,6 +877,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         "2. Рабочие директории и генерация медиа:\n"
         "   - `./media/` — сохранение любых сгенерированных медиафайлов (картинки, графики, qr, видео, аудио).\n"
         "   - ДЛЯ ГЕНЕРАЦИИ КАРТИНОК, ГРАФИКИ, МЕМОВ, АРТОВ И СХЕМ: используй библиотеку `PIL` (`Pillow`) или `matplotlib`. Шрифты лежат в `./media/` (`RussoOne-Regular.ttf`, `Montserrat.ttf`, `Comfortaa.ttf`, `Anton.ttf`). Рисуй все запрошенные пользователем сцены, детали, персонажей и надписи качественно! Готовый файл сохраняй в `./media/<filename>.png` и обязательно печатай путь в stdout: `print(out_path)`.\n"
+        "   - ЕСЛИ ПРИКРЕПЛЕН ВХОДНОЙ ФАЙЛ (INPUT_FILE) И ЗАПРОШЕН ФОТОМОНТАЖ / РЕДАКТИРОВАНИЕ (замена фона, вставка объектов из интернета, коллаж, добавление деталей): открой `INPUT_FILE` через Image.open(), скачай нужные картинки (urllib / requests) или возьми из `./media/`, вырежи, наложи слои, сохрани результат в `./media/<filename>.jpg` и напечатай путь в stdout: `print(out_path)`.\n"
         "3. Входные аргументы скрипта:\n"
         "   - Текст запроса: `os.environ.get('TASK_TEXT')` или `sys.argv[1]`.\n"
         "   - Входной файл (если прикреплен): `os.environ.get('INPUT_FILE')`.\n"
@@ -905,7 +906,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             f"Напиши надежный автономный Python 3 скрипт для задачи: «{task_text}».\n"
             f"# SKILL_NAME: task_exec\n# DESCRIPTION: {task_text[:120]}\n"
             "ВАЖНОЕ ПРАВИЛО: Делай СТРОГО по теме задачи пользователя! НЕ приплетай Crossout, если о нем прямо не просили!\n"
-            "Если требуется графика/картинка/мем — используй Pillow (PIL) и сохрани результат в media/, напечатав путь в stdout.\n"
+            "Если требуется графика/картинка/мем или фотомонтаж входного файла INPUT_FILE — используй Pillow (PIL) и сохрани результат в media/, напечатав путь в stdout.\n"
             "Код верни строго внутри ```python ... ``` без лишних рассуждений."
         )
         ai_reply = ask_ai_fn(compact_prompt, photo_path=photo_path)
