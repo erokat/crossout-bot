@@ -25,3 +25,4 @@ media/meme_templates/cached_*
 gdrive_config.json
 gdrive_token.json
 session_data/antigravity-oauth-token
+media/music/
