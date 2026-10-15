@@ -93,10 +93,23 @@ def parse_caption_parts(raw_caption):
     if not text:
         return "", ""
 
-    # 1. Проверяем формат "сверху: ... снизу: ..."
+    # 1. Проверяем формат "сверху: ... снизу: ..." или "снизу: ... сверху: ..."
     m_split = re.search(r"(?i)сверху[:\s]+(.+?)\s+снизу[:\s]+(.+)", text)
     if m_split:
         return m_split.group(1).strip(), m_split.group(2).strip()
+
+    m_split_rev = re.search(r"(?i)снизу[:\s]+(.+?)\s+сверху[:\s]+(.+)", text)
+    if m_split_rev:
+        return m_split_rev.group(2).strip(), m_split_rev.group(1).strip()
+
+    # Проверяем явное указание только сверху или только снизу
+    m_top_only = re.search(r"(?i)^сверху[:\s]+(.+)$", text)
+    if m_top_only:
+        return m_top_only.group(1).strip(), ""
+
+    m_bot_only = re.search(r"(?i)^снизу[:\s]+(.+)$", text)
+    if m_bot_only:
+        return "", m_bot_only.group(1).strip()
 
     # 2. Проверяем явный разделитель через // или \n
     if "//" in text:
@@ -119,20 +132,31 @@ def parse_caption_parts(raw_caption):
 def render_photo_overlay(base_img, top_text="", bottom_text="", single_text=""):
     """
     Накладывает читаемый текст прямо на фото (Instagram/Telegram Stories/VK style).
-    - Масштабирует изображение под комфортный размер для Telegram mobile (макс 1000-1200).
+    - Масштабирует изображение под комфортный размер для Telegram mobile (макс 1000-1200) без искажения пропорций.
     - Текст накладывается прямо на фото с четкой контрастной обводкой (stroke), без черного фона и плашек.
-    - Размещает в безопасной зоне видимости (8-85% по высоте).
+    - Безопасная видимость без обрезки и перекрытий.
     """
+    # Преобразуем RGBA с прозрачностью на белый фон, исключая превращение прозрачности в черные пиксели
+    if base_img.mode in ("RGBA", "LA") or (base_img.mode == "P" and "transparency" in base_img.info):
+        rgba = base_img.convert("RGBA")
+        bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        base_img = Image.alpha_composite(bg, rgba).convert("RGB")
+    elif base_img.mode != "RGB":
+        base_img = base_img.convert("RGB")
+
     W, H = base_img.size
     target_w = 1000
     scale = min(target_w / W, 1200 / H)
-    new_w, new_h = max(300, int(W * scale)), max(300, int(H * scale))
-    canvas = base_img.resize((new_w, new_h), Image.Resampling.LANCZOS).convert("RGB")
+    if min(W * scale, H * scale) < 300:
+        upscale = 300 / min(W * scale, H * scale)
+        if max(W * scale, H * scale) * upscale <= 1600:
+            scale *= upscale
+    new_w = max(1, int(round(W * scale)))
+    new_h = max(1, int(round(H * scale)))
+    canvas = base_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     canvas_w, canvas_h = canvas.size
     draw = ImageDraw.Draw(canvas)
-    font_size = max(28, int(canvas_w * 0.048))
-    font = get_font("russo", font_size)
 
     top = clean_canvas_text(top_text.strip())
     bot = clean_canvas_text(bottom_text.strip())
@@ -142,15 +166,25 @@ def render_photo_overlay(base_img, top_text="", bottom_text="", single_text=""):
         t_cand, b_cand = parse_caption_parts(single)
         if b_cand:
             top, bot = clean_canvas_text(t_cand), clean_canvas_text(b_cand)
+        elif t_cand and single.lower().startswith("сверху"):
+            top = clean_canvas_text(t_cand)
         else:
             bot = single
 
-    stroke_w = max(4, int(font_size * 0.09))
+    font_size = max(24, int(canvas_w * 0.048))
+    # Адаптация размера шрифта при длинном тексте или низком разрешении
+    total_words = len(top.split()) + len(bot.split())
+    if total_words > 12 or (canvas_h < 500 and total_words > 6):
+        font_size = max(20, int(font_size * 0.8))
+
+    font = get_font("russo", font_size)
+    stroke_w = max(4, int(round(font_size * 0.10)))
     line_h = int(font_size * 1.35)
 
+    y_top_end = 0
     if top:
         lines = wrap_text(draw, top, font, canvas_w - 80)
-        y_start = max(24, int(canvas_h * 0.08))
+        y_start = max(20, int(canvas_h * 0.08))
         for i, l in enumerate(lines):
             clean_l = clean_canvas_text(l)
             bb = draw.textbbox((0, 0), clean_l, font=font, stroke_width=stroke_w)
@@ -158,11 +192,15 @@ def render_photo_overlay(base_img, top_text="", bottom_text="", single_text=""):
             lx = (canvas_w - lw) // 2 - bb[0]
             ly = y_start + i * line_h
             draw_outlined_text(draw, (lx, ly), clean_l, font=font, fill="#FFFFFF", stroke_fill="#000000", stroke_width=stroke_w)
+        y_top_end = y_start + len(lines) * line_h
 
     if bot:
         lines = wrap_text(draw, bot, font, canvas_w - 80)
         total_text_h = len(lines) * line_h
-        y_start = max(canvas_h - total_text_h - int(canvas_h * 0.10), int(canvas_h * 0.45))
+        bottom_pad = max(20, int(canvas_h * 0.08))
+        y_start = canvas_h - total_text_h - bottom_pad
+        min_y = (y_top_end + 15) if top else 20
+        y_start = max(min_y, y_start)
         for i, l in enumerate(lines):
             clean_l = clean_canvas_text(l)
             bb = draw.textbbox((0, 0), clean_l, font=font, stroke_width=stroke_w)
@@ -200,10 +238,16 @@ def edit_photo_with_caption(photo_path, user_instruction, style="auto"):
         elif "шапка" in instr_lower or "белая карточка" in instr_lower:
             style = "top_card"
         else:
-            # По умолчанию: современный оверлей на фото с плашкой и крупным читаемым текстом
+            # По умолчанию: современный оверлей на фото с крупным читаемым текстом без фона
             style = "overlay"
 
-    img = Image.open(photo_path).convert("RGB")
+    raw_img = Image.open(photo_path)
+    if raw_img.mode in ("RGBA", "LA") or (raw_img.mode == "P" and "transparency" in raw_img.info):
+        rgba = raw_img.convert("RGBA")
+        bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        img = Image.alpha_composite(bg, rgba).convert("RGB")
+    else:
+        img = raw_img.convert("RGB")
 
     if style == "demotivator":
         title = top_text or caption_text
@@ -220,7 +264,14 @@ def edit_photo_with_caption(photo_path, user_instruction, style="auto"):
             canvas = render_caption_meme(img, text_top=caption_text.capitalize())
     else:
         # Default: Стильный оверлей прямо на фото, гарантированно видимый в Telegram
-        canvas = render_photo_overlay(img, top_text=top_text, bottom_text=bottom_text, single_text=caption_text)
+        # Если текст не разбит на части и не указано 'сверху', оверлей отрисовывает как нижний субтитр
+        if not bottom_text and top_text == caption_text and not caption_text.lower().startswith("сверху"):
+            top_pass = ""
+            bot_pass = ""
+        else:
+            top_pass = top_text
+            bot_pass = bottom_text
+        canvas = render_photo_overlay(img, top_text=top_pass, bottom_text=bot_pass, single_text=caption_text)
 
     # Сохраняем результат
     ts = int(time.time())
