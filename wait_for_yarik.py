@@ -56,9 +56,8 @@ def get_handled_ids():
             pass
     return ids
 
-def add_handled_id(msg_id, chat_id=None):
+def add_handled_id(msg_id):
     try:
-        mark_message_handled(msg_id, chat_id)
         with open(HANDLED_MSGS_FILE, "a") as f:
             f.write(f"{msg_id}\n")
     except Exception:
@@ -287,6 +286,7 @@ async def main():
 
                     if not is_mention:
                         add_handled_id(m.id)
+                        mark_message_handled(m.id, yarik_chat_id)
                         if is_from_yarik:
                             save_message(
                                 chat_id=yarik_chat_id,
@@ -402,6 +402,7 @@ async def main():
 
                     if not is_mention:
                         add_handled_id(msg.id)
+                        mark_message_handled(msg.id, yarik_chat_id)
                         if is_from_yarik:
                             save_message(
                                 chat_id=yarik_chat_id,
@@ -535,7 +536,7 @@ async def main():
             await asyncio.wait_for(exit_event.wait(), timeout=args.timeout)
             print(json.dumps(result_box.get("data", {}), ensure_ascii=False))
         except asyncio.TimeoutError:
-            print(json.dumps({"status": "timeout"}))
+            print(json.dumps({"status": "timeout", "latest_id": after_id}))
 
     finally:
         bot_task.cancel()

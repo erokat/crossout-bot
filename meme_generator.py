@@ -454,7 +454,14 @@ def gen_enemy_ptur_vs_ally_ptur():
     draw_text_with_outline(draw, (480, 620), "• Тиммейт в войсе в шоке", get_font(20), fill="#38bdf8")
     draw_text_with_outline(draw, (480, 700), "Статус: Помог врагам победить 🤡", get_font(22), fill="#38bdf8")
 
-    draw_text_with_outline(draw, (70, 830), "«Вражеский ПТУР целится в тебя, а союзный — в твою нервную систему»", get_font(21), fill="#cbd5e1")
+    quotes = [
+        "«Вражеский ПТУР целится в тебя, а союзный — в твою нервную систему»",
+        "«Враг на ПТУРе выигрывает катку, союзник на ПТУРе ищет кнопку выстрела»",
+        "«Вражеский ПТУР летит как хищник, союзный — как слепой голубь»",
+        "«Закон Пустошей: союзная ракета всегда найдет твой собственный затылок»"
+    ]
+    chosen_quote = random.choice(quotes)
+    draw_text_with_outline(draw, (60, 830), chosen_quote, get_font(21), fill="#cbd5e1")
     return img, "enemy_ptur_vs_ally_ptur", headline
 
 def gen_ptur_sniper():
@@ -699,6 +706,7 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
 
     # 1. Если тема точно соответствует целевому генератору (Вереск vs ПТУР, Газген, Скорпион и т.д.) — генерируем точный тематический мем!
     if has_targeted:
+        selected_meme = None
         for gen_func in candidates:
             try:
                 img, tpl_name, headline = gen_func()
@@ -707,8 +715,15 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
 
             h = hashlib.sha256(headline.encode("utf-8") + img.tobytes()).hexdigest()
             if not allow_repeat and is_meme_already_sent(meme_hash=h, headline=headline):
+                if selected_meme is None:
+                    selected_meme = (img, tpl_name, headline, h)
                 continue
 
+            selected_meme = (img, tpl_name, headline, h)
+            break
+
+        if selected_meme:
+            img, tpl_name, headline, h = selected_meme
             out_name = f"meme_{int(time.time())}_{random.randint(1000, 9999)}.png"
             out_path = os.path.join(MEDIA_DIR, out_name)
             img.save(out_path, "PNG")

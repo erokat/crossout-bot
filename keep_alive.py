@@ -723,18 +723,19 @@ def handle_owner_message(msg_data):
             ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             ack_msg_id = extract_sent_msg_id(ack_res.stdout)
 
-            res_text, res_media = execute_autonomous_task(orig_task, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai, sender_key="owner", retry_context=pending)
-            cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
-            if res_media and os.path.exists(res_media):
-                cmd_owner.extend(["--photo", res_media, "--text", res_text])
-            else:
-                cmd_owner.extend(["--text", res_text])
-            subprocess.run(cmd_owner)
-
-            del_ids = [str(x) for x in [prop_msg_id, ack_msg_id] if x]
-            if del_ids:
-                del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--delete"] + del_ids
-                subprocess.run(del_cmd)
+            try:
+                res_text, res_media = execute_autonomous_task(orig_task, sender_name="Миша", photo_path=photo, ask_ai_fn=ask_ai, sender_key="owner", retry_context=pending)
+                cmd_owner = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner"]
+                if res_media and os.path.exists(res_media):
+                    cmd_owner.extend(["--photo", res_media, "--text", res_text])
+                else:
+                    cmd_owner.extend(["--text", res_text])
+                subprocess.run(cmd_owner)
+            finally:
+                del_ids = [str(x) for x in [prop_msg_id, ack_msg_id] if x]
+                if del_ids:
+                    del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--delete"] + del_ids
+                    subprocess.run(del_cmd)
             return
 
         elif is_reject:
@@ -767,7 +768,11 @@ def handle_owner_message(msg_data):
         goal_arg = re.sub(r"(?i)^[/!]?goal\s*|^бот\s+цель\s*", "", text).strip()
         if goal_arg:
             reply = f"🎯 **Новая цель принята:** «{goal_arg}»\nГотов реализовать и доделать модуль генерации! Напиши «делай» или «доделай модуль» 👍"
-            set_pending_proposal("owner", goal_arg)
+            cmd_goal = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply]
+            proc = subprocess.run(cmd_goal, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            prop_id = extract_sent_msg_id(proc.stdout)
+            set_pending_proposal("owner", goal_arg, proposal_msg_id=prop_id)
+            return
         else:
             reply = (
                 "🎯 **Текущие цели и задачи бота:**\n\n"
@@ -776,8 +781,8 @@ def handle_owner_message(msg_data):
                 "3. 💬 **Общение & Учеба:** Живой чат с корешами и решение задач без занудства.\n\n"
                 "Все модули активны и готовы к бою! 🔥"
             )
-        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply])
-        return
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "owner", "--text", reply])
+            return
 
     meme_words = ["мем", "мэм", "пикч", "картинк", "гиф", "демотиватор", "мемасик", "мемчик", "мемы", "мэмы"]
     is_meme_theme_req = any(w in t_lower for w in ["выбирай сам", "сам придумай", "на твой вкус", "на свой вкус", "на свой выбор", "на твое усмотрение"])
@@ -1147,6 +1152,12 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     # 0.0. Проверка ответа на предложение создать дополнение
     sender_key = "owner" if is_owner_sender else str(sender_id or YARIK_CHAT_ID)
     pending = get_pending_proposal(sender_key)
+    if not pending:
+        if is_owner_sender:
+            pending = get_pending_proposal("yarik") or get_pending_proposal(str(YARIK_CHAT_ID))
+        else:
+            pending = get_pending_proposal("owner")
+
     if pending and text:
         t_low = text.lower().strip()
         is_confirm = any(re.search(p, t_low) for p in [
@@ -1163,6 +1174,8 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         ])
         if is_confirm:
             clear_pending_proposal(sender_key)
+            clear_pending_proposal("yarik")
+            clear_pending_proposal("owner")
             orig_task = pending.get("task_text", "")
             prop_msg_id = pending.get("proposal_msg_id")
 
@@ -1178,28 +1191,31 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
 
             target_name = "Миша" if is_owner_sender else "Ярик"
             photo_file = msg_data.get("photo")
-            res_text, res_media = execute_autonomous_task(orig_task, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai, sender_key=sender_key, retry_context=pending)
-            send_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "yarik",
-                "--no-copy",
-                "--reply-to", str(msg_id)
-            ]
-            if res_media and os.path.exists(res_media):
-                send_cmd.extend(["--photo", res_media, "--text", res_text])
-            else:
-                send_cmd.extend(["--text", res_text])
-            subprocess.run(send_cmd)
-
-            del_ids = [str(x) for x in [prop_msg_id, ack_msg_id] if x]
-            if del_ids:
-                del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--delete"] + del_ids
-                subprocess.run(del_cmd)
+            try:
+                res_text, res_media = execute_autonomous_task(orig_task, sender_name=target_name, photo_path=photo_file, ask_ai_fn=ask_ai, sender_key=sender_key, retry_context=pending)
+                send_cmd = [
+                    sys.executable,
+                    os.path.join(BASE_DIR, "send.py"),
+                    "--to", "yarik",
+                    "--no-copy",
+                    "--reply-to", str(msg_id)
+                ]
+                if res_media and os.path.exists(res_media):
+                    send_cmd.extend(["--photo", res_media, "--text", res_text])
+                else:
+                    send_cmd.extend(["--text", res_text])
+                subprocess.run(send_cmd)
+            finally:
+                del_ids = [str(x) for x in [prop_msg_id, ack_msg_id] if x]
+                if del_ids:
+                    del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--delete"] + del_ids
+                    subprocess.run(del_cmd)
             return
 
         elif is_reject:
             clear_pending_proposal(sender_key)
+            clear_pending_proposal("yarik")
+            clear_pending_proposal("owner")
             prop_msg_id = pending.get("proposal_msg_id")
             if prop_msg_id:
                 del_cmd = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--delete", str(prop_msg_id)]
@@ -1231,7 +1247,11 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         target_name = "Миша" if is_owner_sender else "Ярик"
         if goal_arg:
             reply = f"🎯 **Новая цель принята ({target_name}):** «{goal_arg}»\nГотов реализовать и доделать модуль генерации! Напиши «делай» или «доделай модуль» 👍"
-            set_pending_proposal(sender_key, goal_arg)
+            cmd_goal = [sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)]
+            proc = subprocess.run(cmd_goal, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            prop_id = extract_sent_msg_id(proc.stdout)
+            set_pending_proposal(sender_key, goal_arg, proposal_msg_id=prop_id)
+            return
         else:
             reply = (
                 f"🎯 **Текущие цели и задачи бота ({target_name}):**\n\n"
@@ -1240,8 +1260,8 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 "3. 💬 **Общение & Учеба:** Живой чат с корешами и решение задач без занудства.\n\n"
                 "Все модули активны и готовы к бою! 🔥"
             )
-        subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)])
-        return
+            subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", "yarik", "--text", reply, "--reply-to", str(msg_id)])
+            return
 
     # 0. Специальный пасхалочный триггер от Ярика
     if re.search(r"х+у+е+с+о+с+", t_lower):
@@ -1818,24 +1838,28 @@ def main():
         last_processed_id = int(stored_last_id)
 
     log_event("[ORCHESTRATOR] Initializing latest message ID from chat on startup...")
-    try:
-        cmd_latest = [sys.executable, os.path.join(BASE_DIR, "wait_for_yarik.py"), "--get-latest-id"]
-        res_latest = subprocess.run(cmd_latest, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
-        for line in res_latest.stdout.splitlines():
-            try:
-                d = json.loads(line.strip())
-                if "latest_id" in d and d["latest_id"] > 0:
-                    latest_id = int(d["latest_id"])
-                    if last_processed_id is None or latest_id > last_processed_id:
-                        last_processed_id = latest_id
-                    mark_message_handled(last_processed_id)
-                    set_kv("last_processed_id", str(last_processed_id))
-                    log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id}. Ignoring prior messages.")
-                    break
-            except Exception:
-                continue
-    except Exception as e:
-        log_event(f"[ORCHESTRATOR WARNING] Could not fetch latest message ID on startup: {e}")
+    for attempt in range(5):
+        try:
+            cmd_latest = [sys.executable, os.path.join(BASE_DIR, "wait_for_yarik.py"), "--get-latest-id"]
+            res_latest = subprocess.run(cmd_latest, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+            for line in res_latest.stdout.splitlines():
+                try:
+                    d = json.loads(line.strip())
+                    if "latest_id" in d and d["latest_id"] > 0:
+                        latest_id = int(d["latest_id"])
+                        if last_processed_id is None or latest_id > last_processed_id:
+                            last_processed_id = latest_id
+                        mark_message_handled(last_processed_id)
+                        set_kv("last_processed_id", str(last_processed_id))
+                        log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id}. Ignoring prior messages.")
+                        break
+                except Exception:
+                    continue
+            if last_processed_id is not None:
+                break
+        except Exception as e:
+            log_event(f"[ORCHESTRATOR WARNING] Could not fetch latest message ID on startup (attempt {attempt+1}): {e}")
+            time.sleep(2)
 
     while True:
         try:
@@ -1862,6 +1886,11 @@ def main():
                         continue
 
             if not data or data.get("status") != "new_messages":
+                if data and "latest_id" in data and data["latest_id"]:
+                    lid = int(data["latest_id"])
+                    if last_processed_id is None or lid > last_processed_id:
+                        last_processed_id = lid
+                        set_kv("last_processed_id", str(lid))
                 time.sleep(1)
                 continue
 

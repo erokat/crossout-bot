@@ -183,16 +183,18 @@ def mark_message_handled(msg_id, chat_id=None):
     except Exception:
         pass
 
-def is_meme_already_sent(meme_hash=None, headline=None):
+def is_meme_already_sent(meme_hash=None, headline=None, max_age_seconds=7200):
     if not meme_hash and not headline:
         return False
     with get_db() as conn:
+        now = time.time()
+        cutoff = now - max_age_seconds if max_age_seconds else 0
         if meme_hash:
-            cur = conn.execute("SELECT 1 FROM sent_memes WHERE meme_hash = ?", (meme_hash,))
+            cur = conn.execute("SELECT 1 FROM sent_memes WHERE meme_hash = ? AND created_at > ?", (meme_hash, cutoff))
             if cur.fetchone():
                 return True
         if headline:
-            cur = conn.execute("SELECT 1 FROM sent_memes WHERE LOWER(TRIM(headline)) = LOWER(TRIM(?))", (headline,))
+            cur = conn.execute("SELECT 1 FROM sent_memes WHERE LOWER(TRIM(headline)) = LOWER(TRIM(?)) AND created_at > ?", (headline, cutoff))
             if cur.fetchone():
                 return True
     return False
