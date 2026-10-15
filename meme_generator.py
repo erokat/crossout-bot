@@ -251,6 +251,50 @@ def gen_rw_five_pebbles():
     draw_text_with_outline(draw, (150, 810), "«Священный путь вознесения полон боли»", get_font(30), fill="#E0E7FF")
     return img, "rw_five_pebbles", headline
 
+def gen_rw_echo():
+    echo_asset = os.path.join(MEDIA_DIR, "echo_meme_original.jpg")
+    width, height = 800, 960
+    if os.path.exists(echo_asset):
+        raw = Image.open(echo_asset).convert("RGB").resize((800, 800), Image.Resampling.LANCZOS)
+    else:
+        raw = Image.new("RGB", (800, 800), color=(15, 20, 30))
+
+    canvas = Image.new("RGB", (width, height), (255, 255, 255))
+    canvas.paste(raw, (0, 160))
+    draw = ImageDraw.Draw(canvas)
+    headline = "Rain World: Экзистенциальный кризис Отголоска за 10 баксов"
+
+    font_title = get_font(34)
+    title_text = 'И на "..." я потратил 10 баксов?'
+    bb = draw.textbbox((0, 0), title_text, font=font_title)
+    tw = bb[2] - bb[0]
+    draw.text(((width - tw) // 2, 35), title_text, font=font_title, fill="#111111")
+
+    font_sub = get_font(22)
+    sub_text = "На что я потратил 10 долларов в Rain World..."
+    bb2 = draw.textbbox((0, 0), sub_text, font=font_sub)
+    tw2 = bb2[2] - bb2[0]
+    draw.text(((width - tw2) // 2, 95), sub_text, font=font_sub, fill="#666666")
+
+    # Speech bubble for Echo saying "..."
+    bw, bh = 140, 70
+    bx0 = 420
+    by0 = 160 + 200
+    bx1 = bx0 + bw
+    by1 = by0 + bh
+
+    draw.rounded_rectangle([bx0, by0, bx1, by1], radius=18, fill="#FFFFFF", outline="#000000", width=4)
+    draw.polygon([(bx0 + 20, by1), (bx0 + 50, by1), (bx0 - 15, by1 + 35)], fill="#FFFFFF", outline="#000000")
+    draw.line([(bx0 + 22, by1), (bx0 + 48, by1)], fill="#FFFFFF", width=5)
+
+    font_dots = get_font(42)
+    bb_dots = draw.textbbox((0, 0), "...", font=font_dots)
+    dw = bb_dots[2] - bb_dots[0]
+    dh = bb_dots[3] - bb_dots[1]
+    draw.text((bx0 + (bw - dw) // 2, by0 + (bh - dh) // 2 - 10), "...", font=font_dots, fill="#000000")
+
+    return canvas, "rw_echo", headline
+
 # --- DYNAMIC THEME GENERATOR ---
 
 def gen_dynamic_meme(theme=""):
@@ -621,6 +665,7 @@ RW_GENERATORS = [
     ("rw_artificer", gen_rw_artificer_chaos),
     ("rw_vulture", gen_rw_vulture_mask),
     ("rw_pebbles", gen_rw_five_pebbles),
+    ("rw_echo", gen_rw_echo),
 ]
 
 CROSSOVER_GENERATORS = [
@@ -655,7 +700,7 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
             return last["file_path"]
 
     is_crossout_topic = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "ховер", "автосборк", "птур", "скорп", "мамонт", "жнец", "вереск", "кларнет"])
-    is_rw_topic = any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
+    is_rw_topic = any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw", "отголос", "эхо"])
     is_crossover_topic = is_crossout_topic and is_rw_topic
     is_ptur_vs = any(w in theme_lower for w in ["птур", "ракета"]) and any(w in theme_lower for w in ["вражеск", "союзн", "враг", "vs", "сравнен", "тиммейт", "свой", "чужой"])
     is_heather_topic = ("вереск" in theme_lower) or (("птур" in theme_lower or "ракета" in theme_lower) and any(w in theme_lower for w in ["сравнен", "vs", "геймплей"]))
@@ -665,11 +710,13 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         or is_rw_topic
         or is_ptur_vs
         or is_heather_topic
-        or any(w in theme_lower for w in ["автосборк", "газген", "взрыв", "птур", "ракета", "скорп", "мамонт", "жнец", "ховер", "клоун", "доге"])
+        or any(w in theme_lower for w in ["автосборк", "газген", "взрыв", "птур", "ракета", "скорп", "мамонт", "жнец", "ховер", "клоун", "доге", "отголос", "эхо"])
     )
 
     candidates = []
-    if is_crossover_topic:
+    if any(w in theme_lower for w in ["отголос", "эхо", "echo"]):
+        candidates = [gen_rw_echo]
+    elif is_crossover_topic:
         cands = [func for _, func in CROSSOVER_GENERATORS]
         random.shuffle(cands)
         candidates = cands

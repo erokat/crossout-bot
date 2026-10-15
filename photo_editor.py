@@ -51,6 +51,18 @@ def is_photo_editor_request(text, has_photo=False):
         if not any(w in t for w in ["надпись", "подпись", "текст", "на фото"]):
             return False
 
+    # СТРОЖАЙШЕ: Если фото НЕТ, и пользователь просит СГЕНЕРИРОВАТЬ, НАРИСОВАТЬ или СОЗДАТЬ картинку/мем:
+    # это запрос на ГЕНЕРАЦИЮ (Meme Generator / AI), а НЕ редактирование существующего фото!
+    if not has_photo:
+        generation_verbs = [
+            "сгенерируй", "создай", "нарисуй", "придумай", "склепай", "запили", "сделай мем",
+            "найди", "скинь", "поищи", "покажи", "скачай", "в интернете", "из интернета"
+        ]
+        if any(w in t for w in generation_verbs):
+            return False
+        if any(w in t for w in ["картинку", "картинка", "пикчу", "мем", "мемчик", "мемасик"]):
+            return False
+
     explicit_triggers = [
         "добавь надпись", "сделай надпись", "напиши на фото", "напиши на картинке",
         "на картинке напиши", "на фото напиши", "добавь текст", "прикрепи текст",
@@ -66,9 +78,6 @@ def is_photo_editor_request(text, has_photo=False):
         "спич баббл", "спичбаббл", "облачко с текстом", "облако текста", "пусть скажет"
     ]
     if any(tr in t for tr in explicit_triggers):
-        # If user asks to search/find an image in the internet without an attached photo, it's an image search request
-        if not has_photo and any(w in t for w in ["найди", "скинь", "поищи", "покажи", "скачай", "в интернете", "из интернета"]):
-            return False
         return True
 
     # If photo is already attached/replied and user asks to edit something

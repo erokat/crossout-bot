@@ -1869,14 +1869,14 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             meme_path = generate_crossout_meme(theme=text, allow_repeat=is_repeat, recipient=recipient_target)
             num_suffix = f" (#{idx + 1})" if count > 1 else ""
 
-            is_rw = any(w in t_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
+            is_rw = any(w in t_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw", "отголос", "эхо"])
             is_xo = any(w in t_lower for w in ["кросс", "крос", "crossout", "газген", "ховер", "автосборк", "птур", "скорп", "мамонт", "жнец"])
             def get_smart_meme_caption(recipient_role, user_text, num_suffix=""):
                 t_l = (user_text or "").lower()
                 is_2018_req = "2018" in t_l
                 is_2019_req = "2019" in t_l
                 is_mahoraga_req = any(w in t_l for w in ["махораг", "адаптир", "дхарм"])
-                is_rw_req = any(w in t_l for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
+                is_rw_req = any(w in t_l for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw", "отголос", "эхо"])
                 
                 if recipient_role == "owner":
                     if is_2018_req:
