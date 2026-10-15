@@ -448,7 +448,8 @@ def render_caption_meme(base_img, text_top, text_bottom=None, sound_text=None):
     for l in lines:
         bb = draw.textbbox((0, 0), l, font=font_header)
         lw = bb[2] - bb[0]
-        draw.text(((W - lw) // 2, y_text), l, font=font_header, fill=(15, 15, 15))
+        lx = (canvas_w - lw) // 2 - bb[0]
+        draw.text((lx, y_text), l, font=font_header, fill=(15, 15, 15))
         y_text += line_h
 
     # Draw sound text if present
@@ -457,17 +458,19 @@ def render_caption_meme(base_img, text_top, text_bottom=None, sound_text=None):
         for sl in sound_lines:
             sb = draw.textbbox((0, 0), sl, font=font_sound)
             sw = sb[2] - sb[0]
-            draw_outlined_text(draw, ((W - sw) // 2, y_sound), sl, font=font_sound, fill="#FFD700", stroke_fill="#000000", stroke_width=4)
+            sx = (canvas_w - sw) // 2 - sb[0]
+            draw_outlined_text(draw, (sx, y_sound), sl, font=font_sound, fill="#FFD700", stroke_fill="#000000", stroke_width=4)
             y_sound += 38
 
     # Draw bottom punchline if present
     if text_bottom:
-        bot_lines = wrap_text(draw, text_bottom, font_bottom, W - 80)
+        bot_lines = wrap_text(draw, text_bottom, font_bottom, canvas_w - 80)
         y_bot = canvas_h - (len(bot_lines) * 55 + 40)
         for bl in bot_lines:
             bb = draw.textbbox((0, 0), bl, font=font_bottom)
             bw = bb[2] - bb[0]
-            draw_outlined_text(draw, ((W - bw) // 2, y_bot), bl, font=font_bottom, fill="#FFFFFF", stroke_fill="#000000", stroke_width=6)
+            bx = (canvas_w - bw) // 2 - bb[0]
+            draw_outlined_text(draw, (bx, y_bot), bl, font=font_bottom, fill="#FFFFFF", stroke_fill="#000000", stroke_width=6)
             y_bot += 55
 
     return canvas
