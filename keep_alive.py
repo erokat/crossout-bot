@@ -1102,7 +1102,6 @@ def handle_owner_message(msg_data):
         response = ask_ai(prompt, photo_path=photo)
 
     if not response or any(bad in response.lower() for bad in ["принял, шеф", "принял шеф", "задача в работе", "все службы на связи", "шеф", "босс"]):
-        import random
         response = random.choice(MISHA_CHITCHAT_POOL)
 
     response = re.sub(r"\bшеф[а-я]*\b", "Миша", response, flags=re.I).strip()
@@ -1723,7 +1722,6 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         return
 
     # Чистый диалог / приветствия
-    import random
     if is_owner_sender:
         prompt = (
             f"Тебе написал твой друг и создатель МИША: «{text}». "
