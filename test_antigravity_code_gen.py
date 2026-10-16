@@ -101,6 +101,35 @@ class TestAntigravityCodeGen(unittest.TestCase):
             mock_gen.assert_called()
             self.assertEqual(reply, "Result from gemini-3.8-flash-medium")
 
+    def test_is_visual_art_request_classification(self):
+        self.assertTrue(dynamic_agent.is_visual_art_request("сгенерируй фото там где на коробку наступил каблук"))
+        self.assertTrue(dynamic_agent.is_visual_art_request("нарисуй персонажа слизнекота вотчера"))
+        self.assertTrue(dynamic_agent.is_visual_art_request("сделай арт rain world с дымовыми сферами"))
+        self.assertFalse(dynamic_agent.is_visual_art_request("сделай мем с птуром и вереском"))
+        self.assertFalse(dynamic_agent.is_visual_art_request("напиши код парсера погоды"))
+
+    def test_generate_image_via_antigravity_invokes_cli(self):
+        with patch("subprocess.run") as mock_run, \
+             patch("os.path.exists", return_value=True), \
+             patch("os.path.isfile", return_value=True), \
+             patch("os.path.getsize", return_value=50000):
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.stdout = "Created art: /tmp/fake_art_123.jpg"
+            mock_proc.stderr = ""
+            mock_run.return_value = mock_proc
+
+            img_path = dynamic_agent.generate_image_via_antigravity("Rain World Watcher slugcat art")
+            self.assertEqual(img_path, "/tmp/fake_art_123.jpg")
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            self.assertIn("--model", cmd)
+            self.assertIn("gemini-3.8-flash-medium", cmd)
+            self.assertIn("--dangerously-skip-permissions", cmd)
+            prompt_called = cmd[cmd.index("-p") + 1]
+            self.assertIn("image-generator", prompt_called)
+
 
 if __name__ == "__main__":
     unittest.main()
+

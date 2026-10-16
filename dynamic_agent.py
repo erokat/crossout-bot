@@ -281,6 +281,32 @@ def is_meme_or_media_request(text):
     ]
     return any(w in t for w in media_words)
 
+def is_visual_art_request(text):
+    if not text:
+        return False
+    t = text.lower().strip()
+    if any(w in t for w in ["код", "скрипт", "модуль", "навык", "скилл", "погода", "курс", "калькулятор", "посчитай"]):
+        return False
+    if any(w in t for w in ["мем", "мэм", "мемасик", "мемчик", "демотиватор"]):
+        return False
+    if any(w in t for w in ["видео", "клип", "песн", "трек", "музык", "симфони", "гиф"]):
+        return False
+    art_markers = [
+        "нарисуй", "нарисовать",
+        "сгенерируй фото", "сгенерируй изображение", "сгенерируй картинку", "сгенерируй арт",
+        "сгенерируй персонаж", "сгенерируй концепт",
+        "сделай фото", "сделай картинку", "сделай арт", "сделай концепт", "сделай рисунок",
+        "создай фото", "создай картинку", "создай арт", "создай иллюстраци", "создай рисунок",
+        "покажи как выглядит", "покажи арт", "покажи фото",
+        "иллюстраци", "концепт-арт", "концепт арт",
+        "каблук", "коробк"
+    ]
+    if any(m in t for m in art_markers):
+        return True
+    if re.match(r"^(?:бот[,\s]*)?(?:фото|картинк[ау]|арт|рисунок)\s+", t):
+        return True
+    return False
+
 def is_autonomous_task(text, has_media=False):
     """
     Определяет, требует ли запрос динамического создания нового программного модуля в skills/,
@@ -638,6 +664,75 @@ def generate_code_via_antigravity(prompt, timeout=120):
         return None
 
 
+def generate_image_via_antigravity(prompt, timeout=120):
+    """
+    Directly invokes Antigravity CLI's native image-generator to produce
+    top-tier Google Imagen 3 photorealistic and concept art images without watermarks or third-party APIs.
+    """
+    agy_bin = shutil.which("agy") or shutil.which("antigravity")
+    if not agy_bin:
+        for candidate in ["/usr/local/bin/agy", "/root/.local/bin/agy", "/data/data/com.termux/files/usr/bin/agy"]:
+            if os.path.exists(candidate):
+                agy_bin = candidate
+                break
+    if not agy_bin:
+        agy_bin = "agy"
+
+    full_prompt = (
+        f"Generate a high-quality illustration or concept art for the following user request: \"{prompt}\". "
+        "You MUST invoke the `image-generator` subagent to generate this image in high resolution without watermarks. "
+        "When done, output the exact saved absolute image path."
+    )
+
+    cmd = [
+        agy_bin,
+        "--model", "gemini-3.8-flash-medium",
+        "--dangerously-skip-permissions",
+        "-p", full_prompt
+    ]
+    env = dict(os.environ)
+    env["CI"] = "1"
+    env["AGY_AUTO_UPDATE"] = "0"
+    env["ANTIGRAVITY_SKIP_UPDATE_CHECK"] = "1"
+    env["DEBIAN_FRONTEND"] = "noninteractive"
+    env["GOMEMLIMIT"] = "350MiB"
+    env["GOGC"] = "100"
+
+    home_candidates = [
+        os.path.expanduser("~"),
+        "/root",
+        "/app",
+        "/data/data/com.termux/files/home"
+    ]
+    for c in home_candidates:
+        if os.path.exists(os.path.join(c, ".gemini", "antigravity-cli", "antigravity-oauth-token")):
+            env["HOME"] = c
+            break
+
+    try:
+        with AGY_SEMAPHORE:
+            res = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+                cwd=tempfile.gettempdir(),
+                env=env
+            )
+        if res.returncode == 0 and res.stdout.strip():
+            out_text = res.stdout.strip()
+            paths = re.findall(r'(/[\w\.\-]+(?:/[\w\.\-]+)*\.(?:jpg|jpeg|png))', out_text)
+            for p in reversed(paths):
+                if os.path.exists(p) and os.path.isfile(p) and os.path.getsize(p) > 2000:
+                    return p
+        return None
+    except Exception as e:
+        print(f"[AGY IMAGE GEN EXCEPTION] {e}")
+        return None
+
+
 def is_test_mock(fn):
     if fn is None:
         return False
@@ -849,6 +944,22 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     if not ask_ai_fn and not has_agy:
         return f"{sender_name}, модуль AI временно недоступен для генерации нового кода.", None
 
+    # 1.5. Прямая генерация высококачественного концепт-арта/иллюстрации/фото через Antigravity Imagen 3
+    if not photo_path and is_visual_art_request(task_text) and not is_test_mock(ask_ai_fn):
+        print(f"[DYNAMIC AGENT] Attempting native Antigravity CLI image generation for: {task_text!r}...")
+        agy_img = generate_image_via_antigravity(task_text, timeout=120)
+        if agy_img and os.path.exists(agy_img) and os.path.getsize(agy_img) > 2000:
+            dest_file = os.path.join(MEDIA_DIR, f"art_{int(time.time())}_{os.path.basename(agy_img)}")
+            try:
+                shutil.copy2(agy_img, dest_file)
+            except Exception:
+                dest_file = agy_img
+            caption = f"Лови готовый арт, {sender_name}! 🎨✨"
+            if any(w in task_text.lower() for w in ["фото", "фотк"]):
+                caption = f"Лови сгенерированное фото, {sender_name}! 📸✨"
+            return caption, dest_file
+        print(f"[DYNAMIC AGENT] Native image generation returned None/fallback. Proceeding to dynamic code synthesis...")
+
     ffmpeg_bin = get_ffmpeg_binary()
 
     file_context = ""
@@ -905,14 +1016,19 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         "   - Для работы с сетью и внешними API используй `requests` или `urllib.request` с таймаутом.\n"
         "4. РАБОЧИЕ ДИРЕКТОРИИ И ПРАВИЛА ГЕНЕРАЦИИ / ОБРАБОТКИ МЕДИА:\n"
         "   - `./media/` — сохранение любых сгенерированных медиафайлов (картинки, фото, графики, qr, видео, аудио).\n"
-        "   - ДЛЯ ИГР, ИГРОВЫХ ПЕРСОНАЖЕЙ, ЛОКАЦИЙ И СКРИНШОТОВ (Rain World, слизнекоты, Minecraft, CS, Dota, Undertale, Crossout и др.):\n"
-        "     * СТРОЖАЙШИЙ ЗАПРЕТ: КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать слепую генерацию нейросетей (Pollinations/SD)! Нейросети не знают конкретных игровых существ (например слизнекота Вотчера) и рисуют уродливых чучел с водяными знаками.\n"
-        "     * ДЛЯ ИГР ОБЯЗАТЕЛЬНО ИСПОЛЬЗУЙ ПОИСК РЕАЛЬНЫХ СКРИНШОТОВ И АССЕТОВ:\n"
+        "   - ЗОЛОТОЕ ПРАВИЛО СОЗДАНИЯ СЦЕН: СНАЧАЛА ИССЛЕДОВАНИЕ И ПОИСК РЕФЕРЕНСОВ, ПОТОМ СБОРКА!\n"
+        "     КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО слепо отправлять запрос на персонажа или игру в Pollinations одной строкой!\n"
+        "     Нейросети не знают конкретных игровых существ (например, Слизнекота Вотчера из Rain World) и вместо этого генерируют уродливых чучел с водяными знаками.\n"
+        "     Скрипт ДОЛЖЕН работать как профессиональный художник по 3 шагам:\n"
+        "     ШАГ 1 (Поиск фона): найди реальный скриншот локации через:\n"
         "       `from media_finder import find_and_download_image`\n"
-        "       Ищи реальные скриншоты локаций, официальные спрайты и арты (например: `find_and_download_image('rain world desert location screenshot')` и `find_and_download_image('rain world the watcher slugcat')`), затем через Pillow делай аккуратный монтаж/коллаж!\n"
-        "   - ДЛЯ ОБЩИХ ФОТОРЕАЛИСТИЧНЫХ КАРТИНОК И СЦЕН (котики, закаты, природа, люди, не привязанные к играм):\n"
-        "     * СТРОЖАЙШИЙ ЗАПРЕТ: КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО рисовать людей, обувь, предметы и сцены полигонами (draw.polygon)! Это выглядит как чертёж.\n"
-        "     * Можно использовать Pollinations API, НО ОБЯЗАТЕЛЬНО удаляй водяной знак pollinations.ai (обрезая нижние 40px):\n"
+        "       `bg_path, _ = find_and_download_image('<тема/игра> <локация> screenshot')`\n"
+        "     ШАГ 2 (Поиск персонажа/объекта): найди реальный арт/спрайт существа через:\n"
+        "       `char_path, _ = find_and_download_image('<персонаж/игра> official art sprite png')`\n"
+        "     ШАГ 3 (Композитинг в Pillow): открой фон, вырежи белый/черный фон у спрайта персонажа (отсечение по цвету `datas = [p if p[:3]!=(255,255,255) else (0,0,0,0) for p in char.getdata()]`), масштабируй, размести на фоне и добавь эффекты (дым, свечение, тени через ImageDraw/GaussianBlur)!\n"
+        "   - ДЛЯ ОБЩИХ ФОТО БЕЗ ПЕРСОНАЖЕЙ (закаты, абстрактные пейзажи, текстуры):\n"
+        "     * СТРОЖАЙШИЙ ЗАПРЕТ: КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО рисовать людей, обувь и предметы примитивными полигонами (draw.polygon)! Это выглядит как чертёж.\n"
+        "     * Можно использовать Pollinations API, НО ОБЯЗАТЕЛЬНО срезать нижние 40px с водяным знаком pollinations.ai:\n"
         "       ```python\n"
         "       import urllib.request, urllib.parse, io\n"
         "       from PIL import Image\n"

@@ -71,7 +71,8 @@ from dynamic_agent import (
     set_pending_proposal,
     get_pending_proposal,
     clear_pending_proposal,
-    is_pure_chitchat
+    is_pure_chitchat,
+    is_visual_art_request
 )
 from photo_editor import (
     is_photo_editor_request,
@@ -1647,7 +1648,10 @@ def handle_owner_message(msg_data):
             return
 
     # 1.95. Генерация фото / арта / реалистичного изображения для владельца
-    is_visual_gen_owner = any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and any(w in t_lower for w in ["фото", "фотк", "картинк", "изображен", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "каблук", "коробк", "персонаж", "предмет", "объект"])
+    is_visual_gen_owner = is_visual_art_request(text) or (
+        any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and
+        any(w in t_lower for w in ["фото", "фотк", "картинк", "изображен", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "каблук", "коробк", "персонаж", "предмет", "объект"])
+    )
     is_explicit_meme_owner = any(w in t_lower for w in ["мем", "мэм", "мемасик", "мемчик", "демотиватор"])
     if is_visual_gen_owner and not is_explicit_meme_owner:
         log_event(f"[ORCHESTRATOR] Routing visual generation request to AI Dynamic Skill Engine for Owner: {text!r}")
@@ -2442,7 +2446,10 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     # 1.65. Запрос на мем / картинку / генерацию визуального контента
     is_explicit_meme = any(w in t_lower for w in ["мем", "мэм", "пикч", "гиф", "демотиватор", "мемасик", "мемчик", "мемы", "мэмы"])
     is_meme_action = any(w in t_lower for w in ["сделай", "склепай", "запили", "нарисуй", "сгенерируй", "создай", "скинь", "кинь", "выдай"]) and is_explicit_meme
-    is_visual_gen = any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and any(w in t_lower for w in ["доск", "шахмат", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "персонаж", "кота", "собаку", "машин", "фото", "изображен", "картинк", "фотк", "коробк", "каблук", "предмет", "объект"])
+    is_visual_gen = is_visual_art_request(text) or (
+        any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and
+        any(w in t_lower for w in ["доск", "шахмат", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "персонаж", "кота", "собаку", "машин", "фото", "изображен", "картинк", "фотк", "коробк", "каблук", "предмет", "объект"])
+    )
 
     # Если запрошена именно творческая генерация сцены / арта / доски (не стандартный мем) — запускаем ИИ!
     if is_visual_gen and not is_explicit_meme:
