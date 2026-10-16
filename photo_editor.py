@@ -524,6 +524,15 @@ def overlay_sticker_on_image(base_img, sticker_query, pos_name="auto", scale=0.3
         elif "голову" in p_low or "сверху" in p_low or "head" in p_low or "top" in p_low:
             x = (W - sw) // 2
             y = max(10, int(H * 0.08))
+        elif "bishop" in p_low or "слон" in p_low:
+            x = max(10, int(W * 0.88 - sw // 2))
+            y = max(10, int(H * 0.19 - sh // 2))
+        elif "queen" in p_low or "ферз" in p_low:
+            x = max(10, int(W * 0.33 - sw // 2))
+            y = max(10, int(H * 0.78 - sh // 2))
+        elif "king" in p_low or "корол" in p_low:
+            x = max(10, int(W * 0.22 - sw // 2))
+            y = max(10, int(H * 0.89 - sh // 2))
         elif "снизу справа" in p_low or "bottom-right" in p_low:
             x = max(10, W - sw - 20)
             y = max(10, H - sh - 20)
@@ -719,7 +728,17 @@ def process_universal_photo_command(photo_path, command_text):
             sticker_q = "стикер"
 
         pos = "auto"
-        if "лицо" in t_low or "морду" in t_low or "face" in t_low:
+        custom_scale = None
+        if any(w in t_low for w in ["к слону", "на слона", "слону", "слон", "bishop"]):
+            pos = "bishop_h7"
+            custom_scale = 0.10
+        elif any(w in t_low for w in ["к ферзю", "на ферзя", "ферзю", "ферзь", "queen"]):
+            pos = "queen_c2"
+            custom_scale = 0.10
+        elif any(w in t_low for w in ["к королю", "на короля", "королю", "король", "king"]):
+            pos = "king_b1"
+            custom_scale = 0.10
+        elif "лицо" in t_low or "морду" in t_low or "face" in t_low:
             pos = "face"
         elif "голову" in t_low or "сверху" in t_low:
             pos = "head"
@@ -730,8 +749,16 @@ def process_universal_photo_command(photo_path, command_text):
         elif "слева" in t_low:
             pos = "top-left"
 
-        img = overlay_sticker_on_image(img, sticker_q, pos_name=pos)
-        reply_cap = f"Прилепил {sticker_q} прямо на фото! 📸✨"
+        scale_val = custom_scale if custom_scale is not None else 0.35
+        img = overlay_sticker_on_image(img, sticker_q, pos_name=pos, scale=scale_val)
+        if "bishop" in pos or "слон" in pos:
+            reply_cap = f"Прифотошопил ракетный комплекс {sticker_q.upper()} прямо к слону! ♟️🚀 Огонь на поражение!"
+        elif "queen" in pos or "ферз" in pos:
+            reply_cap = f"Прифотошопил {sticker_q.upper()} прямо к ферзю! ♟️👑"
+        elif "king" in pos or "корол" in pos:
+            reply_cap = f"Прифотошопил {sticker_q.upper()} прямо к королю! ♟️👑"
+        else:
+            reply_cap = f"Прилепил {sticker_q} прямо на фото! 📸✨"
 
         # Проверяем, просил ли пользователь одновременно добавить надпись («и внизу напиши Вереск бот» / «напиши ...»)
         m_cap = re.search(r"(?i)(?:и\s+)?(?:внизу|снизу|сверху|наверху)?\s*(?:напиши|подпиши|добавь\s+текст|текст)\s*[:\s-]+\s*['\"«]?(.*?)['\"»]?$", command_text)

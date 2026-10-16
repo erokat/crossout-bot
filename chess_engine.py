@@ -108,17 +108,60 @@ def parse_color_name(raw_text):
             return c_code
     return 'w'
 
-def is_chess_request(text):
+WEAPON_MAP = {
+    'птур': 'ptur',
+    'ptur': 'ptur',
+    'кларнет': 'ptur',
+    'ракета': 'ptur',
+    'газген': 'gasgen',
+    'gasgen': 'gasgen',
+    'генератор': 'gasgen',
+    'вереск': 'heather',
+    'heather': 'heather',
+    'капкан': 'kapkan',
+    'kapkan': 'kapkan',
+    'мамонт': 'mammoth',
+    'mammoth': 'mammoth',
+    'пушка': 'mammoth',
+    'скорпион': 'scorpion',
+    'скорп': 'scorpion',
+    'scorpion': 'scorpion',
+    'ховер': 'hover',
+    'hover': 'hover',
+    'комбайн': 'harvester',
+    'жнец': 'harvester',
+    'harvester': 'harvester',
+    'йети': 'yeti',
+    'yeti': 'yeti',
+    'колесо': 'wheel1'
+}
+
+def is_chess_request(text, has_photo=False):
     if not text:
         return False
     t = text.lower()
+    
+    # Если прикреплено фото и запрос на фоторедактор (прифотошопь/прилепи/наложи), НЕ перехватывать
+    if has_photo:
+        clear_triggers = ["убери фигуры", "убери все фигуры", "очисти доску", "чистая доска", "стереть фигуры", "без фигур"]
+        if not any(k in t for k in clear_triggers):
+            if any(w in t for w in ["прифотошоп", "отфотошоп", "прилепи", "наложи", "вставь", "напиши", "добавь"]):
+                return False
+
     chess_keywords = [
-        "шахмат", "доск", "клетк", "корол", "ферз", "ладь", "слон", "пешк", "ход кон", "fide",
+        "шахмат", "доск", "клетк", "ход кон", "fide",
         "мат на доске", "фигуры на доске", "чистая доска", "пустая доска", "убери фигуры",
-        "убери все фигуры", "убери все фигуры и надписи", "очисти доску", "стереть фигуры"
+        "убери все фигуры", "убери все фигуры и надписи", "очисти доску", "стереть фигуры",
+        "расставь фигуры", "начальная позиция", "шахматн"
     ]
     if any(k in t for k in chess_keywords):
         return True
+
+    # Проверка шахматной фигуры в контексте (например: «черной фигуре слон», «черный слон», «белый ферзь»)
+    has_piece_context = bool(re.search(r'(?:фигур[а-я]*|бел[а-я]*|черн[а-я]*|чёрн[а-я]*)\s+(?:слон[а-я]*|ферз[а-я]*|корол[а-я]*|ладь[а-я]*|кон[а-я]*|пешк[а-я]*)', t))
+    if has_piece_context:
+        return True
+
     # If explicit coordinates are mentioned with chess piece words
     has_coord = bool(re.search(r'\b[a-hA-Hа-яА-Я][1-8]\b|\b[1-8][a-hA-Hа-яА-Я]\b', text))
     has_piece = any(re.search(pat, t) for pat, _, _ in PIECE_PATTERNS)
@@ -133,13 +176,64 @@ def parse_chess_request(text):
         "очисти доску", "стереть фигуры", "удали фигуры", "удали все фигуры",
         "без фигур и надписей", "убери все надписи"
     ]
-    if any(p in t for p in empty_triggers) and not any(w in t for w in ["расставь", "начальн", "поставь"]):
-        return {}, "empty", None, None
+    if any(p in t for p in empty_triggers) and not any(w in t for w in ["расставь", "начальн", "поставь", "сгенерируй", "прифотошопь", "оружие", "птур", "слон"]):
+        return {}, "empty", None, None, None
 
     # 2. Initial / start position
     start_triggers = ["начальн", "стандартн", "расставь фигуры", "начальная позиция", "все фигуры на доске"]
     if any(p in t for p in start_triggers):
-        return dict(INITIAL_CHESS_SETUP), "start", None, None
+        return dict(INITIAL_CHESS_SETUP), "start", None, None, None
+
+    # 2.5. Проверка наличия запроса на оружие / модуль (ПТУР, Газген, Вереск и т.д.)
+    detected_weapon = None
+    for kw, w_name in WEAPON_MAP.items():
+        if re.search(r'\b' + re.escape(kw), t):
+            detected_weapon = w_name
+            break
+    if not detected_weapon and any(w in t for w in ["птур", "ракета", "кларнет"]):
+        detected_weapon = "ptur"
+
+    # Определение цвета и фигуры
+    col = 'b' if any(w in t for w in ["черн", "чёрн", "black"]) else ('w' if any(w in t for w in ["бел", "white"]) else ('b' if detected_weapon else 'w'))
+    piece = 'B'
+    if any(w in t for w in ["слон", "офицер", "bishop"]):
+        piece = 'B'
+    elif any(w in t for w in ["ферз", "королев", "queen"]):
+        piece = 'Q'
+    elif any(w in t for w in ["корол", "king"]):
+        piece = 'K'
+    elif any(w in t for w in ["ладь", "rook"]) or re.search(r'\bтур[а-я]*\b', t):
+        piece = 'R'
+    elif any(w in t for w in ["кон", "лошад", "knight"]):
+        piece = 'N'
+    elif any(w in t for w in ["пешк", "pawn"]):
+        piece = 'P'
+
+    # Проверка явных координат
+    coord_match = re.search(r'\b([a-hA-Hа-яА-Я][1-8]|[1-8][a-hA-Hа-яА-Я])\b', t)
+    target_sq = normalize_square(coord_match.group(1)) if coord_match else None
+
+    # Если запрошено оружие для фигуры (например: «черной фигуре слон оружие птур»)
+    if detected_weapon:
+        if target_sq:
+            pieces = {target_sq: f"{col}{piece}"}
+            attachments = {target_sq: detected_weapon}
+            highlights = {target_sq: (80, 220, 120, 140)}
+            return pieces, "weapon_custom", highlights, None, attachments
+        else:
+            # Если слон с оружием (культовый снайперский слон Crossout x Шахматы!)
+            if piece == 'B':
+                pieces = {'b1': 'bK', 'b3': 'wK', 'c2': 'wQ', 'h7': f"{col}B"}
+                arrow = ('h7', 'c2')
+                highlights = {'c2': (255, 90, 90, 140), 'h7': (80, 220, 120, 140)}
+                attachments = {'h7': detected_weapon}
+                return pieces, "weapon_sniper", highlights, arrow, attachments
+            else:
+                default_sq = 'c2' if piece == 'Q' else ('e8' if piece == 'K' else ('a1' if piece == 'R' else 'd4'))
+                pieces = {default_sq: f"{col}{piece}"}
+                attachments = {default_sq: detected_weapon}
+                highlights = {default_sq: (80, 220, 120, 140)}
+                return pieces, "weapon_custom", highlights, None, attachments
 
     # 3. Explicit coordinate-based placement
     pieces = {}
@@ -156,10 +250,10 @@ def parse_chess_request(text):
         sq = normalize_square(sq_raw)
         if not sq:
             continue
-        col = parse_color_name(col_raw)
-        piece = parse_piece_name(piece_raw)
-        if piece:
-            pieces[sq] = f"{col}{piece}"
+        col_parsed = parse_color_name(col_raw)
+        piece_parsed = parse_piece_name(piece_raw)
+        if piece_parsed:
+            pieces[sq] = f"{col_parsed}{piece_parsed}"
 
     # Regex 2: "черного короля на B1", "белого ферзя на клетку C2"
     regex2 = re.finditer(
@@ -173,10 +267,10 @@ def parse_chess_request(text):
         sq = normalize_square(sq_raw)
         if not sq:
             continue
-        col = parse_color_name(col_raw)
-        piece = parse_piece_name(piece_raw)
-        if piece and sq not in pieces:
-            pieces[sq] = f"{col}{piece}"
+        col_parsed = parse_color_name(col_raw)
+        piece_parsed = parse_piece_name(piece_raw)
+        if piece_parsed and sq not in pieces:
+            pieces[sq] = f"{col_parsed}{piece_parsed}"
 
     # Check for laser / sniper diagonal arrow
     arrow = None
@@ -189,7 +283,7 @@ def parse_chess_request(text):
         highlights = {'g7': (255, 90, 90, 140), 'a1': (80, 220, 120, 140)}
 
     if pieces:
-        return pieces, "custom", highlights, arrow
+        return pieces, "custom", highlights, arrow, None
 
     # 4. Semantic checkmate / 2 kings + 1 queen pattern
     if any(w in t for w in ["2 короля", "двух королей", "2 королей"]) or ("корол" in t and "ферз" in t and any(w in t for w in ["мат", "ставит мат", "почти мат", "ловушк"])):
@@ -198,21 +292,29 @@ def parse_chess_request(text):
             pieces = {'b1': 'bK', 'b3': 'wK', 'c2': 'wQ', 'h7': 'bB'}
             arrow = ('h7', 'c2')
             highlights = {'c2': (255, 90, 90, 140), 'h7': (80, 220, 120, 140)}
-            return pieces, "sniper", highlights, arrow
+            return pieces, "sniper", highlights, arrow, None
         else:
             pieces = {'e8': 'bK', 'e6': 'wK', 'e7': 'wQ'}
             highlights = {'e8': (255, 90, 90, 140), 'e7': (255, 215, 0, 140)}
-            return pieces, "mate", highlights, None
+            return pieces, "mate", highlights, None, None
 
-    # 5. Fallback: clean empty board
-    return {}, "empty", None, None
+    # 4.5. Если просто упомянут слон или другая фигура без координат
+    if any(w in t for w in ["слон", "офицер", "bishop"]):
+        pieces = {'b1': 'bK', 'b3': 'wK', 'c2': 'wQ', 'h7': f"{col}B"}
+        arrow = ('h7', 'c2')
+        highlights = {'c2': (255, 90, 90, 140), 'h7': (80, 220, 120, 140)}
+        return pieces, "sniper", highlights, arrow, None
 
-def render_chess_board(pieces_dict=None, highlight_squares=None, arrow=None, out_path=None):
+    # 5. Fallback: clean empty board ТОЛЬКО если прямо просили пустую доску
+    return {}, "empty", None, None, None
+
+def render_chess_board(pieces_dict=None, highlight_squares=None, arrow=None, attachments=None, out_path=None):
     """
     Renders an elegant high-resolution chessboard (1000x1000 px).
     - Pieces: classic transparent Staunton sprites.
     - Coordinates: bold, high-contrast labels on border.
     - Highlights & arrows for moves and tactics.
+    - Attachments: weapons/modules (PTUR, Gasgen, Heather) mounted on pieces.
     """
     pieces = pieces_dict or {}
     sq_size = 112
@@ -319,6 +421,31 @@ def render_chess_board(pieces_dict=None, highlight_squares=None, arrow=None, out
             except Exception as e:
                 print(f"[CHESS PIECE ERROR] Failed to draw {p_code}: {e}")
 
+    # Draw attachments / weapons on pieces
+    if attachments:
+        for sq, weapon in attachments.items():
+            f_char, r_char = sq[0].lower(), sq[1]
+            if f_char not in files or r_char not in ranks:
+                continue
+            c_idx = files.index(f_char)
+            r_idx = ranks.index(r_char)
+            px = margin + c_idx * sq_size + (sq_size - piece_size) // 2
+            py = margin + r_idx * sq_size + (sq_size - piece_size) // 2
+
+            weapon_file = os.path.join(MEDIA_DIR, f"{weapon}.png")
+            if os.path.exists(weapon_file):
+                try:
+                    w_raw = Image.open(weapon_file).convert("RGBA")
+                    w_scale = 68.0 / max(w_raw.width, w_raw.height)
+                    new_w = max(24, int(w_raw.width * w_scale))
+                    new_h = max(24, int(w_raw.height * w_scale))
+                    w_resized = w_raw.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    wx = px + piece_size - new_w + 6
+                    wy = py - 6
+                    img.paste(w_resized, (wx, wy), w_resized)
+                except Exception as e:
+                    print(f"[CHESS WEAPON ERROR] Failed to draw {weapon}: {e}")
+
     # Convert to RGB and save
     final_img = img.convert("RGB")
     if not out_path:
@@ -340,7 +467,12 @@ def process_chess_command(text, sender_name="Ярик", reply_to_photo=None):
     Main entry point for handling chess requests from chat.
     Returns (image_path, caption_text).
     """
-    pieces, mode, highlights, arrow = parse_chess_request(text)
+    parsed = parse_chess_request(text)
+    if len(parsed) == 5:
+        pieces, mode, highlights, arrow, attachments = parsed
+    else:
+        pieces, mode, highlights, arrow = parsed
+        attachments = None
 
     # If replying to a photo asking to remove figures
     if reply_to_photo and any(w in text.lower() for w in ["убери", "очисти", "без фигур", "стереть", "чист"]):
@@ -348,14 +480,20 @@ def process_chess_command(text, sender_name="Ярик", reply_to_photo=None):
         mode = "empty"
         highlights = None
         arrow = None
+        attachments = None
 
     out_file = os.path.join(MEDIA_DIR, f"chess_{int(time.time() * 1000)}.png")
-    image_path = render_chess_board(pieces_dict=pieces, highlight_squares=highlights, arrow=arrow, out_path=out_file)
+    image_path = render_chess_board(pieces_dict=pieces, highlight_squares=highlights, arrow=arrow, attachments=attachments, out_path=out_file)
 
     if mode == "empty":
         caption = f"Держи чистую шахматную доску без фигур! ♟️"
     elif mode == "start":
         caption = f"Расставил все 32 фигуры в начальную позицию. Партия начинается! ♟️👑"
+    elif mode == "weapon_sniper":
+        caption = f"Готово, {sender_name}! Вооружил черного слона на H7 ракетным комплексом ПТУР «Кларнет» из Crossout! ♟️🚀 Теперь белому ферзю на C2 точно крышка!"
+    elif mode == "weapon_custom":
+        w_title = attachments.get(list(pieces.keys())[0], "оружие").upper() if attachments else "ОРУЖИЕ"
+        caption = f"Готово, {sender_name}! Установил боевой модуль {w_title} прямо на шахматную фигуру! ♟️🔥"
     elif mode == "sniper":
         caption = f"Шахматная доска готова! Черный слон с H7 выцеливает белого ферзя на C2 через всю диагональ ♟️🎯"
     elif mode == "mate":

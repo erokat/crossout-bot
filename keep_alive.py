@@ -1023,8 +1023,71 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # 0.02. Шахматы для владельца
-    if is_chess_request(text) or (photo and any(w in t_lower for w in ["убери фигуры", "убери все фигуры", "очисти доску", "чистая доска", "убери все фигуры и надписи"])):
+    # 0.02. Шахматы и фоторедактор для владельца
+    # 1) Очистка доски по фото
+    if photo and any(w in t_lower for w in ["убери фигуры", "убери все фигуры", "очисти доску", "чистая доска", "убери все фигуры и надписи", "стереть фигуры"]):
+        log_event(f"[ORCHESTRATOR] Clean chess board requested for Owner: {text!r}")
+        chess_img, chess_cap = process_chess_command(text, sender_name="Миша", reply_to_photo=photo)
+        cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "owner",
+            "--photo", chess_img,
+            "--text", chess_cap
+        ]
+        subprocess.run(cmd)
+        return
+
+    # 2) Фоторедактор с фото (прифотошопь, добавь надпись, прилепи стикер поверх фото)
+    if photo and is_photo_editor_request(text, has_photo=True):
+        if is_complex_photo_request(text):
+            log_event(f"[ORCHESTRATOR] Routing complex photo task to AI Dynamic Skill Engine for owner: {text!r}")
+            ack_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--no-copy",
+                "--text", "Принял, Миша! Запускаю ИИ для сложного фотомонтажа... 🎨⏳"
+            ]
+            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+            run_autonomous_task_async(
+                task_text=text,
+                sender_name="Миша",
+                photo_path=photo,
+                ask_ai_fn=ask_ai,
+                sender_key="owner",
+                recipient="owner",
+                reply_to_msg_id=None,
+                ack_msg_id=ack_msg_id,
+                is_owner_sender=True
+            )
+            return
+
+        try:
+            edited_img, reply_cap = process_universal_photo_command(photo, text)
+            cmd_owner = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--photo", edited_img,
+                "--text", f"Миша, {reply_cap.lower()}"
+            ]
+            subprocess.run(cmd_owner)
+            return
+        except Exception as e:
+            log_event(f"[PHOTO EDITOR ERROR] {e}")
+            cmd_owner = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--text", f"Миша, не удалось обработать фото: {e}"
+            ]
+            subprocess.run(cmd_owner)
+            return
+
+    # 3) Шахматы для владельца (генерация доски, фигур, позиций)
+    if is_chess_request(text, has_photo=bool(photo)):
         log_event(f"[ORCHESTRATOR] Chess engine triggered for Owner: {text!r}")
         chess_img, chess_cap = process_chess_command(text, sender_name="Миша", reply_to_photo=photo)
         cmd = [
@@ -1852,10 +1915,79 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
-    # 1.35. Шахматы: генерация доски, расстановка фигур, пустая доска, тактические позиции
+    # 1.35. Шахматы и фоторедактор
     photo_file = msg_data.get("photo")
-    if is_chess_request(text) or (photo_file and any(w in t_lower for w in ["убери фигуры", "убери все фигуры", "очисти доску", "чистая доска", "убери все фигуры и надписи"])):
-        target_name = "Миша" if is_owner_sender else "Ярик"
+    target_name = "Миша" if is_owner_sender else "Ярик"
+
+    # 1) Очистка доски по фото
+    if photo_file and any(w in t_lower for w in ["убери фигуры", "убери все фигуры", "очисти доску", "чистая доска", "убери все фигуры и надписи", "стереть фигуры"]):
+        log_event(f"[ORCHESTRATOR] Clean chess board requested for {target_name}: {text!r}")
+        chess_img, chess_cap = process_chess_command(text, sender_name=target_name, reply_to_photo=photo_file)
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--photo", chess_img,
+            "--text", chess_cap,
+            "--reply-to", str(msg_id)
+        ]
+        subprocess.run(send_cmd)
+        return
+
+    # 2) Фоторедактор с фото (прифотошопь, добавь надпись, прилепи стикер поверх фото)
+    if photo_file and is_photo_editor_request(text, has_photo=True):
+        if is_complex_photo_request(text):
+            log_event(f"[ORCHESTRATOR] Routing complex photo task to AI Dynamic Skill Engine for {target_name}: {text!r}")
+            ack_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--no-copy",
+                "--reply-to", str(msg_id),
+                "--text", f"Принял, {target_name}! Запускаю ИИ для сложного фотомонтажа... 🎨⏳"
+            ]
+            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+            run_autonomous_task_async(
+                task_text=text,
+                sender_name=target_name,
+                photo_path=photo_file,
+                ask_ai_fn=ask_ai,
+                sender_key=sender_key,
+                recipient="yarik",
+                reply_to_msg_id=msg_id,
+                ack_msg_id=ack_msg_id,
+                is_owner_sender=is_owner_sender
+            )
+            return
+
+        log_event(f"[ORCHESTRATOR] Photo editor triggered for {target_name}: {text!r} (photo={photo_file})")
+        try:
+            edited_img, reply_cap = process_universal_photo_command(photo_file, text)
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--photo", edited_img,
+                "--text", f"{target_name}, {reply_cap.lower()}",
+                "--reply-to", str(msg_id)
+            ]
+            subprocess.run(send_cmd)
+            return
+        except Exception as e:
+            log_event(f"[PHOTO EDITOR ERROR] {e}")
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--text", f"{target_name}, не удалось обработать фото: {e}",
+                "--reply-to", str(msg_id)
+            ]
+            subprocess.run(send_cmd)
+            return
+
+    # 3) Шахматы без фото (генерация доски, тактической позиции, вооруженной фигуры)
+    if is_chess_request(text, has_photo=bool(photo_file)):
         log_event(f"[ORCHESTRATOR] Chess engine triggered for {target_name}: {text!r}")
         chess_img, chess_cap = process_chess_command(text, sender_name=target_name, reply_to_photo=photo_file)
         send_cmd = [

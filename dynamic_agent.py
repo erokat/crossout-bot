@@ -127,6 +127,10 @@ def calculate_skill_match_score(query_text, skill_name, triggers):
             if tr_clean in t:
                 score += 12
                 continue
+            tr_parts = [p for p in tr_clean.split() if p not in COMMON_SKILL_STOPWORDS and len(p) >= 4]
+            if len(words) <= 3 and any(p in words or re.search(r"\b" + re.escape(p) + r"\b", t) for p in tr_parts):
+                score += 7
+                continue
 
         # Одиночные слова дают высокий балл ТОЛЬКО если запрос короткий (команда) и не стоп-слово
         if tr_clean in words or re.search(r"\b" + re.escape(tr_clean) + r"\b", t):
@@ -530,7 +534,8 @@ def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script
 def synthesize_meme_extension_code(task_text, ext_slug, ext_desc):
     clean_theme = task_text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
     is_crossout = any(w in clean_theme.lower() for w in ["кросаут", "кроссаут", "crossout"])
-    is_chess = any(w in clean_theme.lower() for w in ["шахмат", "доск", "слон", "ферз", "ладь"])
+    is_photo_edit = any(w in clean_theme.lower() for w in ["прифотошоп", "отфотошоп", "на фото", "на картинку", "прилепи", "наложи на фото", "приклей"])
+    is_chess = not is_photo_edit and any(w in clean_theme.lower() for w in ["шахмат", "доск", "слон", "ферз", "ладь"])
     if is_chess:
         return f'''# -*- coding: utf-8 -*-
 # EXTENSION: {ext_slug} | {ext_desc}

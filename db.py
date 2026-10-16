@@ -380,7 +380,7 @@ def restore_dynamic_skills(skills_dir=None, install_requirements=True):
                     default_slug = os.path.splitext(fname)[0]
                     s_name, s_desc, s_trig, s_req = parse_skill_metadata_from_code(file_code, fallback_name=default_slug)
                     existing_entry = get_dynamic_skill(s_name)
-                    if not existing_entry:
+                    if not existing_entry or existing_entry.get("code") != file_code:
                         rel_path = os.path.relpath(fp, base_dir) if fp.startswith(base_dir) else f"skills/{fname}"
                         save_dynamic_skill(
                             skill_name=s_name,
