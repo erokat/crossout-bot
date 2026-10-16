@@ -664,10 +664,11 @@ def generate_code_via_antigravity(prompt, timeout=120):
         return None
 
 
-def generate_image_via_antigravity(prompt, timeout=120):
+def generate_image_via_antigravity(prompt, timeout=140):
     """
     Directly invokes Antigravity CLI's native image-generator to produce
     top-tier Google Imagen 3 photorealistic and concept art images without watermarks or third-party APIs.
+    Automatically researches unknown characters/settings via search_web before generating.
     """
     agy_bin = shutil.which("agy") or shutil.which("antigravity")
     if not agy_bin:
@@ -679,9 +680,11 @@ def generate_image_via_antigravity(prompt, timeout=120):
         agy_bin = "agy"
 
     full_prompt = (
-        f"Generate a high-quality illustration or concept art for the following user request: \"{prompt}\". "
-        "You MUST invoke the `image-generator` subagent to generate this image in high resolution without watermarks. "
-        "When done, output the exact saved absolute image path."
+        f"User request: \"{prompt}\".\n"
+        "1. First, if the request mentions a specific character, game, franchise, anime, creature, or setting, "
+        "use `search_web` to discover authentic canonical visual details (colors, silhouette, eyes, signature abilities, gear, environment).\n"
+        "2. Then, invoke the `image-generator` subagent with a rich, detailed prompt incorporating these researched visual details.\n"
+        "3. Wait for the image generation to complete, and output the exact saved absolute image path."
     )
 
     cmd = [
