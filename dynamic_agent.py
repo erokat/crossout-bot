@@ -529,79 +529,20 @@ def synthesize_meme_extension_code(task_text, ext_slug, ext_desc):
         return f'''# -*- coding: utf-8 -*-
 # EXTENSION: {ext_slug} | {ext_desc}
 import os, sys
-from PIL import Image, ImageDraw, ImageFont
-
 _cur_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_cur_dir)
-media_dir = os.path.join(_parent_dir, "media")
-os.makedirs(media_dir, exist_ok=True)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
 
-width, height = 1080, 1080
-img = Image.new("RGB", (width, height), (22, 24, 29))
-draw = ImageDraw.Draw(img)
+from chess_engine import process_chess_command
 
-board_size = 720
-bx0 = (width - board_size) // 2
-by0 = 160
-cell_size = board_size // 8
-
-light_color = (240, 217, 181)
-dark_color = (181, 136, 99)
-
-for r in range(8):
-    for c in range(8):
-        col = light_color if (r + c) % 2 == 0 else dark_color
-        draw.rectangle([bx0 + c * cell_size, by0 + r * cell_size, bx0 + (c + 1) * cell_size, by0 + (r + 1) * cell_size], fill=col)
-
-font_coords = None
-for f_path in [os.path.join(media_dir, "RussoOne-Regular.ttf"), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
-    if os.path.exists(f_path):
-        try: font_coords = ImageFont.truetype(f_path, 20); break
-        except Exception: pass
-if not font_coords: font_coords = ImageFont.load_default()
-
-letters = "ABCDEFGH"
-for i in range(8):
-    draw.text((bx0 + i * cell_size + cell_size // 2, by0 + board_size + 15), letters[i], font=font_coords, fill="#CCCCCC", anchor="mm")
-    draw.text((bx0 - 20, by0 + i * cell_size + cell_size // 2), str(8 - i), font=font_coords, fill="#CCCCCC", anchor="mm")
-
-bishop_cx = bx0 + 0 * cell_size + cell_size // 2
-bishop_cy = by0 + 7 * cell_size + cell_size // 2
-queen_cx = bx0 + 6 * cell_size + cell_size // 2
-queen_cy = by0 + 1 * cell_size + cell_size // 2
-
-# Draw pieces
-draw.ellipse([bishop_cx - 24, bishop_cy - 24, bishop_cx + 24, bishop_cy + 24], fill=(30, 30, 30), outline=(0, 255, 120), width=3)
-draw.ellipse([queen_cx - 26, queen_cy - 26, queen_cx + 26, queen_cy + 26], fill=(245, 245, 245), outline=(255, 30, 30), width=3)
-
-# Laser line & sniper crosshair
-draw.line([(bishop_cx, bishop_cy), (queen_cx, queen_cy)], fill=(255, 40, 40), width=4)
-draw.ellipse([queen_cx - 32, queen_cy - 32, queen_cx + 32, queen_cy + 32], outline=(255, 0, 0), width=3)
-draw.ellipse([queen_cx - 16, queen_cy - 16, queen_cx + 16, queen_cy + 16], outline=(255, 0, 0), width=2)
-draw.line([(queen_cx - 42, queen_cy), (queen_cx + 42, queen_cy)], fill=(255, 0, 0), width=2)
-draw.line([(queen_cx, queen_cy - 42), (queen_cx, queen_cy + 42)], fill=(255, 0, 0), width=2)
-
-draw.text((queen_cx, queen_cy - 50), "TARGET LOCKED: ФЕРЗЬ", font=font_coords, fill="#FF4444", anchor="mm")
-draw.text((bishop_cx + 35, bishop_cy + 5), "СЛОН СО СНАЙПЕРКОЙ", font=font_coords, fill="#00FF88", anchor="lm")
-
-font_title = None
-for f_path in [os.path.join(media_dir, "RussoOne-Regular.ttf"), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
-    if os.path.exists(f_path):
-        try: font_title = ImageFont.truetype(f_path, 32); break
-        except Exception: pass
-if not font_title: font_title = ImageFont.load_default()
-
-draw.rectangle([(40, 30), (width - 40, 125)], fill=(30, 35, 45), outline=(240, 160, 20), width=2)
-draw.text((width // 2, 65), "ШАХ И МАТ? НЕ ТАК БЫСТРО...", font=font_title, fill="#FFCC00", anchor="mm")
-draw.text((width // 2, 100), "Когда белые орут «Шах и мат!», но не заметили слона на диагонали", font=font_coords, fill="#E0E0E0", anchor="mm")
-
-draw.rectangle([(40, height - 120), (width - 40, height - 35)], fill=(30, 35, 45), outline=(70, 80, 100), width=2)
-draw.text((width // 2, height - 78), "Слон на A1 со снайперкой держит диагональ: «Минус ферзь!» ♟️🎯", font=font_title, fill="#FFFFFF", anchor="mm")
-
-out_path = os.path.join(media_dir, "chess_sniper_bishop.png")
-img.save(out_path, "PNG")
-print(out_path)
-print("Шахматная доска готова! Слон в засаде держит вражеского ферзя на прицеле со снайперкой ♟️🎯")
+task_text = "{clean_theme}"
+img_path, caption = process_chess_command(task_text, sender_name="Ярик")
+if img_path and os.path.exists(img_path):
+    print(img_path)
+    print(caption)
+else:
+    sys.exit(1)
 '''
     elif is_crossout:
         return f'''# -*- coding: utf-8 -*-

@@ -697,7 +697,7 @@ def process_universal_photo_command(photo_path, command_text):
     elif any(w in t_low for w in ["чб", "ч/б", "черно-бел", "сепия", "негатив", "инверт", "размой", "блюр", "резкость", "зашакаль", "пережарь", "deepfry", "ярче", "темнее", "поверни", "квадрат"]):
         img = apply_visual_filter(img, command_text)
         if any(w in t_low for w in ["зашакаль", "пережарь", "deepfry"]):
-            reply_cap = "Зашакалил фото по высшему разряду, хрустит как свежий Газген! 💀🔥"
+            reply_cap = "Зашакалил фото по высшему разряду, хрустит отлично! 💀🔥"
         elif any(w in t_low for w in ["чб", "черно-бел"]):
             reply_cap = "Сделал стильное черно-белое фото! 🎞️🖤"
         elif any(w in t_low for w in ["размой", "блюр"]):
@@ -716,7 +716,7 @@ def process_universal_photo_command(photo_path, command_text):
             m_stk = re.search(r"(?i)(?:добавь|поставь|прилепи|наложи|вставь|прифотошопь)(?:\s+(?:на\s+фото|на\s+картинку|на\s+лицо(?:\s+[а-я]+)?))?\s+(.+?)(?:\s+(?:сверху|снизу|на голову|на лицо|по центру|слева|справа)|$)", command_text)
             sticker_q = m_stk.group(1).strip() if m_stk else ""
         if not sticker_q or any(w in sticker_q.lower() for w in ["этот", "эту", "фото", "картинку"]):
-            sticker_q = "газген"
+            sticker_q = "стикер"
 
         pos = "auto"
         if "лицо" in t_low or "морду" in t_low or "face" in t_low:
@@ -731,7 +731,7 @@ def process_universal_photo_command(photo_path, command_text):
             pos = "top-left"
 
         img = overlay_sticker_on_image(img, sticker_q, pos_name=pos)
-        reply_cap = f"Прилепил {sticker_q} прямо на фото! 🚜🔥"
+        reply_cap = f"Прилепил {sticker_q} прямо на фото! 📸✨"
 
         # Проверяем, просил ли пользователь одновременно добавить надпись («и внизу напиши Вереск бот» / «напиши ...»)
         m_cap = re.search(r"(?i)(?:и\s+)?(?:внизу|снизу|сверху|наверху)?\s*(?:напиши|подпиши|добавь\s+текст|текст)\s*[:\s-]+\s*['\"«]?(.*?)['\"»]?$", command_text)

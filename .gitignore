@@ -21,8 +21,11 @@ media/meme_*.png
 media/test_*.png
 media/test_*.jpg
 media/edited_photo_*
+media/chess_*.png
+media/chess_*.jpg
 media/meme_templates/cached_*
 gdrive_config.json
 gdrive_token.json
 session_data/antigravity-oauth-token
 media/music/
+
