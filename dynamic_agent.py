@@ -374,10 +374,10 @@ def auto_install_missing_packages(error_output):
         pkg_name = module_pkg_map.get(base_mod, cleaned)
         print(f"[DYNAMIC AGENT] Auto-installing missing dependency: {pkg_name} ...")
         try:
-            cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", pkg_name]
+            cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--break-system-packages", pkg_name]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
             if res.returncode != 0 and "no such option" in res.stderr.lower():
-                cmd = [sys.executable, "-m", "pip", "install", pkg_name]
+                cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", pkg_name]
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
             if res.returncode == 0:
                 print(f"[DYNAMIC SKILL ENGINE] Successfully auto-installed {pkg_name}!")
@@ -823,12 +823,20 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         if last_e:
             prev_context = f"\nВНИМАНИЕ: Предыдущая попытка упала с ошибкой: {last_e}. Обязательно учти и исправь это!\n"
 
-    # 2. Генерируем новое дополнение с нуля
+    mem_ctx = ""
+    try:
+        from db import format_memory_context
+        m_info = format_memory_context(task_text, limit=3)
+        if m_info:
+            mem_ctx = f"\n{m_info}\nОБЯЗАТЕЛЬНО УЧТИ ЭТИ ФАКТЫ И ПРАВИЛА ИЗ ДОЛГОВРЕМЕННОЙ ПАМЯТИ ПРИ НАПИСАНИИ СКРИПТА!\n"
+    except Exception:
+        pass
+
     # 2. Генерируем новый динамический модуль с нуля через Gemini
     prompt = (
         f"Ты — автономный генератор надежных Python 3 скриптов и модулей (Dynamic Skill Engine) для Telegram-бота.\n"
         f"Пользователь {sender_name} просит выполнить задачу: «{task_text}».\n"
-        f"{file_context}{prev_context}\n"
+        f"{file_context}{prev_context}{mem_ctx}\n"
         "ПРАВИЛА ОБРАЩЕНИЯ К ПОЛЬЗОВАТЕЛЯМ:\n"
         "1. К владельцу бота обращаться ТОЛЬКО по имени «Миша» (Миха, Мишан). Категорически запрещено называть его 'шеф', 'босс', 'командир' или 'Ярик'!\n"
         "2. К другу обращаться «Ярик».\n"

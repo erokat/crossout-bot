@@ -12,6 +12,7 @@ from config import DB_PATH
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode = WAL")
+    conn.create_function("lower", 1, lambda s: str(s).lower() if s is not None else "")
     try:
         yield conn
         conn.commit()
@@ -102,6 +103,19 @@ def init_db():
             value TEXT
         )
         """)
+
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS bot_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic TEXT,
+            fact TEXT,
+            full_text TEXT,
+            author TEXT,
+            created_at REAL
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_memory_topic ON bot_memory(topic)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_memory_created ON bot_memory(created_at)")
 
         # Migration and schema for handled_messages with composite PRIMARY KEY (chat_id, message_id)
         cur = conn.execute("PRAGMA table_info(handled_messages)")
@@ -488,10 +502,10 @@ def restore_dynamic_skills(skills_dir=None, install_requirements=True):
 
             try:
                 print(f"[DYNAMIC SKILLS] Installing missing requirement: {pkg}...")
-                cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", pkg]
+                cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--break-system-packages", pkg]
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
                 if res.returncode != 0 and "no such option" in (res.stderr or "").lower():
-                    cmd = [sys.executable, "-m", "pip", "install", pkg]
+                    cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", pkg]
                     res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
                 if res.returncode == 0:
                     print(f"[DYNAMIC SKILLS] Successfully installed requirement: {pkg}")
@@ -672,9 +686,173 @@ def get_last_sent_meme(sent_to=None):
         row = cur.fetchone()
         return {"file_path": row[0], "headline": row[1]} if row else None
 
+
+# ----------------- BOT LONG-TERM MEMORY ENGINE -----------------
+
+MEMORIES_FILE = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "bot_memories.json")
+
+def save_bot_memory(fact, topic="", full_text="", author=""):
+    if not fact:
+        return False
+    fact = str(fact).strip()
+    topic = str(topic).strip() if topic else ""
+    full_text = str(full_text).strip() if full_text else fact
+    author = str(author).strip() if author else ""
+
+    if not topic:
+        about_match = re.search(r"(?:про|о|об|насчет|по поводу)\s+([а-яa-z0-9\s]+?)(?:\s+(?:связан|это|что|было|много|мало)|[,\.!?:\n\"]|$)", full_text, re.IGNORECASE)
+        if about_match:
+            topic = about_match.group(1).strip()[:50]
+        else:
+            quotes = re.findall(r'["«]([^"»]+)["»]', full_text)
+            if quotes:
+                topic = quotes[0][:50]
+            else:
+                words = [w for w in re.findall(r'\b[а-яa-z0-9]{4,}\b', full_text.lower()) if w not in {"запомни", "сделай", "пожалуйста", "короче", "смотри"}]
+                topic = " ".join(words[:3])
+
+    with get_db() as conn:
+        conn.execute("""
+        INSERT INTO bot_memory (topic, fact, full_text, author, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """, (topic, fact, full_text, author, time.time()))
+
+    try:
+        sync_memories_to_disk()
+    except Exception:
+        pass
+    return True
+
+def sync_memories_to_disk():
+    with get_db() as conn:
+        cur = conn.execute("SELECT id, topic, fact, full_text, author, created_at FROM bot_memory ORDER BY id ASC")
+        rows = [
+            {"id": r[0], "topic": r[1], "fact": r[2], "full_text": r[3], "author": r[4], "created_at": r[5]}
+            for r in cur.fetchall()
+        ]
+    with open(MEMORIES_FILE, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=2)
+
+def restore_bot_memories():
+    if not os.path.exists(MEMORIES_FILE):
+        return 0
+    try:
+        with open(MEMORIES_FILE, "r", encoding="utf-8") as f:
+            rows = json.load(f)
+        if not rows or not isinstance(rows, list):
+            return 0
+        with get_db() as conn:
+            cur = conn.execute("SELECT COUNT(*) FROM bot_memory")
+            count = cur.fetchone()[0]
+            if count == 0:
+                for r in rows:
+                    conn.execute("""
+                    INSERT INTO bot_memory (topic, fact, full_text, author, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, (r.get("topic", ""), r.get("fact", ""), r.get("full_text", ""), r.get("author", ""), r.get("created_at", time.time())))
+                print(f"[MEMORY] Restored {len(rows)} memories from {MEMORIES_FILE}")
+                return len(rows)
+    except Exception as e:
+        print(f"[MEMORY WARNING] Error restoring memories: {e}")
+    return 0
+
+def get_all_memories(limit=25):
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT id, topic, fact, full_text, author, created_at FROM bot_memory ORDER BY id DESC LIMIT ?",
+            (limit,)
+        )
+        return [
+            {"id": r[0], "topic": r[1], "fact": r[2], "full_text": r[3], "author": r[4], "created_at": r[5]}
+            for r in cur.fetchall()
+        ]
+
+def get_relevant_memories(query="", limit=5):
+    if not query:
+        return get_all_memories(limit=limit)
+
+    q_words = [w.lower() for w in re.findall(r'\b[а-яa-z0-9]{3,}\b', query.lower()) if w not in {"бот", "сделай", "мем", "картинку", "скинь", "про", "как", "что", "это", "нарисуй", "покажи"}]
+    if not q_words:
+        return get_all_memories(limit=limit)
+
+    with get_db() as conn:
+        conditions = []
+        params = []
+        for w in q_words:
+            stem = w[:-1] if len(w) >= 5 else w
+            conditions.append("(lower(topic) LIKE ? OR lower(fact) LIKE ? OR lower(full_text) LIKE ?)")
+            p = f"%{stem}%"
+            params.extend([p, p, p])
+
+        sql = f"SELECT id, topic, fact, full_text, author, created_at FROM bot_memory WHERE {' OR '.join(conditions)} ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        cur = conn.execute(sql, params)
+        rows = cur.fetchall()
+        if rows:
+            return [
+                {"id": r[0], "topic": r[1], "fact": r[2], "full_text": r[3], "author": r[4], "created_at": r[5]}
+                for r in rows
+            ]
+    return get_all_memories(limit=limit)
+
+def format_memory_context(query="", limit=4):
+    mems = get_relevant_memories(query=query, limit=limit)
+    if not mems:
+        return ""
+    lines = ["[ДОЛГОВРЕМЕННАЯ ПАМЯТЬ БОТА (ФАКТЫ И ПРАВИЛА, КОТОРЫЕ ПРОСИЛИ ЗАПОМНИТЬ ПОЛЬЗОВАТЕЛИ)]:"]
+    for m in mems:
+        author_str = f" (от {m['author']})" if m.get("author") else ""
+        topic_str = f"Тема '{m['topic']}': " if m.get("topic") else ""
+        lines.append(f"- {topic_str}{m['fact']}{author_str}")
+    return "\n".join(lines)
+
+def delete_bot_memory(query):
+    if not query:
+        return 0
+    q = str(query).strip().lower()
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM bot_memory WHERE lower(topic) LIKE ? OR lower(fact) LIKE ? OR lower(full_text) LIKE ?",
+            (f"%{q}%", f"%{q}%", f"%{q}%")
+        )
+        deleted = cur.rowcount
+        if deleted == 0:
+            q_words = [w for w in re.findall(r'\b[а-яa-z0-9]{4,}\b', q) if w not in {"забудь", "удали", "памяти", "информацию", "про"}]
+            if q_words:
+                conds = []
+                params = []
+                for w in q_words:
+                    stem = w[:-1] if len(w) >= 5 else w
+                    conds.append("(lower(topic) LIKE ? OR lower(fact) LIKE ? OR lower(full_text) LIKE ?)")
+                    p = f"%{stem}%"
+                    params.extend([p, p, p])
+                cur = conn.execute(f"DELETE FROM bot_memory WHERE {' AND '.join(conds)}", params)
+                deleted = cur.rowcount
+                if deleted == 0:
+                    cur = conn.execute(f"DELETE FROM bot_memory WHERE {' OR '.join(conds)}", params)
+                    deleted = cur.rowcount
+
+    if deleted:
+        try:
+            sync_memories_to_disk()
+        except Exception:
+            pass
+    return deleted
+
+def clear_all_bot_memories():
+    with get_db() as conn:
+        conn.execute("DELETE FROM bot_memory")
+    try:
+        if os.path.exists(MEMORIES_FILE):
+            os.remove(MEMORIES_FILE)
+    except Exception:
+        pass
+    return True
+
 # Initialize tables on import
 try:
     init_db()
+    restore_bot_memories()
 except Exception:
     pass
 

@@ -811,6 +811,15 @@ def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
             f"Мем должен быть строго про «{clean_theme}» — жизненный, остроумный, смешной, молодежный/пацанский юмор."
         )
 
+    memory_info = ""
+    try:
+        from db import format_memory_context
+        mem_ctx = format_memory_context(clean_theme, limit=3) or format_memory_context(raw_theme, limit=3)
+        if mem_ctx:
+            memory_info = f"\n9. ФАКТЫ ИЗ ДОЛГОВРЕМЕННОЙ ПАМЯТИ БОТА:\n{mem_ctx}\nОБЯЗАТЕЛЬНО ИСПОЛЬЗУЙ И ВКЛЮЧИ ЭТИ ФАКТЫ/ПРАВИЛА В СЮЖЕТ, ПАНЧЛАЙНЫ И ТЕКСТ МЕМА!"
+    except Exception:
+        pass
+
     prompt = f"""Напиши автономный скрипт на Python 3 с использованием библиотеки Pillow (PIL), который С НУЛЯ создает уникальный графический мем по запросу:
 «{clean_theme}»
 
@@ -840,7 +849,7 @@ def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
      `img.save(out_path, 'PNG')`
    - В САМОЙ ПОСЛЕДНЕЙ СТРОКЕ скрипт ОБЯЗАТЕЛЬНО должен вывести путь к файлу в stdout:
      `print(out_path)`
-8. Скрипт должен быть полностью самодостаточным, без внешних сетевых запросов и без вызова сторонних библиотек кроме Pillow.
+8. Скрипт должен быть полностью самодостаточным, без внешних сетевых запросов и без вызова сторонних библиотек кроме Pillow.{memory_info}
 
 Верни ТОЛЬКО готовый Python 3 код строго внутри одного блока ```python ... ``` без лишнего текста вокруг."""
 

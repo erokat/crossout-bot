@@ -49,7 +49,14 @@ from db import (
     is_handled,
     add_handled_id,
     configure_session_sqlite,
-    restore_dynamic_skills
+    restore_dynamic_skills,
+    save_bot_memory,
+    get_relevant_memories,
+    format_memory_context,
+    get_all_memories,
+    delete_bot_memory,
+    clear_all_bot_memories,
+    restore_bot_memories
 )
 
 def boost_cleanup_temp_files():
@@ -680,6 +687,12 @@ DEFAULT_BOT_SYSTEM_INSTRUCTION = (
 
 def ask_ai(prompt, photo_path=None, system_instruction=None):
     effective_instruction = system_instruction or DEFAULT_BOT_SYSTEM_INSTRUCTION
+    try:
+        mem_ctx = format_memory_context(prompt, limit=3)
+        if mem_ctx:
+            effective_instruction = f"{effective_instruction}\n\n{mem_ctx}"
+    except Exception:
+        pass
     prompt_lower = prompt.lower()
     # 0. Приоритет Antigravity CLI (Gemini 3.8 Flash Medium) для генерации кода
     is_code = any(w in prompt_lower for w in [
@@ -1061,11 +1074,120 @@ def spawn_meme_creator_subagent(
     return t
 
 
+def is_memory_request(text):
+    if not text:
+        return False
+    t_low = text.lower().strip()
+    clean_t = re.sub(r"^(?:!|/)?(?:бот|ботяра|ботик|робот)[,\s:]*", "", t_low).strip()
+
+    # 1. Запомни / сохрани в память
+    if re.search(r"\b(?:запомни|сохрани\s+в\s+память|запиши\s+в\s+память|добавь\s+в\s+память|запомнить|держи\s+в\s+памяти)\b", clean_t):
+        return True
+    # 2. Что ты помнишь / покажи память / вспомни
+    if any(w in clean_t for w in ["что ты помнишь", "что в памяти", "покажи память", "список памяти", "вспомни всё", "вспомни все"]):
+        return True
+    if re.search(r"\b(?:вспомни|что\s+ты\s+(?:помнишь|знаешь)\s+(?:про|о|об|насчет))\b", clean_t):
+        return True
+    # 3. Забудь / удали из памяти / сотри память
+    if re.search(r"\b(?:забудь|удали\s+из\s+памяти|сотри\s+из\s+памяти|очисти\s+память|сотри\s+память)\b", clean_t):
+        return True
+    return False
+
+def process_memory_command(text, sender_name="Ярик", is_owner=False):
+    target_name = "Миша" if is_owner else ("Ярик" if sender_name not in ["Миша", "erokat"] else sender_name)
+    clean_t = re.sub(r"^(?:!|/)?(?:бот|ботяра|ботик|робот)[,\s:]*", "", text, flags=re.I).strip()
+    t_low = clean_t.lower()
+
+    # 1. Полная очистка памяти
+    if any(w in t_low for w in [
+        "забудь всю информацию", "забудь все что знаешь", "забудь всё что знаешь",
+        "сотри память", "очисти память", "очистить память", "стереть память",
+        "забудь всё", "забудь все", "забудь обо мне", "забудь всё обо мне"
+    ]):
+        clear_all_bot_memories()
+        log_event(f"[MEMORY] All memories wiped by {target_name}: {text!r}")
+        return f"Принял, {target_name}! Всю долговременную память зачистил начисто. Общаемся с чистого листа! 🤝"
+
+    # 2. Удаление конкретной темы из памяти
+    forget_match = re.search(r"(?:забудь(?:\s+про|\s+о|\s+об|\s+насчет)?|удали\s+из\s+памяти|сотри\s+из\s+памяти)\s+([^\.!\n\?]+)", clean_t, re.I)
+    if forget_match:
+        topic_to_del = forget_match.group(1).strip()
+        topic_to_del = re.sub(r"^(?:информацию\s+(?:о|про)|всё\s+(?:о|про)|все\s+(?:о|про))\s*", "", topic_to_del, flags=re.I).strip(' \t\n\r"\'«»')
+        if topic_to_del and topic_to_del.lower() not in {"всё", "все", "память"}:
+            deleted = delete_bot_memory(topic_to_del)
+            log_event(f"[MEMORY] Deleted memory topic '{topic_to_del}' (count={deleted}) by {target_name}")
+            if deleted > 0:
+                return f"Принял, {target_name}! Удалил из памяти всё по теме «{topic_to_del}» (записей: {deleted}) 👍 Больше об этом не вспомню."
+            else:
+                return f"{target_name}, по теме «{topic_to_del}» в памяти ничего не нашлось, удалять нечего 👍"
+
+    # 3. Запрос: что ты помнишь / покажи память
+    if any(w in t_low for w in ["что ты помнишь", "что в памяти", "покажи память", "список памяти", "вспомни всё", "вспомни все"]):
+        mems = get_all_memories(limit=10)
+        log_event(f"[MEMORY] Listing memories for {target_name} (total={len(mems)})")
+        if not mems:
+            return f"{target_name}, в моей долговременной памяти пока пусто! Скажи: «Бот, запомни: ...» — и я сохраню любой факт навсегда 👍"
+        lines = [f"{target_name}, вот что записано в моей долговременной памяти 🧠:"]
+        for idx, m in enumerate(mems, 1):
+            top_str = f"Тема '{m['topic']}': " if m.get("topic") else ""
+            fact_short = m["fact"][:120] + ("..." if len(m["fact"]) > 120 else "")
+            lines.append(f"{idx}. {top_str}{fact_short}")
+        lines.append("\nЯ учитываю всё это в ответах и в создании мемов!")
+        return "\n".join(lines)
+
+    # 4. Запрос: вспомни про <тема> / что ты знаешь про <тема>
+    recall_match = re.search(r"(?:вспомни(?:\s+про|\s+о|\s+об|\s+насчет)?|что\s+ты\s+(?:помнишь|знаешь)\s+(?:про|о|об|насчет))\s+([^\.!\n\?]+)", clean_t, re.I)
+    if recall_match:
+        q_topic = recall_match.group(1).strip().strip(' \t\n\r"\'«»')
+        if q_topic and q_topic.lower() not in {"всё", "все", "память"}:
+            relevant = get_relevant_memories(q_topic, limit=5)
+            log_event(f"[MEMORY] Recalled memories for '{q_topic}' by {target_name} (found={len(relevant)})")
+            if relevant:
+                lines = [f"{target_name}, вот что я помню по теме «{q_topic}» 🧠:"]
+                for r in relevant:
+                    lines.append(f"• {r['fact']}")
+                return "\n".join(lines)
+            else:
+                return f"{target_name}, по теме «{q_topic}» в долговременной памяти пока ничего нет! Если хочешь, чтобы я это знал — напиши: «Бот, запомни: ...» 👍"
+
+    # 5. Запоминание нового факта (запомни / сохрани в память)
+    rem_match = re.match(
+        r"^(?:пожалуйста[,\s]*)?(?:запомни|сохрани\s+в\s+память|запиши\s+в\s+память|добавь\s+в\s+память|запомнить|держи\s+в\s+памяти)(?:[:\s]+|\s+что\s+|\s+то,\s*что\s+)?(.*)$",
+        clean_t,
+        re.IGNORECASE | re.DOTALL
+    )
+    if rem_match and rem_match.group(1).strip():
+        fact_text = rem_match.group(1).strip()
+        save_bot_memory(fact=fact_text, full_text=text, author=target_name)
+        log_event(f"[MEMORY] Saved new memory by {target_name}: fact={fact_text[:80]!r}")
+        fact_preview = fact_text[:200] + ("..." if len(fact_text) > 200 else "")
+        return (
+            f"Запомнил намертво, {target_name}! 🧠💾\n\n"
+            f"«{fact_preview}»\n\n"
+            "Записал в долговременную память. Теперь я всегда буду помнить и учитывать это и в ответах, и в мемах! 🤝"
+        )
+
+    return None
+
+
 def handle_owner_message(msg_data):
     text = msg_data.get("text", "").strip()
     photo = msg_data.get("photo")
     t_lower = text.lower()
     log_event(f"[ORCHESTRATOR] Handling OWNER task: {text!r} (photo={photo})")
+
+    # 0.005. Долговременная память бота для владельца (Запомни / Вспомни / Забудь)
+    if is_memory_request(text):
+        mem_reply = process_memory_command(text, sender_name="Миша", is_owner=True)
+        if mem_reply:
+            cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--text", mem_reply
+            ]
+            subprocess.run(cmd)
+            return
 
     # 0.01. Отключение Crossout-сленга / сброс Crossout-режима
     if any(w in t_lower for w in [
@@ -1861,22 +1983,20 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
-    if any(w in t_lower for w in [
-        "забудь всю информацию", "забудь все что знаешь", "забудь всё что знаешь",
-        "забудь информацию о ярике", "забудь обо мне", "сотри память", "очисти память",
-        "забудь всё обо мне", "забудь все обо мне", "забудь о ярике", "забудь ярика"
-    ]):
+    # 0.52. Долговременная память бота (Запомни / Вспомни / Что ты помнишь / Забудь / Очисти память)
+    if is_memory_request(text):
         target_name = "Миша" if is_owner_sender else "Ярик"
-        reply_forget = f"Принял, {target_name}! Всю оперативку и данные зачистил начисто. Общаемся с чистого листа, по-человечески и без всякого бреда! 🤝"
-        send_cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "yarik",
-            "--text", reply_forget,
-            "--reply-to", str(msg_id)
-        ]
-        subprocess.run(send_cmd)
-        return
+        mem_reply = process_memory_command(text, sender_name=target_name, is_owner=is_owner_sender)
+        if mem_reply:
+            send_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--text", mem_reply,
+                "--reply-to", str(msg_id)
+            ]
+            subprocess.run(send_cmd)
+            return
 
     if any(w in t_lower for w in ["забудь эту фотографию", "забудь это фото", "забудь эту пикчу"]):
         target_name = "Миша" if is_owner_sender else "Ярик"
@@ -2522,6 +2642,10 @@ def main():
     print("=" * 60)
 
     setup_environment()
+    try:
+        restore_bot_memories()
+    except Exception:
+        pass
     cfg = load_config()
 
     port = int(os.environ.get("PORT", 10000))
