@@ -3,6 +3,7 @@ import sys
 import shutil
 import argparse
 import asyncio
+import re
 import fcntl
 import uuid
 import json
@@ -166,7 +167,23 @@ async def delete_via_telethon(cfg, chat_id, message_ids):
         finally:
             await client.disconnect()
 
+def prepare_telethon_text(text):
+    if not text:
+        return text
+    # Convert single underscore formatting (_text_) to double underscore (__text__) for Telethon
+    # Telethon's markdown parser requires __text__ for italics; single _text_ is left as raw underscores.
+    parts = re.split(r"(`[^`]+`)", text)
+    processed = []
+    for part in parts:
+        if part.startswith("`") and part.endswith("`"):
+            processed.append(part)
+        else:
+            conv = re.sub(r"(?<![_\w])_(?!_)(.+?)(?<!_)_(?![_\w])", r"__\1__", part)
+            processed.append(conv)
+    return "".join(processed)
+
 async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=None, no_copy=False):
+    telethon_text = prepare_telethon_text(text) if text else text
     with session_flock():
         configure_session_sqlite()
         client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
@@ -198,7 +215,7 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
                 msg = await client.send_file(
                     entity,
                     photo_path,
-                    caption=text or "",
+                    caption=telethon_text or "",
                     reply_to=reply_to
                 )
                 print(f"Telethon file sent (msg_id={msg.id})")
@@ -238,7 +255,7 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
             else:
                 msg = await client.send_message(
                     entity,
-                    text,
+                    telethon_text,
                     reply_to=reply_to
                 )
                 print(f"Telethon text sent (msg_id={msg.id})")

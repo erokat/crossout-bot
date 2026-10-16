@@ -83,7 +83,22 @@ class TestWebSearchSkill(unittest.TestCase):
         res, media = execute_autonomous_task(query, sender_name="Миша")
         self.assertIn("web_search_skill.py", res)
         self.assertIn("уже успешно создан и зарегистрирован", res)
+        self.assertIn("📌", res)
+        self.assertNotIn("_{desc}_", res)
         self.assertIsNone(media)
+
+    def test_prepare_telethon_text(self):
+        from send import prepare_telethon_text
+        from telethon.extensions import markdown
+
+        raw_text = "⚡ **Навык создан и активен:** `web_search_skill.py`\n_Умный поиск информации, новостей, фактов и ответов на вопросы в интернете_"
+        prepared = prepare_telethon_text(raw_text)
+        self.assertIn("__Умный поиск информации", prepared)
+
+        parsed_msg, entities = markdown.parse(prepared)
+        self.assertNotIn("_Умный поиск", parsed_msg)
+        self.assertNotIn("интернете_", parsed_msg)
+        self.assertTrue(any(e.__class__.__name__ == "MessageEntityItalic" for e in entities))
 
 if __name__ == "__main__":
     unittest.main()

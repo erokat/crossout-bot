@@ -698,7 +698,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             trig_example = f"«!бот {triggers[0]} ...»" if triggers else f"«!бот {s_name}»"
             report = (
                 f"⚡ **Навык готов и активен:** `{os.path.basename(existing_script)}`\n"
-                f"_{desc}_\n\n"
+                f"📌 {desc}\n\n"
                 f"{sender_name}, этот навык уже успешно создан и зарегистрирован в системе! 🔥\n"
                 f"Ты можешь прямо сейчас использовать его, например: {trig_example}"
             )
@@ -736,7 +736,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
             else:
                 report = (
                     f"⚡ **Использовано дополнение к боту:** `{os.path.basename(existing_script)}`\n"
-                    f"_{ext_info.get('description', 'Выполнение сохраненной функции')}_\n\n"
+                    f"📌 {ext_info.get('description', 'Выполнение сохраненной функции')}\n\n"
                 )
                 if stdout:
                     report += f"📊 **Результат:**\n```\n{stdout[:2000]}\n```\n"
