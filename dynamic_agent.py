@@ -382,7 +382,7 @@ def auto_install_missing_packages(error_output):
 
     return installed_any
 
-def run_script(script_path, input_file=None, task_text=None, timeout=60):
+def run_script(script_path, input_file=None, task_text=None, sender_name=None, timeout=60):
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     ffmpeg_exe = get_ffmpeg_binary()
@@ -394,6 +394,8 @@ def run_script(script_path, input_file=None, task_text=None, timeout=60):
 
     if task_text:
         env["TASK_TEXT"] = str(task_text)
+    if sender_name:
+        env["SENDER_NAME"] = str(sender_name)
 
     args = [sys.executable, script_path]
     if input_file:
@@ -761,7 +763,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 if "ModuleNotFoundError" in stderr or "No module named" in stderr:
                     installed = auto_install_missing_packages(stderr)
                     if installed:
-                        code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+                        code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, sender_name=sender_name, timeout=60)
 
                 if code_rc != 0:
                     for attempt in range(1, 4):
@@ -788,10 +790,10 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                             with open(script_path, "w", encoding="utf-8") as f:
                                 f.write(fixed_code)
                             code = fixed_code
-                            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+                            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, sender_name=sender_name, timeout=60)
                             if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
                                 if auto_install_missing_packages(stderr):
-                                    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+                                    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, sender_name=sender_name, timeout=60)
                             if code_rc == 0:
                                 print(f"[DYNAMIC SKILL ENGINE] Self-healing succeeded on attempt {attempt}/3 for existing skill!")
                                 try:
@@ -872,34 +874,43 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     # 2. Генерируем новое дополнение с нуля
     # 2. Генерируем новый динамический модуль с нуля через Gemini
     prompt = (
-        f"Ты — автономный генератор Python 3 скриптов и медиа (Dynamic Skill Engine) для Telegram-бота.\n"
+        f"Ты — автономный генератор надежных Python 3 скриптов и модулей (Dynamic Skill Engine) для Telegram-бота.\n"
         f"Пользователь {sender_name} просит выполнить задачу: «{task_text}».\n"
         f"{file_context}{prev_context}\n"
+        "ПРАВИЛА ОБРАЩЕНИЯ К ПОЛЬЗОВАТЕЛЯМ:\n"
+        "1. К владельцу бота обращаться ТОЛЬКО по имени «Миша» (Миха, Мишан). Категорически запрещено называть его 'шеф', 'босс', 'командир' или 'Ярик'!\n"
+        "2. К другу обращаться «Ярик».\n"
+        "3. Имя текущего пользователя доступно в коде через `os.environ.get('SENDER_NAME', 'Миша')`.\n\n"
         "ВАЖНЕЙШЕЕ ПРАВИЛО ТЕМАТИКИ (СТРОЖАЙШИЙ ЗАПРЕТ НА ЛИШНИЙ КРОССАУТ):\n"
         "1. Создавай изображение/мем/графику/скрипт СТРОГО по теме, которую запросил пользователь!\n"
         "2. Если запрос про шахматы — делай ТОЛЬКО шахматы (никакого Crossout, никаких скорпионов, кабин и пушек, если о них прямо не просили)!\n"
         "3. Если запрос про Rain World, котиков, учёбу, CS, Dota, жизненные ситуации, аниме, сессию, программирование — делай СТРОГО по этой теме!\n"
         "4. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО приплетать элементы Crossout (Газген, ПТУР, Капканы, Пустоши, Скорпион, кабины, ховеры), если в тексте задачи пользователь САМ прямо не упомянул игру Crossout или её детали!\n"
         "5. Игру Crossout используй ТОЛЬКО тогда, когда пользователь САМ прямо попросил Crossout (или явно упомянул крафты, оружие и детали из Crossout).\n\n"
-        "СПЕЦИФИКАЦИЯ ВНУТРЕННЕЙ АРХИТЕКТУРЫ И ОКРУЖЕНИЯ:\n"
+        "СПЕЦИФИКАЦИЯ ВНУТРЕННЕЙ АРХИТЕКТУРЫ, ПОДКЛЮЧЕНИЙ И ОКРУЖЕНИЯ:\n"
         "1. Корень проекта находится в PYTHONPATH. Тебе доступны модули:\n"
         "   - `from db import get_db, get_kv, set_kv` — чтение и запись в базу данных SQLite.\n"
         "   - `from media_finder import find_and_download_image` — поиск и скачивание артов/изображений.\n"
-        "2. Рабочие директории и генерация медиа:\n"
-        "   - `./media/` — сохранение любых сгенерированных медиафайлов (картинки, графики, qr, видео, аудио).\n"
-        "   - ДЛЯ ГЕНЕРАЦИИ КАРТИНОК, ГРАФИКИ, МЕМОВ, АРТОВ И СХЕМ: используй библиотеку `PIL` (`Pillow`) или `matplotlib`. Шрифты лежат в `./media/` (`RussoOne-Regular.ttf`, `Montserrat.ttf`, `Comfortaa.ttf`, `Anton.ttf`). Рисуй все запрошенные пользователем сцены, детали, персонажей и надписи качественно! Готовый файл сохраняй в `./media/<filename>.png` и обязательно печатай путь в stdout: `print(out_path)`.\n"
-        "   - ЕСЛИ ПРИКРЕПЛЕН ВХОДНОЙ ФАЙЛ (INPUT_FILE) И ЗАПРОШЕН ФОТОМОНТАЖ / РЕДАКТИРОВАНИЕ (замена фона, вставка объектов из интернета, коллаж, добавление деталей): открой `INPUT_FILE` через Image.open(), скачай нужные картинки (urllib / requests) или возьми из `./media/`, вырежи, наложи слои, сохрани результат в `./media/<filename>.jpg` и напечатай путь в stdout: `print(out_path)`.\n"
-        "3. Входные аргументы скрипта:\n"
+        "2. Входные параметры скрипта:\n"
         "   - Текст запроса: `os.environ.get('TASK_TEXT')` или `sys.argv[1]`.\n"
         "   - Входной файл (если прикреплен): `os.environ.get('INPUT_FILE')`.\n"
+        "   - Имя пользователя: `os.environ.get('SENDER_NAME', 'Миша')`.\n"
         "   - Исполняемый ffmpeg: `os.environ.get('FFMPEG_EXE', 'ffmpeg')`.\n"
-        "4. Библиотеки и зависимости:\n"
+        "3. Библиотеки, сетевые подключения и зависимости:\n"
         "   - Если нужны внешние пакеты (requests, beautifulsoup4, pillow, openpyxl, pandas, matplotlib, qrcode, pydub), свободно импортируй их!\n"
-        "   - Движок автоматически установит недостающие пакеты через pip.\n"
-        "5. ЗАЩИТА СИСТЕМНОГО ЯДРА (СТРОГИЙ ЗАПРЕТ):\n"
+        "   - Движок бота автоматически обнаружит и установит недостающие пакеты через pip при первом запуске.\n"
+        "   - Для работы с сетью и внешними API используй `requests` или `urllib.request` с таймаутом.\n"
+        "4. Рабочие директории и генерация медиа:\n"
+        "   - `./media/` — сохранение любых сгенерированных медиафайлов (картинки, графики, qr, видео, аудио).\n"
+        "   - ДЛЯ ГЕНЕРАЦИИ КАРТИНОК, ГРАФИКИ, МЕМОВ, АРТОВ И СХЕМ: используй библиотеку `PIL` (`Pillow`) или `matplotlib`. Шрифты лежат в `./media/` (`RussoOne-Regular.ttf`, `Montserrat.ttf`, `Comfortaa.ttf`, `Anton.ttf`). Рисуй все запрошенные пользователем сцены, детали, персонажей и надписи качественно! Готовый файл сохраняй в `./media/<filename>.png` и обязательно печатай путь в stdout: `print(out_path)`.\n"
+        "   - ЕСЛИ ПРИКРЕПЛЕН ВХОДНОЙ ФАЙЛ (INPUT_FILE) И ЗАПРОШЕН ФОТОМОНТАЖ / РЕДАКТИРОВАНИЕ: открой `INPUT_FILE` через Image.open(), скачай нужные картинки (urllib / requests) или возьми из `./media/`, вырежи, наложи слои, сохрани результат в `./media/<filename>.jpg` и напечатай путь в stdout: `print(out_path)`.\n"
+        "5. ПРАВИЛА ВЫВОДА В STDOUT (КАК ПРАВИЛЬНО ЗАПУСКАТЬ И ВЫВОДИТЬ):\n"
+        "   - Если скрипт генерирует медиафайл (картинка, мем, график): первой строкой напечатай путь к созданному файлу (`print(out_path)`). Второй строкой можно напечатать живой текст/подпись.\n"
+        "   - Если задача текстовая (погода, расчет, парсинг, курс валют, факт, перевод): напечатай готовый чистый текст прямо в stdout (`print(result)`).\n"
+        "6. ЗАЩИТА СИСТЕМНОГО ЯДРА (СТРОГИЙ ЗАПРЕТ):\n"
         "   Никогда не изменяй и не перезаписывай файлы ядра бота:\n"
         "   keep_alive.py, wait_for_yarik.py, db.py, send.py, session.session, crossout_session.session, config.py.\n"
-        "6. Метаданные навыка в начале файла:\n"
+        "7. Метаданные навыка в начале файла:\n"
         "   # SKILL_NAME: <slug_латиницей>\n"
         "   # DESCRIPTION: <Краткое описание навыка>\n"
         "   # TRIGGERS: <полная_фраза_триггера_1>, <полная_фраза_триггера_2>\n"
@@ -1007,13 +1018,13 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     start_time = time.time()
 
     # Первый запуск (таймаут 60 секунд)
-    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+    code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, sender_name=sender_name, timeout=60)
 
     # Если не хватило модуля — авто-устанавливаем через pip (таймаут 45с) и перезапускаем
     if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
         installed = auto_install_missing_packages(stderr)
         if installed:
-            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+            code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, sender_name=sender_name, timeout=60)
 
     # Self-healing / самоотладка при ошибках (до 3 итераций!)
     if code_rc != 0:
@@ -1041,10 +1052,10 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 with open(script_path, "w", encoding="utf-8") as f:
                     f.write(fixed_code)
                 code = fixed_code
-                code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+                code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, sender_name=sender_name, timeout=60)
                 if code_rc != 0 and ("ModuleNotFoundError" in stderr or "No module named" in stderr):
                     if auto_install_missing_packages(stderr):
-                        code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, timeout=60)
+                        code_rc, stdout, stderr = run_script(script_path, input_file=photo_path, task_text=task_text, sender_name=sender_name, timeout=60)
                 if code_rc == 0:
                     print(f"[DYNAMIC SKILL ENGINE] Self-healing succeeded on attempt {attempt}/3!")
                     try:
