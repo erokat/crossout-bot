@@ -69,5 +69,22 @@ class TestChessPhotoFixes(unittest.TestCase):
         if os.path.exists(edited_p):
             os.remove(edited_p)
 
+    def test_sniper_rifle_chess_placement(self):
+        text = "Бот сгенерируй на шахматной доске на клетке B1 черного короля, на B3 белого короля, на C2 белого ферзя, на H7 черного слона и чтобы у одной фигуры была снайперка и чтобы там почти мат давала и выцеливала кого-то"
+        pieces, mode, highlights, arrow, attachments = parse_chess_request(text)
+        self.assertEqual(pieces.get("b1"), "bK")
+        self.assertEqual(pieces.get("b3"), "wK")
+        self.assertEqual(pieces.get("c2"), "wQ")
+        self.assertEqual(pieces.get("h7"), "bB")
+        self.assertEqual(arrow, ("h7", "c2"))
+        self.assertIsNotNone(attachments)
+        self.assertEqual(attachments.get("h7"), "sniper_rifle")
+
+        img_path, caption = process_chess_command(text, sender_name="Миша")
+        self.assertTrue(os.path.exists(img_path))
+        self.assertIn("снайперск", caption.lower())
+        self.assertIn("h7", caption.lower())
+        self.assertIn("c2", caption.lower())
+
 if __name__ == "__main__":
     unittest.main()

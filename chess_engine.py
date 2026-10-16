@@ -133,7 +133,20 @@ WEAPON_MAP = {
     'harvester': 'harvester',
     'йети': 'yeti',
     'yeti': 'yeti',
-    'колесо': 'wheel1'
+    'колесо': 'wheel1',
+    'снайперка': 'sniper_rifle',
+    'снайперку': 'sniper_rifle',
+    'снайперке': 'sniper_rifle',
+    'снайпер': 'sniper_rifle',
+    'снайперская': 'sniper_rifle',
+    'снайперскую': 'sniper_rifle',
+    'снайперское': 'sniper_rifle',
+    'винтовка': 'sniper_rifle',
+    'винтовку': 'sniper_rifle',
+    'винтовке': 'sniper_rifle',
+    'awp': 'sniper_rifle',
+    'rifle': 'sniper_rifle',
+    'прицел': 'sniper_rifle'
 }
 
 def is_chess_request(text, has_photo=False):
@@ -212,16 +225,17 @@ def parse_chess_request(text):
     # Проверка явных координат
     coord_match = re.search(r'\b([a-hA-Hа-яА-Я][1-8]|[1-8][a-hA-Hа-яА-Я])\b', t)
     target_sq = normalize_square(coord_match.group(1)) if coord_match else None
+    all_coords = re.findall(r'\b([a-hA-Hа-яА-Я][1-8]|[1-8][a-hA-Hа-яА-Я])\b', t)
 
-    # Если запрошено оружие для фигуры (например: «черной фигуре слон оружие птур»)
-    if detected_weapon:
+    # Если запрошено оружие для фигуры (например: «черной фигуре слон оружие птур») ТОЛЬКО если 1 координата
+    if detected_weapon and len(all_coords) <= 1:
         if target_sq:
             pieces = {target_sq: f"{col}{piece}"}
             attachments = {target_sq: detected_weapon}
             highlights = {target_sq: (80, 220, 120, 140)}
             return pieces, "weapon_custom", highlights, None, attachments
         else:
-            # Если слон с оружием (культовый снайперский слон Crossout x Шахматы!)
+            # Если слон с оружием
             if piece == 'B':
                 pieces = {'b1': 'bK', 'b3': 'wK', 'c2': 'wQ', 'h7': f"{col}B"}
                 arrow = ('h7', 'c2')
@@ -282,8 +296,49 @@ def parse_chess_request(text):
         arrow = ('a1', 'g7')
         highlights = {'g7': (255, 90, 90, 140), 'a1': (80, 220, 120, 140)}
 
+    # Attachments for coordinate-based placement if weapon requested
+    attachments = None
+    if detected_weapon and pieces:
+        target_weapon_sq = None
+        # Check if specific piece type was named for weapon
+        if any(w in t for w in ["слон", "офицер", "bishop"]):
+            for sq, p_code in pieces.items():
+                if p_code[1] == 'B':
+                    target_weapon_sq = sq
+                    break
+        elif any(w in t for w in ["ферз", "queen"]):
+            for sq, p_code in pieces.items():
+                if p_code[1] == 'Q':
+                    target_weapon_sq = sq
+                    break
+        elif any(w in t for w in ["ладь", "rook"]):
+            for sq, p_code in pieces.items():
+                if p_code[1] == 'R':
+                    target_weapon_sq = sq
+                    break
+        elif any(w in t for w in ["кон", "knight"]):
+            for sq, p_code in pieces.items():
+                if p_code[1] == 'N':
+                    target_weapon_sq = sq
+                    break
+
+        if not target_weapon_sq and arrow:
+            target_weapon_sq = arrow[0]
+
+        if not target_weapon_sq:
+            non_kings = [sq for sq, p_code in pieces.items() if p_code[1] != 'K']
+            target_weapon_sq = non_kings[0] if non_kings else list(pieces.keys())[0]
+
+        if target_weapon_sq:
+            attachments = {target_weapon_sq: detected_weapon}
+            if not highlights:
+                highlights = {}
+            if target_weapon_sq not in highlights:
+                highlights[target_weapon_sq] = (80, 220, 120, 140)
+
     if pieces:
-        return pieces, "custom", highlights, arrow, None
+        mode = "custom_weapon" if attachments else "custom"
+        return pieces, mode, highlights, arrow, attachments
 
     # 4. Semantic checkmate / 2 kings + 1 queen pattern
     if any(w in t for w in ["2 короля", "двух королей", "2 королей"]) or ("корол" in t and "ферз" in t and any(w in t for w in ["мат", "ставит мат", "почти мат", "ловушк"])):
@@ -292,7 +347,9 @@ def parse_chess_request(text):
             pieces = {'b1': 'bK', 'b3': 'wK', 'c2': 'wQ', 'h7': 'bB'}
             arrow = ('h7', 'c2')
             highlights = {'c2': (255, 90, 90, 140), 'h7': (80, 220, 120, 140)}
-            return pieces, "sniper", highlights, arrow, None
+            weapon_att = detected_weapon or ("sniper_rifle" if any(w in t for w in ["снайпер", "винтовк"]) else None)
+            attachments = {'h7': weapon_att} if weapon_att else None
+            return pieces, "sniper", highlights, arrow, attachments
         else:
             pieces = {'e8': 'bK', 'e6': 'wK', 'e7': 'wQ'}
             highlights = {'e8': (255, 90, 90, 140), 'e7': (255, 215, 0, 140)}
@@ -303,7 +360,9 @@ def parse_chess_request(text):
         pieces = {'b1': 'bK', 'b3': 'wK', 'c2': 'wQ', 'h7': f"{col}B"}
         arrow = ('h7', 'c2')
         highlights = {'c2': (255, 90, 90, 140), 'h7': (80, 220, 120, 140)}
-        return pieces, "sniper", highlights, arrow, None
+        weapon_att = detected_weapon or ("sniper_rifle" if any(w in t for w in ["снайпер", "винтовк"]) else None)
+        attachments = {'h7': weapon_att} if weapon_att else None
+        return pieces, "sniper", highlights, arrow, attachments
 
     # 5. Fallback: clean empty board ТОЛЬКО если прямо просили пустую доску
     return {}, "empty", None, None, None
@@ -429,6 +488,8 @@ def render_chess_board(pieces_dict=None, highlight_squares=None, arrow=None, att
                 continue
             c_idx = files.index(f_char)
             r_idx = ranks.index(r_char)
+            piece_cx = margin + c_idx * sq_size + sq_size // 2
+            piece_cy = margin + r_idx * sq_size + sq_size // 2
             px = margin + c_idx * sq_size + (sq_size - piece_size) // 2
             py = margin + r_idx * sq_size + (sq_size - piece_size) // 2
 
@@ -436,13 +497,41 @@ def render_chess_board(pieces_dict=None, highlight_squares=None, arrow=None, att
             if os.path.exists(weapon_file):
                 try:
                     w_raw = Image.open(weapon_file).convert("RGBA")
-                    w_scale = 68.0 / max(w_raw.width, w_raw.height)
-                    new_w = max(24, int(w_raw.width * w_scale))
-                    new_h = max(24, int(w_raw.height * w_scale))
-                    w_resized = w_raw.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                    wx = px + piece_size - new_w + 6
-                    wy = py - 6
-                    img.paste(w_resized, (wx, wy), w_resized)
+                    if weapon == "sniper_rifle":
+                        target_center = None
+                        if arrow and arrow[0].lower() == sq.lower():
+                            to_sq = arrow[1].lower()
+                            if to_sq[0] in files and to_sq[1] in ranks:
+                                tc = files.index(to_sq[0])
+                                tr = ranks.index(to_sq[1])
+                                target_center = (
+                                    margin + tc * sq_size + sq_size // 2,
+                                    margin + tr * sq_size + sq_size // 2
+                                )
+
+                        w_scale = 105.0 / max(w_raw.width, w_raw.height)
+                        new_w = max(24, int(w_raw.width * w_scale))
+                        new_h = max(24, int(w_raw.height * w_scale))
+                        w_resized = w_raw.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+                        if target_center:
+                            dx = target_center[0] - piece_cx
+                            dy = target_center[1] - piece_cy
+                            target_angle = math.degrees(math.atan2(dy, dx))
+                            rot_deg = -(target_angle + 45)
+                            w_resized = w_resized.rotate(rot_deg, resample=Image.Resampling.BICUBIC, expand=True)
+
+                        wx = piece_cx - w_resized.width // 2
+                        wy = piece_cy - w_resized.height // 2
+                        img.paste(w_resized, (wx, wy), w_resized)
+                    else:
+                        w_scale = 68.0 / max(w_raw.width, w_raw.height)
+                        new_w = max(24, int(w_raw.width * w_scale))
+                        new_h = max(24, int(w_raw.height * w_scale))
+                        w_resized = w_raw.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                        wx = px + piece_size - new_w + 6
+                        wy = py - 6
+                        img.paste(w_resized, (wx, wy), w_resized)
                 except Exception as e:
                     print(f"[CHESS WEAPON ERROR] Failed to draw {weapon}: {e}")
 
@@ -489,11 +578,28 @@ def process_chess_command(text, sender_name="Ярик", reply_to_photo=None):
         caption = f"Держи чистую шахматную доску без фигур! ♟️"
     elif mode == "start":
         caption = f"Расставил все 32 фигуры в начальную позицию. Партия начинается! ♟️👑"
-    elif mode == "weapon_sniper":
-        caption = f"Готово, {sender_name}! Вооружил черного слона на H7 ракетным комплексом ПТУР «Кларнет» из Crossout! ♟️🚀 Теперь белому ферзю на C2 точно крышка!"
-    elif mode == "weapon_custom":
-        w_title = attachments.get(list(pieces.keys())[0], "оружие").upper() if attachments else "ОРУЖИЕ"
-        caption = f"Готово, {sender_name}! Установил боевой модуль {w_title} прямо на шахматную фигуру! ♟️🔥"
+    elif mode in ["weapon_sniper", "weapon_custom", "custom_weapon"]:
+        w_name = attachments.get(list(attachments.keys())[0], "оружие") if attachments else "оружие"
+        if w_name == "sniper_rifle":
+            w_text = "снайперской винтовкой с оптическим прицелом"
+        elif w_name == "ptur":
+            w_text = "ракетным комплексом ПТУР"
+        else:
+            w_text = f"модулем {w_name.upper()}"
+
+        desc_parts = []
+        for sq, p_code in pieces.items():
+            color_ru = "белый" if p_code[0] == 'w' else "чёрный"
+            p_map = {'K': 'король', 'Q': 'ферзь', 'R': 'ладья', 'B': 'слон', 'N': 'конь', 'P': 'пешка'}
+            piece_ru = p_map.get(p_code[1], 'фигура')
+            desc_parts.append(f"{color_ru} {piece_ru} на {sq.upper()}")
+        pieces_summary = ", ".join(desc_parts)
+
+        if arrow:
+            from_sq, to_sq = arrow
+            caption = f"Готово, {sender_name}! Расставил фигуры по координатам ({pieces_summary}), вооружил фигуру на {from_sq.upper()} {w_text} и взял на прицел {to_sq.upper()}! ♟️🎯"
+        else:
+            caption = f"Готово, {sender_name}! Расставил фигуры по координатам ({pieces_summary}) и вооружил {w_text}! ♟️🔥"
     elif mode == "sniper":
         caption = f"Шахматная доска готова! Черный слон с H7 выцеливает белого ферзя на C2 через всю диагональ ♟️🎯"
     elif mode == "mate":
