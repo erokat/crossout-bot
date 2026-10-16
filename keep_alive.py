@@ -161,50 +161,67 @@ def setup_environment():
         except Exception as e:
             print(f"[INIT ERROR] Failed to decode SESSION_BASE64: {e}")
 
-    # 2. Decode OAUTH_TOKEN_BASE64 if present, or restore from repo session_data
-    oauth_dir = os.path.expanduser("~/.gemini/antigravity-cli")
-    os.makedirs(oauth_dir, exist_ok=True)
-    oauth_path = os.path.join(oauth_dir, "antigravity-oauth-token")
-
+    # 2. Decode OAUTH_TOKEN_BASE64 / AGY_TOKEN_JSON if present, or restore from repo session_data
+    token_bytes = None
     oauth_b64 = os.environ.get("OAUTH_TOKEN_BASE64")
+    agy_raw = os.environ.get("AGY_TOKEN_JSON")
     if oauth_b64:
         try:
-            with open(oauth_path, "wb") as f:
-                f.write(base64.b64decode(oauth_b64))
-            os.chmod(oauth_path, 0o600)
-            print(f"[INIT] antigravity-oauth-token decoded successfully to {oauth_path}")
+            token_bytes = base64.b64decode(oauth_b64)
         except Exception as e:
             print(f"[INIT ERROR] Failed to decode OAUTH_TOKEN_BASE64: {e}")
-    elif not os.path.exists(oauth_path):
+    elif agy_raw:
+        try:
+            token_bytes = agy_raw.encode("utf-8")
+        except Exception as e:
+            print(f"[INIT ERROR] Failed to encode AGY_TOKEN_JSON: {e}")
+
+    if not token_bytes:
         oauth_repo = os.path.join(BASE_DIR, "session_data", "antigravity-oauth-token")
         if os.path.exists(oauth_repo):
             try:
-                shutil.copy2(oauth_repo, oauth_path)
-                os.chmod(oauth_path, 0o600)
-                print(f"[INIT] antigravity-oauth-token restored from repo to {oauth_path}")
+                with open(oauth_repo, "rb") as f:
+                    token_bytes = f.read()
             except Exception as e:
-                print(f"[INIT ERROR] Failed to restore antigravity-oauth-token from repo: {e}")
+                print(f"[INIT ERROR] Failed to read token from repo session_data: {e}")
 
-    # 3. Create ~/.gemini/antigravity-cli/settings.json
-    gemini_dir = oauth_dir
-    try:
-        settings_path = os.path.join(gemini_dir, "settings.json")
-        settings_data = {
-            "model": "gemini-3.8-flash-medium",
-            "allowNonWorkspaceAccess": True,
-            "toolPermission": "always-proceed",
-            "artifactReviewPolicy": "always-proceed",
-            "trustedWorkspaces": [BASE_DIR, "/app", "/data/data/com.termux/files/home"]
-        }
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(settings_data, f, indent=2)
-        inst_path = os.path.join(gemini_dir, "installation_id")
-        if not os.path.exists(inst_path):
-            with open(inst_path, "w", encoding="utf-8") as f:
-                f.write("34b32c25-9450-483f-9a3e-f10612cbe265")
-        print(f"[INIT] settings.json and installation_id configured at {gemini_dir}")
-    except Exception as e:
-        print(f"[INIT ERROR] Failed to write settings.json: {e}")
+    target_oauth_dirs = [
+        os.path.expanduser("~/.gemini/antigravity-cli"),
+        "/root/.gemini/antigravity-cli",
+        "/app/.gemini/antigravity-cli"
+    ]
+    termux_cli_dir = "/data/data/com.termux/files/home/.gemini/antigravity-cli"
+    if os.path.exists("/data/data/com.termux/files/home"):
+        target_oauth_dirs.append(termux_cli_dir)
+
+    settings_data = {
+        "model": "gemini-3.8-flash-medium",
+        "allowNonWorkspaceAccess": True,
+        "toolPermission": "always-proceed",
+        "artifactReviewPolicy": "always-proceed",
+        "trustedWorkspaces": [BASE_DIR, "/app", "/data/data/com.termux/files/home"]
+    }
+
+    for gemini_dir in target_oauth_dirs:
+        try:
+            os.makedirs(gemini_dir, exist_ok=True)
+            oauth_path = os.path.join(gemini_dir, "antigravity-oauth-token")
+            if token_bytes:
+                with open(oauth_path, "wb") as f:
+                    f.write(token_bytes)
+                os.chmod(oauth_path, 0o600)
+                print(f"[INIT] antigravity-oauth-token written successfully to {oauth_path}")
+
+            settings_path = os.path.join(gemini_dir, "settings.json")
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(settings_data, f, indent=2)
+            inst_path = os.path.join(gemini_dir, "installation_id")
+            if not os.path.exists(inst_path):
+                with open(inst_path, "w", encoding="utf-8") as f:
+                    f.write("34b32c25-9450-483f-9a3e-f10612cbe265")
+            print(f"[INIT] settings.json configured at {gemini_dir}")
+        except Exception as e:
+            print(f"[INIT WARNING] Could not configure {gemini_dir}: {e}")
 
     # 4. Create config.json with TG API credentials
     try:
@@ -576,7 +593,7 @@ def ocr_image_file(photo_path):
 
 AGY_SEMAPHORE = threading.Semaphore(1)
 
-def run_antigravity_cli(prompt, timeout=40):
+def run_antigravity_cli(prompt, timeout=90):
     acquired = AGY_SEMAPHORE.acquire(blocking=True, timeout=5)
     if not acquired:
         log_event("[AGY WARNING] Another heavy CLI process is currently active. Skipping concurrent execution to protect Render memory.")
@@ -597,8 +614,19 @@ def run_antigravity_cli(prompt, timeout=40):
         env["AGY_AUTO_UPDATE"] = "0"
         env["ANTIGRAVITY_SKIP_UPDATE_CHECK"] = "1"
         env["DEBIAN_FRONTEND"] = "noninteractive"
-        env["GOMEMLIMIT"] = "100MiB"
-        env["GOGC"] = "20"
+        env["GOMEMLIMIT"] = "350MiB"
+        env["GOGC"] = "100"
+
+        home_candidates = [
+            os.path.expanduser("~"),
+            "/root",
+            "/app",
+            "/data/data/com.termux/files/home"
+        ]
+        for candidate in home_candidates:
+            if os.path.exists(os.path.join(candidate, ".gemini", "antigravity-cli", "antigravity-oauth-token")):
+                env["HOME"] = candidate
+                break
 
         max_retries = 1
         for attempt in range(1, max_retries + 1):
@@ -650,17 +678,31 @@ DEFAULT_BOT_SYSTEM_INSTRUCTION = (
 
 def ask_ai(prompt, photo_path=None, system_instruction=None):
     effective_instruction = system_instruction or DEFAULT_BOT_SYSTEM_INSTRUCTION
-    # 0. Приоритет Antigravity CLI (Gemini 3.8 Flash Medium) для веб-поиска, фактов, новостей и кода
-    is_search_or_code = any(w in prompt.lower() for w in [
-        "найди в интернете", "поищи в интернете", "погугли", "в сети", "интернет поиск",
-        "напиши python", "код на python", "скрипт на python", "python 3", "динамический модуль"
+    prompt_lower = prompt.lower()
+    # 0. Приоритет Antigravity CLI (Gemini 3.8 Flash Medium) для генерации кода
+    is_code = any(w in prompt_lower for w in [
+        "напиши python", "код на python", "скрипт на python", "python 3", "динамический модуль",
+        "dynamic skill", "исправь ошибку", "исходный код:"
     ])
-    if is_search_or_code:
-        search_prompt = f"[СИСТЕМНОЕ ПРАВИЛО: {effective_instruction}]\n\n{prompt}"
-        res = run_antigravity_cli(search_prompt, timeout=100)
+    if is_code:
+        # Для кода не приплетаем чат-инструкцию, отправляем чистый промпт кодогенерации в agy
+        res = run_antigravity_cli(prompt, timeout=120)
         if res:
             return res
-        # Если CLI не ответил, пробуем прямой Gemini API (если настроен ключ)
+        gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction="You are an expert Python 3 software developer. Return valid Python code inside ```python ... ```.")
+        if gemini_res:
+            return gemini_res
+        return None
+
+    # 1. Приоритет Antigravity CLI для веб-поиска, фактов и новостей
+    is_search = any(w in prompt_lower for w in [
+        "найди в интернете", "поищи в интернете", "погугли", "в сети", "интернет поиск"
+    ])
+    if is_search:
+        search_prompt = f"[СИСТЕМНОЕ ПРАВИЛО: {effective_instruction}]\n\n{prompt}"
+        res = run_antigravity_cli(search_prompt, timeout=90)
+        if res:
+            return res
         gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction=effective_instruction)
         if gemini_res:
             return gemini_res
