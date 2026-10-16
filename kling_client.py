@@ -252,6 +252,7 @@ def generate_kling_video_async(
     """
     def _worker():
         target_name = "Миша" if is_owner else "Ярик"
+        video_file = None
         try:
             # 1. Permission check for non-owner
             if not is_owner:
@@ -276,6 +277,25 @@ def generate_kling_video_async(
                     "--reply-to", str(reply_to_msg_id) if reply_to_msg_id else "0"
                 ])
                 return
+
+            cr_ok, cr_data = check_kling_credits()
+            if cr_ok and isinstance(cr_data, dict):
+                balance = None
+                for k in ["credits", "balance"]:
+                    if k in cr_data:
+                        balance = cr_data[k]
+                        break
+                    if isinstance(cr_data.get("data"), dict) and k in cr_data["data"]:
+                        balance = cr_data["data"][k]
+                        break
+                if balance is not None and isinstance(balance, (int, float)) and balance <= 0:
+                    no_credits_msg = f"{target_name}, на аккаунте Kling AI закончились кредиты ({balance}) 💸"
+                    subprocess.run([
+                        sys.executable, os.path.join(BASE_DIR, "send.py"),
+                        "--to", recipient, "--text", no_credits_msg,
+                        "--reply-to", str(reply_to_msg_id) if reply_to_msg_id else "0"
+                    ])
+                    return
 
             # 3. Task submission
             ack_msg = f"Принял задачу, {target_name}! Запустил генерацию видео в Kling AI... 🎬⏳ Это займет пару минут."
@@ -358,16 +378,21 @@ def generate_kling_video_async(
                 send_cmd.extend(["--reply-to", str(reply_to_msg_id)])
             subprocess.run(send_cmd)
 
-            # Cleanup video file to save memory/storage
-            try:
-                if os.path.exists(video_file):
-                    os.remove(video_file)
-                    print(f"[KLING CLEANUP] Removed temporary video: {video_file}")
-            except Exception:
-                pass
-
         except Exception as e:
             print(f"[KLING WORKER EXCEPTION] {e}")
+        finally:
+            if video_file and os.path.exists(video_file):
+                try:
+                    os.remove(video_file)
+                    print(f"[KLING CLEANUP] Removed temporary video: {video_file}")
+                except Exception:
+                    pass
+            if image_path and os.path.exists(image_path) and any(seg in image_path for seg in ["media/", "media\\", "owner_", "yarik_"]):
+                try:
+                    os.remove(image_path)
+                    print(f"[KLING CLEANUP] Cleaned up processed input image: {image_path}")
+                except Exception:
+                    pass
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()

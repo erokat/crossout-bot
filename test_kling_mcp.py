@@ -126,6 +126,30 @@ class TestKlingMCP(unittest.TestCase):
                 t2.join(timeout=2.0)
                 self.assertTrue(mock_perm.called)
 
+    @patch("kling_client.check_kling_credits")
+    @patch("kling_client.submit_text_to_video")
+    @patch("subprocess.run")
+    def test_generate_kling_video_async_zero_credits(self, mock_run, mock_submit, mock_credits):
+        mock_credits.return_value = (True, {"credits": 0})
+        with patch.dict(os.environ, {"KLING_API_KEY": "fake_key"}):
+            t = kling_client.generate_kling_video_async(
+                prompt="No credits test",
+                is_owner=True
+            )
+            t.join(timeout=2.0)
+            # Submit should NOT be called because credits are 0
+            self.assertFalse(mock_submit.called)
+
+    @patch("skills.kling_video_skill.generate_kling_video_async")
+    def test_kling_video_skill_invokes_async(self, mock_gen_async):
+        with patch.dict(os.environ, {"KLING_API_KEY": "fake_key"}):
+            import skills.kling_video_skill as kvs
+            res, media = kvs.handle_task("сгенерируй видео неоновый город", is_owner_sender=True)
+            self.assertIn("🎬", res)
+            self.assertIsNone(media)
+            mock_gen_async.assert_called_once()
+            self.assertIn("неоновый город", mock_gen_async.call_args[1]["prompt"])
+
 
 if __name__ == "__main__":
     unittest.main()

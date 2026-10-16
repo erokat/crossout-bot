@@ -802,47 +802,68 @@ def sync_memories_to_disk():
         json.dump(rows, f, ensure_ascii=False, indent=2)
 
 def restore_bot_memories():
-    # If local file missing, try to restore from GitHub or Google Drive
-    if not os.path.exists(MEMORIES_FILE) or os.path.getsize(MEMORIES_FILE) == 0:
+    local_rows = []
+    if os.path.exists(MEMORIES_FILE) and os.path.getsize(MEMORIES_FILE) > 2:
+        try:
+            with open(MEMORIES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list) and data:
+                    local_rows = data
+        except Exception:
+            local_rows = []
+
+    # If local file is missing, empty, or has no entries, restore from GitHub / Google Drive
+    if not local_rows:
         try:
             from github_sync import fetch_memories_from_github
             gh_content = fetch_memories_from_github()
             if gh_content:
-                with open(MEMORIES_FILE, "w", encoding="utf-8") as f:
-                    f.write(gh_content)
-                print(f"[MEMORY] Restored bot_memories.json from GitHub")
+                gh_data = json.loads(gh_content)
+                if isinstance(gh_data, list) and gh_data:
+                    with open(MEMORIES_FILE, "w", encoding="utf-8") as f:
+                        f.write(gh_content)
+                    local_rows = gh_data
+                    print(f"[MEMORY] Restored {len(local_rows)} bot_memories.json from GitHub")
         except Exception as e:
             print(f"[MEMORY WARNING] Error restoring from GitHub: {e}")
 
-        if not os.path.exists(MEMORIES_FILE) or os.path.getsize(MEMORIES_FILE) == 0:
+        if not local_rows:
             try:
                 from gdrive import download_memory_from_drive, get_valid_access_token
                 if get_valid_access_token():
-                    download_memory_from_drive(MEMORIES_FILE)
+                    dl_res = download_memory_from_drive(MEMORIES_FILE)
+                    if dl_res and os.path.exists(MEMORIES_FILE):
+                        with open(MEMORIES_FILE, "r", encoding="utf-8") as f:
+                            gd_data = json.load(f)
+                            if isinstance(gd_data, list) and gd_data:
+                                local_rows = gd_data
+                                print(f"[MEMORY] Restored {len(local_rows)} bot_memories.json from Google Drive")
             except Exception as e:
                 print(f"[MEMORY WARNING] Error restoring from Google Drive: {e}")
 
-    if not os.path.exists(MEMORIES_FILE):
+    if not local_rows:
         return 0
+
     try:
-        with open(MEMORIES_FILE, "r", encoding="utf-8") as f:
-            rows = json.load(f)
-        if not rows or not isinstance(rows, list):
-            return 0
         with get_db() as conn:
-            cur = conn.execute("SELECT COUNT(*) FROM bot_memory")
-            count = cur.fetchone()[0]
-            if count == 0:
-                for r in rows:
+            cur = conn.execute("SELECT topic, fact FROM bot_memory")
+            existing_pairs = {(r[0], r[1]) for r in cur.fetchall()}
+            inserted = 0
+            for r in local_rows:
+                pair = (r.get("topic", ""), r.get("fact", ""))
+                if pair not in existing_pairs:
                     conn.execute("""
                     INSERT INTO bot_memory (topic, fact, full_text, author, created_at)
                     VALUES (?, ?, ?, ?, ?)
                     """, (r.get("topic", ""), r.get("fact", ""), r.get("full_text", ""), r.get("author", ""), r.get("created_at", time.time())))
-                print(f"[MEMORY] Restored {len(rows)} memories from {MEMORIES_FILE}")
-                return len(rows)
+                    existing_pairs.add(pair)
+                    inserted += 1
+            if inserted:
+                print(f"[MEMORY] Seeded {inserted} memories into SQLite from bot_memories.json")
+            return len(local_rows)
     except Exception as e:
-        print(f"[MEMORY WARNING] Error restoring memories: {e}")
-    return 0
+        print(f"[MEMORY WARNING] Error restoring memories to SQLite: {e}")
+    return len(local_rows)
 
 def get_all_memories(limit=25):
     with get_db() as conn:

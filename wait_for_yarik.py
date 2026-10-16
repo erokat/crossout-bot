@@ -211,10 +211,14 @@ async def poll_control_bot(cfg, exit_event, result_box):
                         cq_msg_id = cq_msg.get("message_id")
                         if cq_msg_id:
                             try:
-                                url_del = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
-                                pld_del = json.dumps({"chat_id": owner_id, "message_id": int(cq_msg_id)}).encode("utf-8")
-                                req_del = urllib.request.Request(url_del, data=pld_del, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
-                                await loop.run_in_executor(None, lambda: urllib.request.urlopen(req_del, timeout=5))
+                                url_edit = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
+                                pld_edit = json.dumps({
+                                    "chat_id": owner_id,
+                                    "message_id": int(cq_msg_id),
+                                    "reply_markup": {"inline_keyboard": []}
+                                }).encode("utf-8")
+                                req_edit = urllib.request.Request(url_edit, data=pld_edit, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
+                                await loop.run_in_executor(None, lambda: urllib.request.urlopen(req_edit, timeout=5))
                             except Exception:
                                 pass
                         continue
@@ -251,10 +255,14 @@ async def poll_control_bot(cfg, exit_event, result_box):
                             p_msg_id = pending_conf.get("message_id")
                             if p_msg_id:
                                 try:
-                                    url_del = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
-                                    pld_del = json.dumps({"chat_id": owner_id, "message_id": int(p_msg_id)}).encode("utf-8")
-                                    req_del = urllib.request.Request(url_del, data=pld_del, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
-                                    await loop.run_in_executor(None, lambda: urllib.request.urlopen(req_del, timeout=5))
+                                    url_edit = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
+                                    pld_edit = json.dumps({
+                                        "chat_id": owner_id,
+                                        "message_id": int(p_msg_id),
+                                        "reply_markup": {"inline_keyboard": []}
+                                    }).encode("utf-8")
+                                    req_edit = urllib.request.Request(url_edit, data=pld_edit, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
+                                    await loop.run_in_executor(None, lambda: urllib.request.urlopen(req_edit, timeout=5))
                                 except Exception:
                                     pass
                             continue

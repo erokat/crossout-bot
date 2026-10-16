@@ -115,5 +115,29 @@ class TestMemoryCloudPersistence(unittest.TestCase):
         self.assertEqual(payload["sha"], "old_sha_123")
 
 
+    @patch("github_sync.fetch_memories_from_github")
+    def test_restore_bot_memories_when_local_is_empty_brackets(self, mock_fetch_gh):
+        # Local file exists with "[]" (as checked into git repository)
+        with open(self.test_memories_file, "w", encoding="utf-8") as f:
+            f.write("[]")
+
+        mock_fetch_gh.return_value = json.dumps([
+            {"topic": "день рождения", "fact": "1 мая", "author": "Миша"}
+        ])
+
+        with patch("db.get_db") as mock_get_db:
+            mock_conn = MagicMock()
+            mock_get_db.return_value.__enter__.return_value = mock_conn
+            mock_cur = MagicMock()
+            mock_cur.fetchall.return_value = []
+            mock_conn.execute.return_value = mock_cur
+
+            restored_count = db.restore_bot_memories()
+            self.assertEqual(restored_count, 1)
+            with open(self.test_memories_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertEqual(data[0]["topic"], "день рождения")
+
+
 if __name__ == "__main__":
     unittest.main()

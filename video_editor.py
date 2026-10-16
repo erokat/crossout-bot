@@ -345,8 +345,29 @@ def process_video_command(video_path, command_text):
             reply_cap = f"Ускорил видео в {speed}x! 🏎️💨"
 
         elif any(w in t for w in ["замедли", "медленнее"]):
-            out_file = change_video_speed(video_path, speed=0.5)
-            reply_cap = "Замедлил видео в 2 раза (slow-mo)! 🐢🎬"
+            slow_factor = 2.0
+            if "вчетверо" in t:
+                slow_factor = 4.0
+            elif "втрое" in t:
+                slow_factor = 3.0
+            elif "вдвое" in t:
+                slow_factor = 2.0
+            else:
+                m = re.search(r"(?:(?:в|на)\s+)?(\d+(?:[.,]\d+)?)\s*(?:[xх]|раз[а-я]*)\b", t)
+                if not m:
+                    m = re.search(r"\b(?:в|на)\s+(\d+(?:[.,]\d+)?)(?!\s*(?:год[а-я]*|мин[а-я]*|сек[а-я]*|час[а-я]*|дн[а-я]*|лет|мес[а-я]*))\b", t)
+                if m:
+                    try:
+                        val = float(m.group(1).replace(",", "."))
+                        if 1.0 < val <= 10.0:
+                            slow_factor = val
+                        elif 0.0 < val < 1.0:
+                            slow_factor = 1.0 / val
+                    except ValueError:
+                        slow_factor = 2.0
+            speed = max(0.1, min(0.9, 1.0 / slow_factor))
+            out_file = change_video_speed(video_path, speed=speed)
+            reply_cap = f"Замедлил видео в {slow_factor:g} раз(а) (slow-mo)! 🐢🎬"
 
         # 3. Реверс
         elif any(w in t for w in ["реверс", "задом наперед", "задом наперёд", "наоборот"]):

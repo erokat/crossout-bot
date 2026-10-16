@@ -95,6 +95,18 @@ class TestAtempoCascade(unittest.TestCase):
         called_cmd = mock_run.call_args[0][0]
         self.assertIn("-an", called_cmd)
 
+    @patch("video_editor.cleanup_file")
+    @patch("video_editor.change_video_speed")
+    @patch("os.path.exists")
+    def test_process_video_command_slowdown_multiplier(self, mock_exists, mock_change_speed, mock_cleanup):
+        mock_exists.return_value = True
+        mock_change_speed.return_value = "media/videos/speed_123.mp4"
+
+        # "замедли в 4 раза" -> speed=0.25
+        out, cap, is_gif, is_audio = video_editor.process_video_command("media/videos/input.mp4", "замедли в 4 раза")
+        mock_change_speed.assert_called_with("media/videos/input.mp4", speed=0.25)
+        self.assertIn("4", cap)
+
 
 if __name__ == "__main__":
     unittest.main()

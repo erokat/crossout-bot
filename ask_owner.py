@@ -187,10 +187,18 @@ def main():
                 remove_inline_keyboard(bot_token, owner_id, prompt_msg_id)
             break
 
+        # Check latest offset from DB in case wait_for_yarik advanced it
+        try:
+            db_offset = int(get_kv("control_bot_offset", "0"))
+            if db_offset > current_offset:
+                current_offset = db_offset
+        except Exception:
+            pass
+
         # 2. Direct getUpdates polling from Telegram Bot API
         if bot_token:
             try:
-                poll_url = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={current_offset}&timeout=2"
+                poll_url = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={current_offset}&timeout=2&limit=10"
                 poll_req = urllib.request.Request(poll_url, headers={"User-Agent": "CrossoutBot/1.0"})
                 with urllib.request.urlopen(poll_req, timeout=4) as p_resp:
                     upd_data = json.loads(p_resp.read().decode("utf-8"))
@@ -279,7 +287,16 @@ def main():
         status_symbol = "✅" if verdict == "APPROVED" else "❌"
         status_word = "разрешен" if verdict == "APPROVED" else "отклонен"
         target_name = "Ярика" if "ярик" in initiator.lower() else "тебя"
-        res_text = f"{status_symbol} <b>Запрос на удаление от {target_name} {status_word}!</b>"
+        q_lower = question.lower()
+        if any(w in q_lower for w in ["удали", "удален", "удалит", "снеси", "сотри"]):
+            action_desc = "на удаление"
+        elif any(w in q_lower for w in ["видео", "клинг", "kling"]):
+            action_desc = "на генерацию видео"
+        elif any(w in q_lower for w in ["навык", "скилл", "код"]):
+            action_desc = "на создание навыка"
+        else:
+            action_desc = "на действие"
+        res_text = f"{status_symbol} <b>Запрос {action_desc} от {target_name} {status_word}!</b>"
         if comment and comment not in ["Inline button", "Web link click"]:
             res_text += f"\n<i>Комментарий: {comment}</i>"
         send_bot_message(bot_token, owner_id, res_text)

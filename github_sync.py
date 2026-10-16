@@ -504,13 +504,33 @@ def sync_skills_from_github(skills_dir=None, install_requirements=True, push_mis
     if install_requirements and all_new_reqs:
         import subprocess
         import importlib.util
+        from db import clean_requirement_name, PACKAGE_MODULE_MAPPING
 
         for pkg in all_new_reqs:
-            from db import clean_requirement_name
             pkg = clean_requirement_name(pkg)
             if not pkg:
                 continue
-            base_mod = pkg.split("[")[0].split("=")[0].split("<")[0].split(">")[0].strip().replace("-", "_")
+            raw_pkg = re.split(r"[=<>[\]~!\s]", pkg)[0].strip()
+
+            # 1. Check via importlib.metadata.distribution() by pip name
+            try:
+                import importlib.metadata
+                importlib.metadata.distribution(raw_pkg)
+                continue
+            except Exception:
+                pass
+
+            # 2. Check mapped module name (e.g. pillow -> PIL)
+            mapped_mod = PACKAGE_MODULE_MAPPING.get(raw_pkg.lower())
+            if mapped_mod:
+                try:
+                    if importlib.util.find_spec(mapped_mod) is not None:
+                        continue
+                except Exception:
+                    pass
+
+            # 3. Check base module name
+            base_mod = raw_pkg.replace("-", "_")
             try:
                 if importlib.util.find_spec(base_mod) is not None:
                     continue
