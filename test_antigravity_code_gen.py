@@ -65,7 +65,7 @@ class TestAntigravityCodeGen(unittest.TestCase):
             mock_cli.assert_called_once()
             # Verify code prompt is passed directly without prepending the conversational Crossout/Yarik rule
             called_prompt = mock_cli.call_args[0][0]
-            self.assertEqual(called_prompt, code_prompt)
+            self.assertIn(code_prompt, called_prompt)
             self.assertNotIn("[СИСТЕМНОЕ ПРАВИЛО: Ты — верный, живой, остроумный бро", called_prompt)
 
     def test_execute_autonomous_task_uses_antigravity_code_gen(self):

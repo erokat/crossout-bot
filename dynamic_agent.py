@@ -8,6 +8,7 @@ import shutil
 import hashlib
 import subprocess
 import traceback
+import tempfile
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SKILLS_DIR = os.path.join(BASE_DIR, "skills")
@@ -548,12 +549,17 @@ def generate_code_via_antigravity(prompt, timeout=120):
     if not agy_bin:
         agy_bin = "agy"
 
+    clean_prompt = (
+        "СТРОГО БЕЗ ИСПОЛЬЗОВАНИЯ ИНСТРУМЕНТОВ (DO NOT USE ANY TOOLS: no view_file, no run_command, no search). "
+        "Сразу напиши и верни готовый надежный Python 3 код строго внутри ```python ... ```.\n\n" + prompt
+    )
+
     cmd = [
         agy_bin,
         "--model", "gemini-3.8-flash-medium",
         "--dangerously-skip-permissions",
         "--disable-slash-commands",
-        "-p", prompt
+        "-p", clean_prompt
     ]
     env = dict(os.environ)
     env["CI"] = "1"
@@ -582,6 +588,7 @@ def generate_code_via_antigravity(prompt, timeout=120):
             stderr=subprocess.PIPE,
             text=True,
             timeout=timeout,
+            cwd=tempfile.gettempdir(),
             env=env
         )
         if res.returncode == 0 and res.stdout.strip():

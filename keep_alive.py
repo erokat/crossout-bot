@@ -13,6 +13,7 @@ import re
 import urllib.request
 import urllib.parse
 import collections
+import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 RECENT_LOGS = collections.deque(maxlen=250)
@@ -638,6 +639,7 @@ def run_antigravity_cli(prompt, timeout=90):
                     stderr=subprocess.PIPE,
                     text=True,
                     timeout=timeout,
+                    cwd=tempfile.gettempdir(),
                     env=env
                 )
                 if res.returncode == 0 and res.stdout.strip():
@@ -685,8 +687,12 @@ def ask_ai(prompt, photo_path=None, system_instruction=None):
         "dynamic skill", "исправь ошибку", "исходный код:"
     ])
     if is_code:
-        # Для кода не приплетаем чат-инструкцию, отправляем чистый промпт кодогенерации в agy
-        res = run_antigravity_cli(prompt, timeout=120)
+        # Для кода не приплетаем чат-инструкцию, отправляем чистый промпт кодогенерации в agy без вызова инструментов
+        code_prompt = (
+            "СТРОГО БЕЗ ИСПОЛЬЗОВАНИЯ ИНСТРУМЕНТОВ (DO NOT USE ANY TOOLS: no view_file, no run_command, no search). "
+            "Сразу напиши и верни готовый надежный Python 3 код строго внутри ```python ... ```.\n\n" + prompt
+        )
+        res = run_antigravity_cli(code_prompt, timeout=120)
         if res:
             return res
         gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction="You are an expert Python 3 software developer. Return valid Python code inside ```python ... ```.")
