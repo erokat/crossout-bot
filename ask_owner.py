@@ -290,8 +290,8 @@ def main():
         q_lower = question.lower()
         if any(w in q_lower for w in ["удали", "удален", "удалит", "снеси", "сотри"]):
             action_desc = "на удаление"
-        elif any(w in q_lower for w in ["видео", "клинг", "kling"]):
-            action_desc = "на генерацию видео"
+        elif "видео" in q_lower:
+            action_desc = "на работу с видео"
         elif any(w in q_lower for w in ["навык", "скилл", "код"]):
             action_desc = "на создание навыка"
         else:

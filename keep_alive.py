@@ -59,28 +59,6 @@ from db import (
     restore_bot_memories
 )
 
-def boost_cleanup_temp_files():
-    """Cleans temporary files and cache while strictly preserving ./saved_memes/ and assets."""
-    purged = 0
-    try:
-        if os.path.exists(MEDIA_DIR):
-            for f in os.listdir(MEDIA_DIR):
-                fpath = os.path.join(MEDIA_DIR, f)
-                # NEVER touch saved_memes or non-files
-                if not os.path.isfile(fpath) or "saved_memes" in fpath:
-                    continue
-                ext = os.path.splitext(f)[1].lower()
-                # Purge downloaded temporary videos/audio or tmp_ generated files
-                if ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".ts", ".mp3", ".wav", ".m4a"] or f.startswith("tmp_"):
-                    try:
-                        os.remove(fpath)
-                        purged += 1
-                    except Exception:
-                        pass
-    except Exception:
-        pass
-    return purged
-
 
 
 from meme_generator import generate_crossout_meme
@@ -1714,24 +1692,6 @@ def handle_owner_message(msg_data):
             )
         return
 
-    # 0.68. Генерация видео через Kling AI MCP (Text-to-Video / Image-to-Video)
-    is_kling_req = any(w in t_lower for w in ["клинг", "kling"]) or (
-        any(w in t_lower for w in ["сгенерируй", "создай", "сделай", "запили"]) and any(w in t_lower for w in ["видеоролик", "видео", "анимацию"]) and any(w in t_lower for w in ["ии", "ai", "нейросеть", "клинг", "kling"])
-    )
-    if is_kling_req:
-        log_event(f"[ORCHESTRATOR] Routing video generation request to Kling AI for owner: {text!r}")
-        from kling_client import generate_kling_video_async
-        msg_data["handed_off_to_async"] = True
-        generate_kling_video_async(
-            prompt=text,
-            sender_name="Миша",
-            recipient="owner",
-            is_owner=True,
-            image_path=photo,
-            reply_to_msg_id=None
-        )
-        return
-
     # 0.7. Автономная генерация динамических навыков (Dynamic Skill Engine)
     if check_or_classify_autonomous_task(text, has_media=bool(photo), ask_ai_fn=ask_ai):
         log_event(f"[ORCHESTRATOR] Executing autonomous skill for Owner (async): {text!r}")
@@ -2531,25 +2491,6 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 add_to_stickers=add_to_stickers,
                 notify_owner=False
             )
-        return
-
-    # 1.68. Генерация видео через Kling AI MCP (Text-to-Video / Image-to-Video)
-    is_kling_req = any(w in t_lower for w in ["клинг", "kling"]) or (
-        any(w in t_lower for w in ["сгенерируй", "создай", "сделай", "запили"]) and any(w in t_lower for w in ["видеоролик", "видео", "анимацию"]) and any(w in t_lower for w in ["ии", "ai", "нейросеть", "клинг", "kling"])
-    )
-    if is_kling_req:
-        target_name = "Миша" if is_owner_sender else "Ярик"
-        log_event(f"[ORCHESTRATOR] Routing video generation request to Kling AI for {target_name}: {text!r}")
-        from kling_client import generate_kling_video_async
-        msg_data["handed_off_to_async"] = True
-        generate_kling_video_async(
-            prompt=text,
-            sender_name=target_name,
-            recipient="yarik",
-            is_owner=is_owner_sender,
-            image_path=photo_file,
-            reply_to_msg_id=msg_id
-        )
         return
 
     # 1.7. Автономная генерация динамических навыков (Dynamic Skill Engine)
