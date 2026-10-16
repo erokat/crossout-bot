@@ -511,8 +511,13 @@ def run_periodic_media_cleaner():
                         fpath = os.path.join(root, f)
                         if not os.path.isfile(fpath):
                             continue
-                        ext = os.path.splitext(f)[1].lower()
-                        if (ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".ts"] or f.startswith("tmp_") or (ext == ".gif" and f.startswith("gif_"))) and (now - os.path.getmtime(fpath) > 120):
+                        is_temp_file = (
+                            ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".ts"] or
+                            f.startswith(("tmp_", "img_", "test_")) or
+                            (ext == ".gif" and f.startswith("gif_")) or
+                            "images" in root
+                        )
+                        if is_temp_file and (now - os.path.getmtime(fpath) > 180):
                             try:
                                 os.remove(fpath)
                                 print(f"[AUTO-CLEANUP] Purged cached file: {f}")
