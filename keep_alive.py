@@ -1232,54 +1232,31 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # 2) Фоторедактор с фото (прифотошопь, добавь надпись, прилепи стикер поверх фото)
+    # 2) Фоторедактор с фото (прифотошопь, добавь надпись, прилепи стикер поверх фото, обработка)
     if photo and is_photo_editor_request(text, has_photo=True):
-        if is_complex_photo_request(text):
-            log_event(f"[ORCHESTRATOR] Routing complex photo task to AI Dynamic Skill Engine for owner: {text!r}")
-            ack_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "owner",
-                "--no-copy",
-                "--text", "Принял, Миша! Запускаю ИИ для сложного фотомонтажа... 🎨⏳"
-            ]
-            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-            safe_run_autonomous_task_async(
-                msg_data,
-                task_text=text,
-                sender_name="Миша",
-                photo_path=photo,
-                ask_ai_fn=ask_ai,
-                sender_key="owner",
-                recipient="owner",
-                reply_to_msg_id=None,
-                ack_msg_id=ack_msg_id,
-                is_owner_sender=True
-            )
-            return
-
-        try:
-            edited_img, reply_cap = process_universal_photo_command(photo, text)
-            cmd_owner = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "owner",
-                "--photo", edited_img,
-                "--text", f"Миша, {reply_cap.lower()}"
-            ]
-            subprocess.run(cmd_owner)
-            return
-        except Exception as e:
-            log_event(f"[PHOTO EDITOR ERROR] {e}")
-            cmd_owner = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "owner",
-                "--text", f"Миша, не удалось обработать фото: {e}"
-            ]
-            subprocess.run(cmd_owner)
-            return
+        log_event(f"[ORCHESTRATOR] Routing photo edit task to AI Dynamic Skill Engine for owner: {text!r}")
+        ack_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "owner",
+            "--no-copy",
+            "--text", "Принял, Миша! Запускаю ИИ для обработки фото... 🎨⏳"
+        ]
+        ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+        safe_run_autonomous_task_async(
+            msg_data,
+            task_text=text,
+            sender_name="Миша",
+            photo_path=photo,
+            ask_ai_fn=ask_ai,
+            sender_key="owner",
+            recipient="owner",
+            reply_to_msg_id=None,
+            ack_msg_id=ack_msg_id,
+            is_owner_sender=True
+        )
+        return
 
     # 3) Шахматы для владельца (генерация доски, фигур, позиций)
     if is_chess_request(text, has_photo=bool(photo)):
@@ -1612,52 +1589,29 @@ def handle_owner_message(msg_data):
     # 0.55. Фоторедактор: Добавление стикеров/надписи/фильтров/эффектов на фото
     if is_photo_editor_request(text, has_photo=bool(photo)):
         if photo and os.path.exists(photo):
-            if is_complex_photo_request(text):
-                log_event(f"[ORCHESTRATOR] Routing complex photo task to AI Dynamic Skill Engine for owner: {text!r}")
-                ack_cmd = [
-                    sys.executable,
-                    os.path.join(BASE_DIR, "send.py"),
-                    "--to", "owner",
-                    "--no-copy",
-                    "--text", "Принял, Миша! Запускаю ИИ для сложного фотомонтажа... 🎨⏳"
-                ]
-                ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-                safe_run_autonomous_task_async(
-                    msg_data,
-                    task_text=text,
-                    sender_name="Миша",
-                    photo_path=photo,
-                    ask_ai_fn=ask_ai,
-                    sender_key="owner",
-                    recipient="owner",
-                    reply_to_msg_id=None,
-                    ack_msg_id=ack_msg_id,
-                    is_owner_sender=True
-                )
-                return
-
-            try:
-                edited_img, reply_cap = process_universal_photo_command(photo, text)
-                cmd_owner = [
-                    sys.executable,
-                    os.path.join(BASE_DIR, "send.py"),
-                    "--to", "owner",
-                    "--photo", edited_img,
-                    "--text", f"Миша, {reply_cap.lower()}"
-                ]
-                subprocess.run(cmd_owner)
-                return
-            except Exception as e:
-                log_event(f"[PHOTO EDITOR ERROR] {e}")
-                cmd_owner = [
-                    sys.executable,
-                    os.path.join(BASE_DIR, "send.py"),
-                    "--to", "owner",
-                    "--text", f"Миша, не удалось обработать фото: {e}"
-                ]
-                subprocess.run(cmd_owner)
-                return
+            log_event(f"[ORCHESTRATOR] Routing photo task to AI Dynamic Skill Engine for owner: {text!r}")
+            ack_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "owner",
+                "--no-copy",
+                "--text", "Принял, Миша! Запускаю ИИ для обработки фото... 🎨⏳"
+            ]
+            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+            safe_run_autonomous_task_async(
+                msg_data,
+                task_text=text,
+                sender_name="Миша",
+                photo_path=photo,
+                ask_ai_fn=ask_ai,
+                sender_key="owner",
+                recipient="owner",
+                reply_to_msg_id=None,
+                ack_msg_id=ack_msg_id,
+                is_owner_sender=True
+            )
+            return
         else:
             cmd_owner = [
                 sys.executable,
@@ -1714,8 +1668,36 @@ def handle_owner_message(msg_data):
             subprocess.run(cmd_owner)
             return
 
+    # 1.95. Генерация фото / арта / реалистичного изображения для владельца
+    is_visual_gen_owner = any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and any(w in t_lower for w in ["фото", "фотк", "картинк", "изображен", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "каблук", "коробк", "персонаж", "предмет", "объект"])
+    is_explicit_meme_owner = any(w in t_lower for w in ["мем", "мэм", "мемасик", "мемчик", "демотиватор"])
+    if is_visual_gen_owner and not is_explicit_meme_owner:
+        log_event(f"[ORCHESTRATOR] Routing visual generation request to AI Dynamic Skill Engine for Owner: {text!r}")
+        ack_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "owner",
+            "--no-copy",
+            "--text", "Принял, Миша! Генерирую изображение через ИИ... 🎨⏳"
+        ]
+        ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+        safe_run_autonomous_task_async(
+            msg_data,
+            task_text=text,
+            sender_name="Миша",
+            photo_path=photo,
+            ask_ai_fn=ask_ai,
+            sender_key="owner",
+            recipient="owner",
+            reply_to_msg_id=None,
+            ack_msg_id=ack_msg_id,
+            is_owner_sender=True
+        )
+        return
+
     # 2. Если владелец просит мем лично для себя ("сделай мем", "новый мем", "сгенерируй", "скинь мем", "пикчу" и т.д.)
-    is_owner_meme = has_meme_mention or any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем", "мемов", "мема", "мэмов", "мэма", "мэмасик", "мемасик", "мемы", "мэмы", "пикч", "картинк", "демотиватор"])
+    is_owner_meme = has_meme_mention or any(w in t_lower for w in ["сделай мем", "новый мем", "сгенерируй мем", "скинь мем", "покажи мем", "создай мем", "мемов", "мема", "мэмов", "мэма", "мэмасик", "мемасик", "мемы", "мэмы", "пикч", "демотиватор"])
     if is_owner_meme:
         is_repeat = any(w in t_lower for w in ["заново", "снова", "повтори", "тот же", "тот самый", "продублируй", "еще раз", "ещё раз", "тоже самое"])
         count = extract_meme_count(text)
@@ -2163,58 +2145,32 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
-    # 2) Фоторедактор с фото (прифотошопь, добавь надпись, прилепи стикер поверх фото)
+    # 2) Фоторедактор с фото (прифотошопь, добавь надпись, прилепи стикер поверх фото, обработка)
     if photo_file and is_photo_editor_request(text, has_photo=True):
-        if is_complex_photo_request(text):
-            log_event(f"[ORCHESTRATOR] Routing complex photo task to AI Dynamic Skill Engine for {target_name}: {text!r}")
-            ack_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "yarik",
-                "--no-copy",
-                "--reply-to", str(msg_id),
-                "--text", f"Принял, {target_name}! Запускаю ИИ для сложного фотомонтажа... 🎨⏳"
-            ]
-            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-            safe_run_autonomous_task_async(
-                msg_data,
-                task_text=text,
-                sender_name=target_name,
-                photo_path=photo_file,
-                ask_ai_fn=ask_ai,
-                sender_key=sender_key,
-                recipient="yarik",
-                reply_to_msg_id=msg_id,
-                ack_msg_id=ack_msg_id,
-                is_owner_sender=is_owner_sender
-            )
-            return
-
-        log_event(f"[ORCHESTRATOR] Photo editor triggered for {target_name}: {text!r} (photo={photo_file})")
-        try:
-            edited_img, reply_cap = process_universal_photo_command(photo_file, text)
-            send_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "yarik",
-                "--photo", edited_img,
-                "--text", f"{target_name}, {reply_cap.lower()}",
-                "--reply-to", str(msg_id)
-            ]
-            subprocess.run(send_cmd)
-            return
-        except Exception as e:
-            log_event(f"[PHOTO EDITOR ERROR] {e}")
-            send_cmd = [
-                sys.executable,
-                os.path.join(BASE_DIR, "send.py"),
-                "--to", "yarik",
-                "--text", f"{target_name}, не удалось обработать фото: {e}",
-                "--reply-to", str(msg_id)
-            ]
-            subprocess.run(send_cmd)
-            return
+        log_event(f"[ORCHESTRATOR] Routing photo edit task to AI Dynamic Skill Engine for {target_name}: {text!r}")
+        ack_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--no-copy",
+            "--reply-to", str(msg_id),
+            "--text", f"Принял, {target_name}! Запускаю ИИ для обработки фото... 🎨⏳"
+        ]
+        ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+        safe_run_autonomous_task_async(
+            msg_data,
+            task_text=text,
+            sender_name=target_name,
+            photo_path=photo_file,
+            ask_ai_fn=ask_ai,
+            sender_key=sender_key,
+            recipient="yarik",
+            reply_to_msg_id=msg_id,
+            ack_msg_id=ack_msg_id,
+            is_owner_sender=is_owner_sender
+        )
+        return
 
     # 3) Шахматы без фото (генерация доски, тактической позиции, вооруженной фигуры)
     if is_chess_request(text, has_photo=bool(photo_file)):
@@ -2468,56 +2424,30 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
     if is_photo_editor_request(text, has_photo=bool(photo_file)):
         target_name = "Миша" if is_owner_sender else "Ярик"
         if photo_file and os.path.exists(photo_file):
-            if is_complex_photo_request(text):
-                log_event(f"[ORCHESTRATOR] Routing complex photo task to AI Dynamic Skill Engine for {target_name}: {text!r}")
-                ack_cmd = [
-                    sys.executable,
-                    os.path.join(BASE_DIR, "send.py"),
-                    "--to", "yarik",
-                    "--no-copy",
-                    "--reply-to", str(msg_id),
-                    "--text", f"Принял, {target_name}! Запускаю ИИ для сложного фотомонтажа... 🎨⏳"
-                ]
-                ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-                safe_run_autonomous_task_async(
-                    msg_data,
-                    task_text=text,
-                    sender_name=target_name,
-                    photo_path=photo_file,
-                    ask_ai_fn=ask_ai,
-                    sender_key=sender_key,
-                    recipient="yarik",
-                    reply_to_msg_id=msg_id,
-                    ack_msg_id=ack_msg_id,
-                    is_owner_sender=is_owner_sender
-                )
-                return
-
-            log_event(f"[ORCHESTRATOR] Photo editor triggered for {target_name}: {text!r} (photo={photo_file})")
-            try:
-                edited_img, reply_cap = process_universal_photo_command(photo_file, text)
-                send_cmd = [
-                    sys.executable,
-                    os.path.join(BASE_DIR, "send.py"),
-                    "--to", "yarik",
-                    "--photo", edited_img,
-                    "--text", f"{target_name}, {reply_cap.lower()}",
-                    "--reply-to", str(msg_id)
-                ]
-                subprocess.run(send_cmd)
-                return
-            except Exception as e:
-                log_event(f"[PHOTO EDITOR ERROR] {e}")
-                err_cmd = [
-                    sys.executable,
-                    os.path.join(BASE_DIR, "send.py"),
-                    "--to", "yarik",
-                    "--text", f"{target_name}, не удалось обработать фото: {e}",
-                    "--reply-to", str(msg_id)
-                ]
-                subprocess.run(err_cmd)
-                return
+            log_event(f"[ORCHESTRATOR] Routing photo edit task to AI Dynamic Skill Engine for {target_name}: {text!r}")
+            ack_cmd = [
+                sys.executable,
+                os.path.join(BASE_DIR, "send.py"),
+                "--to", "yarik",
+                "--no-copy",
+                "--reply-to", str(msg_id),
+                "--text", f"Принял, {target_name}! Запускаю ИИ для обработки фото... 🎨⏳"
+            ]
+            ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ack_msg_id = extract_sent_msg_id(ack_res.stdout)
+            safe_run_autonomous_task_async(
+                msg_data,
+                task_text=text,
+                sender_name=target_name,
+                photo_path=photo_file,
+                ask_ai_fn=ask_ai,
+                sender_key=sender_key,
+                recipient="yarik",
+                reply_to_msg_id=msg_id,
+                ack_msg_id=ack_msg_id,
+                is_owner_sender=is_owner_sender
+            )
+            return
         else:
             prompt_photo = f"{target_name}, чтобы отредактировать фото, добавить стикер или надпись — прикрепи фото к сообщению или ответь (reply) на картинку! 📸"
             send_cmd = [
@@ -2546,9 +2476,9 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         return
 
     # 1.65. Запрос на мем / картинку / генерацию визуального контента
-    is_explicit_meme = any(w in t_lower for w in ["мем", "мэм", "пикч", "картинк", "гиф", "демотиватор", "мемасик", "мемчик", "мемы", "мэмы"])
+    is_explicit_meme = any(w in t_lower for w in ["мем", "мэм", "пикч", "гиф", "демотиватор", "мемасик", "мемчик", "мемы", "мэмы"])
     is_meme_action = any(w in t_lower for w in ["сделай", "склепай", "запили", "нарисуй", "сгенерируй", "создай", "скинь", "кинь", "выдай"]) and is_explicit_meme
-    is_visual_gen = any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and any(w in t_lower for w in ["доск", "шахмат", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "персонаж", "кота", "собаку", "машин", "фото", "изображен"])
+    is_visual_gen = any(w in t_lower for w in ["нарисуй", "сгенерируй", "создай", "изобрази", "отрисуй", "сделай", "покажи", "скинь", "кинь"]) and any(w in t_lower for w in ["доск", "шахмат", "арт", "рисунок", "сцен", "пейзаж", "постер", "граффити", "иллюстрац", "персонаж", "кота", "собаку", "машин", "фото", "изображен", "картинк", "фотк", "коробк", "каблук", "предмет", "объект"])
 
     # Если запрошена именно творческая генерация сцены / арта / доски (не стандартный мем) — запускаем ИИ!
     if is_visual_gen and not is_explicit_meme:

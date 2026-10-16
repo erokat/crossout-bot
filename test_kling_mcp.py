@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-test_kling_mcp.py - Unit tests for Kling AI Remote MCP client and video generation integration.
+test_kling_mcp.py - Unit tests for Kling AI Remote MCP & Gen-API client and video generation integration.
 """
 
 import os
@@ -45,34 +45,79 @@ class TestKlingMCP(unittest.TestCase):
             self.assertEqual(body["params"]["arguments"]["prompt"], "robot fight")
 
     @patch("kling_client.call_kling_tool")
-    def test_submit_text_to_video(self, mock_call):
-        mock_call.return_value = (True, {"task_id": "test_video_task_555"})
+    def test_submit_text_to_video_mcp(self, mock_call):
+        with patch.dict(os.environ, {"KLING_API_KEY": "mcp_token_standard"}):
+            mock_call.return_value = (True, {"task_id": "test_video_task_555"})
 
-        ok, task_id = kling_client.submit_text_to_video("A cinematic crossout race in desert")
-        self.assertTrue(ok)
-        self.assertEqual(task_id, "test_video_task_555")
+            ok, task_id = kling_client.submit_text_to_video("A cinematic crossout race in desert")
+            self.assertTrue(ok)
+            self.assertEqual(task_id, "test_video_task_555")
 
-        mock_call.assert_called_once()
-        args = mock_call.call_args[0][1]
-        self.assertEqual(args["prompt"], "A cinematic crossout race in desert")
-        self.assertEqual(args["model"], "kling-v1")
+            mock_call.assert_called_once()
+            args = mock_call.call_args[0][1]
+            self.assertEqual(args["prompt"], "A cinematic crossout race in desert")
+            self.assertEqual(args["model"], "kling-v1")
 
     @patch("kling_client.call_kling_tool")
-    def test_get_task_status(self, mock_call):
-        # Case 1: succeed with video url
-        mock_call.return_value = (True, {
-            "data": {
-                "status": "succeed",
-                "progress": 100,
-                "videos": [{"url": "https://cdn.kling.ai/generated_video.mp4"}]
-            }
-        })
+    def test_get_task_status_mcp(self, mock_call):
+        with patch.dict(os.environ, {"KLING_API_KEY": "mcp_token_standard"}):
+            mock_call.return_value = (True, {
+                "data": {
+                    "status": "succeed",
+                    "progress": 100,
+                    "videos": [{"url": "https://cdn.kling.ai/generated_video.mp4"}]
+                }
+            })
 
-        ok, status_data = kling_client.get_task_status("test_task_777")
-        self.assertTrue(ok)
-        self.assertEqual(status_data["status"], "succeed")
-        self.assertEqual(status_data["progress"], 100)
-        self.assertEqual(status_data["video_url"], "https://cdn.kling.ai/generated_video.mp4")
+            ok, status_data = kling_client.get_task_status("test_task_777")
+            self.assertTrue(ok)
+            self.assertEqual(status_data["status"], "succeed")
+            self.assertEqual(status_data["progress"], 100)
+            self.assertEqual(status_data["video_url"], "https://cdn.kling.ai/generated_video.mp4")
+
+    @patch("urllib.request.urlopen")
+    def test_gen_api_credits_check(self, mock_urlopen):
+        with patch.dict(os.environ, {"KLING_API_KEY": "sk-test12345"}):
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = json.dumps({"balance": 150, "name": "Михаил"}).encode("utf-8")
+            mock_resp.__enter__.return_value = mock_resp
+            mock_resp.__exit__.return_value = False
+            mock_urlopen.return_value = mock_resp
+
+            ok, res = kling_client.check_kling_credits()
+            self.assertTrue(ok)
+            self.assertEqual(res["balance"], 150)
+            self.assertEqual(res["service"], "gen-api")
+
+    @patch("urllib.request.urlopen")
+    def test_gen_api_submit_text_to_video(self, mock_urlopen):
+        with patch.dict(os.environ, {"KLING_API_KEY": "sk-test12345"}):
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = json.dumps({"request_id": 987654}).encode("utf-8")
+            mock_resp.__enter__.return_value = mock_resp
+            mock_resp.__exit__.return_value = False
+            mock_urlopen.return_value = mock_resp
+
+            ok, req_id = kling_client.submit_text_to_video("Tokyo street at night")
+            self.assertTrue(ok)
+            self.assertEqual(req_id, "987654")
+
+    @patch("urllib.request.urlopen")
+    def test_gen_api_task_status(self, mock_urlopen):
+        with patch.dict(os.environ, {"KLING_API_KEY": "sk-test12345"}):
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = json.dumps({
+                "status": "success",
+                "output": ["https://cdn.gen-api.ru/video_result.mp4"]
+            }).encode("utf-8")
+            mock_resp.__enter__.return_value = mock_resp
+            mock_resp.__exit__.return_value = False
+            mock_urlopen.return_value = mock_resp
+
+            ok, st = kling_client.get_task_status("987654")
+            self.assertTrue(ok)
+            self.assertEqual(st["status"], "succeed")
+            self.assertEqual(st["video_url"], "https://cdn.gen-api.ru/video_result.mp4")
 
     @patch("subprocess.run")
     def test_request_owner_permission_for_kling(self, mock_subproc):
@@ -107,24 +152,25 @@ class TestKlingMCP(unittest.TestCase):
         mock_status.return_value = (True, {"status": "succeed", "video_url": "https://kling.ai/v.mp4"})
         mock_dl.return_value = "/tmp/fake_kling.mp4"
 
-        with patch("os.path.exists", return_value=True), patch("os.remove"):
-            with patch("time.sleep"):
-                # Run for owner (permission bypassed)
-                t1 = kling_client.generate_kling_video_async(
-                    prompt="Owner request",
-                    is_owner=True
-                )
-                t1.join(timeout=2.0)
-                self.assertFalse(mock_perm.called)
+        with patch.dict(os.environ, {"KLING_API_KEY": "fake_key"}):
+            with patch("os.path.exists", return_value=True), patch("os.remove"):
+                with patch("time.sleep"):
+                    # Run for owner (permission bypassed)
+                    t1 = kling_client.generate_kling_video_async(
+                        prompt="Owner request",
+                        is_owner=True
+                    )
+                    t1.join(timeout=2.0)
+                    self.assertFalse(mock_perm.called)
 
-                # Run for Yarik (permission checked)
-                t2 = kling_client.generate_kling_video_async(
-                    prompt="Yarik request",
-                    is_owner=False,
-                    sender_name="Ярик"
-                )
-                t2.join(timeout=2.0)
-                self.assertTrue(mock_perm.called)
+                    # Run for Yarik (permission checked)
+                    t2 = kling_client.generate_kling_video_async(
+                        prompt="Yarik request",
+                        is_owner=False,
+                        sender_name="Ярик"
+                    )
+                    t2.join(timeout=2.0)
+                    self.assertTrue(mock_perm.called)
 
     @patch("kling_client.check_kling_credits")
     @patch("kling_client.submit_text_to_video")

@@ -41,8 +41,8 @@ def handle_task(task_text, photo_path=None, **kwargs):
     generate_kling_video_async(
         prompt=prompt,
         image_path=photo_path,
-        reply_to_id=reply_to_id,
-        target_chat=target_chat,
+        reply_to_msg_id=reply_to_id,
+        recipient=target_chat,
         is_owner=is_owner
     )
     return f"🎬 Запуск генерации видео Kling AI по запросу: «{prompt}»...", None

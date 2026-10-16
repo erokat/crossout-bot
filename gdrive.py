@@ -5,7 +5,20 @@ import time
 import mimetypes
 import urllib.request
 import urllib.parse
-from db import get_kv, set_kv
+def get_kv(key, default=None):
+    try:
+        import db
+        return db.get_kv(key, default)
+    except Exception:
+        return default
+
+def set_kv(key, val):
+    try:
+        import db
+        return db.set_kv(key, val)
+    except Exception:
+        pass
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TOKEN_FILE = os.path.join(BASE_DIR, "gdrive_token.json")

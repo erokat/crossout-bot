@@ -175,10 +175,13 @@ def is_one_off_creative_task(task_text):
         return False
     creative_markers = [
         "мем", "мэм", "мемасик", "мемчик", "картинк", "пикч", "нарисуй",
-        "сгенерируй фото", "сгенерируй изображение", "сгенерируй картинку",
+        "сгенерируй фото", "сгенерируй изображение", "сгенерируй картинку", "сгенерируй",
+        "фото", "фотк", "обработ", "редакт", "монтаж", "коллаж", "наложи", "вырежи",
+        "добавь надпись", "замени", "склей", "эффект", "стиль", "фильтр", "размой",
         "доск", "шахмат", "арт", "открытк", "демотиватор", "прикол", "иллюстраци",
         "шутк", "анекдот", "юмор", "хуйн", "дичь", "бред", "сочини", "придумай",
-        "расскажи историю", "расскажи сказку", "стих", "стихотворен", "песн", "поздравлен"
+        "расскажи историю", "расскажи сказку", "стих", "стихотворен", "песн", "поздравлен",
+        "каблук", "коробк", "предмет", "объект", "пейзаж", "персонаж"
     ]
     return any(m in t for m in creative_markers)
 
@@ -880,10 +883,25 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         "   - Если нужны внешние пакеты (requests, beautifulsoup4, pillow, openpyxl, pandas, matplotlib, qrcode, pydub), свободно импортируй их!\n"
         "   - Движок бота автоматически обнаружит и установит недостающие пакеты через pip при первом запуске.\n"
         "   - Для работы с сетью и внешними API используй `requests` или `urllib.request` с таймаутом.\n"
-        "4. Рабочие директории и генерация медиа:\n"
-        "   - `./media/` — сохранение любых сгенерированных медиафайлов (картинки, графики, qr, видео, аудио).\n"
-        "   - ДЛЯ ГЕНЕРАЦИИ КАРТИНОК, ГРАФИКИ, МЕМОВ, АРТОВ И СХЕМ: используй библиотеку `PIL` (`Pillow`) или `matplotlib`. Шрифты лежат в `./media/` (`RussoOne-Regular.ttf`, `Montserrat.ttf`, `Comfortaa.ttf`, `Anton.ttf`). Рисуй все запрошенные пользователем сцены, детали, персонажей и надписи качественно! Готовый файл сохраняй в `./media/<filename>.png` и обязательно печатай путь в stdout: `print(out_path)`.\n"
-        "   - ЕСЛИ ПРИКРЕПЛЕН ВХОДНОЙ ФАЙЛ (INPUT_FILE) И ЗАПРОШЕН ФОТОМОНТАЖ / РЕДАКТИРОВАНИЕ: открой `INPUT_FILE` через Image.open(), скачай нужные картинки (urllib / requests) или возьми из `./media/`, вырежи, наложи слои, сохрани результат в `./media/<filename>.jpg` и напечатай путь в stdout: `print(out_path)`.\n"
+        "4. РАБОЧИЕ ДИРЕКТОРИИ И ПРАВИЛА ГЕНЕРАЦИИ / ОБРАБОТКИ МЕДИА:\n"
+        "   - `./media/` — сохранение любых сгенерированных медиафайлов (картинки, фото, графики, qr, видео, аудио).\n"
+        "   - ДЛЯ ГЕНЕРАЦИИ ФОТО, АРТОВ И РЕАЛИСТИЧНЫХ ИЗОБРАЖЕНИЙ:\n"
+        "     * СТРОЖАЙШИЙ ЗАПРЕТ: КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО рисовать реалистичные объекты, людей, обувь, предметы, коробки, технику и сцены полигонами через draw.polygon или простыми фигурами в Pillow! Это выглядит некачественно.\n"
+        "     * Для фотореалистичных картинок, артов и сцен скрипт должен скачивать сгенерированное ИИ изображение высокого качества через бесплатный API Pollinations:\n"
+        "       import urllib.request, urllib.parse\n"
+        "       prompt_en = 'detailed descriptive prompt in English, photorealistic, studio photography, 4k'\n"
+        "       url = f'https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt_en)}?width=1024&height=1024&nologo=true'\n"
+        "       req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})\n"
+        "       with urllib.request.urlopen(req, timeout=35) as resp:\n"
+        "           with open(out_path, 'wb') as f:\n"
+        "               f.write(resp.read())\n"
+        "     * Либо искать и скачивать реальные фото студийного качества через: `from media_finder import find_and_download_image`.\n"
+        "     * Pillow (`PIL`) используй для композиции, нарезки, наложения слоёв, стильного текста со шрифтами из `./media/` (RussoOne-Regular.ttf, Montserrat.ttf, Anton.ttf), плашек и рамок.\n"
+        "     * Для графиков/диаграмм используй `matplotlib.pyplot`.\n"
+        "   - ДЛЯ РЕДАКТИРОВАНИЯ ФОТО / ФОТОМОНТАЖА (ЕСЛИ ПРИКРЕПЛЕН INPUT_FILE):\n"
+        "     * Входной файл лежит в `os.environ.get('INPUT_FILE')`.\n"
+        "     * Открой его через `Image.open(input_file)`, примени нужные фильтры, кадрирование, поворот, цветокоррекцию, размытие, добавление текста или наложение других картинок.\n"
+        "     * Сохрани результат в `./media/<filename>.jpg` и первой строкой напечатай путь в stdout: `print(out_path)`.\n"
         "5. ПРАВИЛА ВЫВОДА В STDOUT (КАК ПРАВИЛЬНО ЗАПУСКАТЬ И ВЫВОДИТЬ):\n"
         "   - Если скрипт генерирует медиафайл (картинка, мем, график): первой строкой напечатай путь к созданному файлу (`print(out_path)`). Второй строкой можно напечатать живой текст/подпись.\n"
         "   - Если задача текстовая (погода, расчет, парсинг, курс валют, факт, перевод): напечатай готовый чистый текст прямо в stdout (`print(result)`).\n"
@@ -916,7 +934,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 f"Напиши надежный автономный Python 3 скрипт для задачи: «{task_text}».\n"
                 f"# SKILL_NAME: task_exec\n# DESCRIPTION: {task_text[:120]}\n"
                 "ВАЖНОЕ ПРАВИЛО: Делай СТРОГО по теме задачи пользователя! НЕ приплетай Crossout, если о нем прямо не просили!\n"
-                "Если требуется графика/картинка/мем или фотомонтаж входного файла INPUT_FILE — используй Pillow (PIL) и сохрани результат в media/, напечатав путь в stdout.\n"
+                "Если требуется фото/картинка/арт: используй Pollinations API (https://image.pollinations.ai/prompt/...) или find_and_download_image. НЕ рисуй полигонами! Для фотомонтажа входного файла INPUT_FILE — используй Pillow (PIL) и сохрани результат в media/, напечатав путь в stdout.\n"
                 "Код верни строго внутри ```python ... ``` без лишних рассуждений."
             )
             if is_test_mock(ask_ai_fn):
@@ -1055,7 +1073,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=script_path)
 
     # Если скрипт успешно отработал: персистентно сохраняем в SQLite dynamic_skills и GitHub ТОЛЬКО постоянные навыки!
-    is_one_off = is_one_off_creative_task(task_text)
+    is_one_off = is_one_off_creative_task(task_text) or bool(photo_path) or bool(new_media)
     if code_rc == 0:
         if not is_one_off:
             try:
@@ -1160,6 +1178,12 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                 return report, fallback_meme
         except Exception as e:
             print(f"[DYNAMIC SKILL ENGINE] Fallback meme generation failed after script error: {e}")
+
+    if is_one_off and os.path.exists(script_path):
+        try:
+            os.remove(script_path)
+        except Exception:
+            pass
 
     return (
         f"⚠️ Ошибка выполнения модуля для «{task_text}»:\n`{last_err}`\n\n"
