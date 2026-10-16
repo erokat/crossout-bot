@@ -13,6 +13,14 @@ import keep_alive
 
 
 class TestAntigravityCodeGen(unittest.TestCase):
+    def tearDown(self):
+        skill_file = os.path.join(BASE_DIR, "skills", "test_agy_skill.py")
+        if os.path.exists(skill_file):
+            try:
+                os.remove(skill_file)
+            except Exception:
+                pass
+
     def test_generate_code_via_antigravity_invokes_cli_with_flash_medium(self):
         with patch("subprocess.run") as mock_run:
             mock_proc = MagicMock()

@@ -579,8 +579,11 @@ def render_breaking_news(base_img, title, news_text):
 
     # Bottom yellow ticker
     draw.rectangle([(0, H - 38), (W, H)], fill="#FBBF24")
-    ticker_str = f"В ПУСТОШАХ: {news_text} | ПОДРОБНОСТИ В СЛЕДУЮЩЕМ ВЫПУСКЕ..."
+    has_crossout = any(w in (title + " " + news_text).lower() for w in ["crossout", "кроссаут", "газген", "птур", "пустош"])
+    ticker_prefix = "В ПУСТОШАХ:" if has_crossout else "СРОЧНЫЕ НОВОСТИ:"
+    ticker_str = f"{ticker_prefix} {news_text} | ПОДРОБНОСТИ В СЛЕДУЮЩЕМ ВЫПУСКЕ..."
     draw.text((20, H - 32), ticker_str[:75], font=font_ticker, fill="#111827")
+
 
     return canvas
 
@@ -671,7 +674,7 @@ def render_pov_meme(base_img, pov_text):
 
 def clean_user_theme(raw_text):
     if not raw_text:
-        return "Crossout"
+        return "жизненный мем"
     t = raw_text.strip()
 
     # Strip bot call
@@ -700,10 +703,16 @@ def clean_user_theme(raw_text):
     year_str = years[0] if years else None
 
     if not t or t.lower() in ["того", "там", "было", "что", "это", "как", "года"]:
+        raw_low = (raw_text or "").lower()
+        if "crossout" in raw_low or "кроссаут" in raw_low or "газген" in raw_low:
+            if year_str:
+                return f"Crossout {year_str} года"
+            return "Crossout"
         if year_str:
-            return f"Crossout {year_str} года"
-        return "Crossout"
+            return f"ностальгия {year_str} года"
+        return "жизненный мем"
     return t
+
 
 def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     """

@@ -521,23 +521,24 @@ def cleanup_video_file(file_path):
         print(f"[CLEANUP WARNING] Failed to delete video {file_path}: {e}")
 
 def run_periodic_media_cleaner():
-    """Background daemon that sweeps media folder every 5 minutes and purges leftover videos."""
+    """Background daemon that sweeps media folder every 5 minutes and purges leftover videos and temporary media recursively."""
     while True:
         time.sleep(300)
         try:
             now = time.time()
             if os.path.exists(MEDIA_DIR):
-                for f in os.listdir(MEDIA_DIR):
-                    fpath = os.path.join(MEDIA_DIR, f)
-                    if not os.path.isfile(fpath):
-                        continue
-                    ext = os.path.splitext(f)[1].lower()
-                    if (ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".ts"] or f.startswith("tmp_")) and (now - os.path.getmtime(fpath) > 120):
-                        try:
-                            os.remove(fpath)
-                            print(f"[AUTO-CLEANUP] Purged cached file: {f}")
-                        except Exception:
-                            pass
+                for root, _, files in os.walk(MEDIA_DIR):
+                    for f in files:
+                        fpath = os.path.join(root, f)
+                        if not os.path.isfile(fpath):
+                            continue
+                        ext = os.path.splitext(f)[1].lower()
+                        if (ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".ts"] or f.startswith("tmp_") or (ext == ".gif" and f.startswith("gif_"))) and (now - os.path.getmtime(fpath) > 120):
+                            try:
+                                os.remove(fpath)
+                                print(f"[AUTO-CLEANUP] Purged cached file: {f}")
+                            except Exception:
+                                pass
         except Exception as e:
             print(f"[CLEANUP EXCEPTION] Error in periodic cleaner: {e}")
         try:
@@ -545,6 +546,17 @@ def run_periodic_media_cleaner():
             gc.collect()
         except Exception:
             pass
+
+def safe_run_autonomous_task_async(msg_data=None, **kwargs):
+    """
+    Launches autonomous task in background thread and flags msg_data as handed off
+    so the main loop's finally block doesn't delete the media file while worker is running.
+    """
+    t = run_autonomous_task_async(**kwargs)
+    if msg_data is not None and isinstance(msg_data, dict):
+        msg_data["handed_off_to_async"] = True
+    return t
+
 
 def ask_gemini_api(prompt, photo_path=None, system_instruction=None):
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -1158,6 +1170,9 @@ def process_memory_command(text, sender_name="Ярик", is_owner=False):
     )
     if rem_match and rem_match.group(1).strip():
         fact_text = rem_match.group(1).strip()
+        fact_text = re.sub(r"^(?:,\s*|\s*)(?:что|то,\s*что|то\s*что|факт[:\s]*|правило[:\s]*|:)\s*", "", fact_text, flags=re.I).strip()
+        if not fact_text:
+            return None
         save_bot_memory(fact=fact_text, full_text=text, author=target_name)
         log_event(f"[MEMORY] Saved new memory by {target_name}: fact={fact_text[:80]!r}")
         fact_preview = fact_text[:200] + ("..." if len(fact_text) > 200 else "")
@@ -1230,7 +1245,8 @@ def handle_owner_message(msg_data):
             ]
             ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-            run_autonomous_task_async(
+            safe_run_autonomous_task_async(
+                msg_data,
                 task_text=text,
                 sender_name="Миша",
                 photo_path=photo,
@@ -1332,7 +1348,8 @@ def handle_owner_message(msg_data):
                 except Exception:
                     pass
 
-            run_autonomous_task_async(
+            safe_run_autonomous_task_async(
+                msg_data,
                 task_text=orig_task,
                 sender_name="Миша",
                 photo_path=photo,
@@ -1606,7 +1623,8 @@ def handle_owner_message(msg_data):
                 ]
                 ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-                run_autonomous_task_async(
+                safe_run_autonomous_task_async(
+                    msg_data,
                     task_text=text,
                     sender_name="Миша",
                     photo_path=photo,
@@ -1714,6 +1732,24 @@ def handle_owner_message(msg_data):
             )
         return
 
+    # 0.68. Генерация видео через Kling AI MCP (Text-to-Video / Image-to-Video)
+    is_kling_req = any(w in t_lower for w in ["клинг", "kling"]) or (
+        any(w in t_lower for w in ["сгенерируй", "создай", "сделай", "запили"]) and any(w in t_lower for w in ["видеоролик", "видео", "анимацию"]) and any(w in t_lower for w in ["ии", "ai", "нейросеть", "клинг", "kling"])
+    )
+    if is_kling_req:
+        log_event(f"[ORCHESTRATOR] Routing video generation request to Kling AI for owner: {text!r}")
+        from kling_client import generate_kling_video_async
+        msg_data["handed_off_to_async"] = True
+        generate_kling_video_async(
+            prompt=text,
+            sender_name="Миша",
+            recipient="owner",
+            is_owner=True,
+            image_path=photo,
+            reply_to_msg_id=None
+        )
+        return
+
     # 0.7. Автономная генерация динамических навыков (Dynamic Skill Engine)
     if check_or_classify_autonomous_task(text, has_media=bool(photo), ask_ai_fn=ask_ai):
         log_event(f"[ORCHESTRATOR] Executing autonomous skill for Owner (async): {text!r}")
@@ -1726,7 +1762,8 @@ def handle_owner_message(msg_data):
         ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         ack_msg_id = extract_sent_msg_id(ack_res.stdout)
 
-        run_autonomous_task_async(
+        safe_run_autonomous_task_async(
+            msg_data,
             task_text=text,
             sender_name="Миша",
             photo_path=photo,
@@ -1912,7 +1949,8 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             target_name = "Миша" if is_owner_sender else "Ярик"
             photo_file = msg_data.get("photo")
 
-            run_autonomous_task_async(
+            safe_run_autonomous_task_async(
+                msg_data,
                 task_text=orig_task,
                 sender_name=target_name,
                 photo_path=photo_file,
@@ -2139,7 +2177,8 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             ]
             ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-            run_autonomous_task_async(
+            safe_run_autonomous_task_async(
+                msg_data,
                 task_text=text,
                 sender_name=target_name,
                 photo_path=photo_file,
@@ -2441,7 +2480,8 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 ]
                 ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-                run_autonomous_task_async(
+                safe_run_autonomous_task_async(
+                    msg_data,
                     task_text=text,
                     sender_name=target_name,
                     photo_path=photo_file,
@@ -2524,7 +2564,8 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         ]
         ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         ack_msg_id = extract_sent_msg_id(ack_res.stdout)
-        run_autonomous_task_async(
+        safe_run_autonomous_task_async(
+            msg_data,
             task_text=text,
             sender_name=target_name,
             photo_path=photo_file,
@@ -2562,6 +2603,25 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             )
         return
 
+    # 1.68. Генерация видео через Kling AI MCP (Text-to-Video / Image-to-Video)
+    is_kling_req = any(w in t_lower for w in ["клинг", "kling"]) or (
+        any(w in t_lower for w in ["сгенерируй", "создай", "сделай", "запили"]) and any(w in t_lower for w in ["видеоролик", "видео", "анимацию"]) and any(w in t_lower for w in ["ии", "ai", "нейросеть", "клинг", "kling"])
+    )
+    if is_kling_req:
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        log_event(f"[ORCHESTRATOR] Routing video generation request to Kling AI for {target_name}: {text!r}")
+        from kling_client import generate_kling_video_async
+        msg_data["handed_off_to_async"] = True
+        generate_kling_video_async(
+            prompt=text,
+            sender_name=target_name,
+            recipient="yarik",
+            is_owner=is_owner_sender,
+            image_path=photo_file,
+            reply_to_msg_id=msg_id
+        )
+        return
+
     # 1.7. Автономная генерация динамических навыков (Dynamic Skill Engine)
     is_auto_task = check_or_classify_autonomous_task(text, has_media=bool(photo_file), ask_ai_fn=ask_ai)
     if is_auto_task:
@@ -2583,7 +2643,8 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         ack_res = subprocess.run(ack_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         ack_msg_id = extract_sent_msg_id(ack_res.stdout)
 
-        run_autonomous_task_async(
+        safe_run_autonomous_task_async(
+            msg_data,
             task_text=text,
             sender_name=target_name,
             photo_path=photo_file,
@@ -2678,9 +2739,9 @@ def main():
                         d = json.loads(line.strip())
                         if "latest_id" in d and d["latest_id"] > 0:
                             latest_id = int(d["latest_id"])
-                            last_processed_id = max(0, latest_id - 1)
+                            last_processed_id = latest_id
                             set_kv("last_processed_id", str(last_processed_id))
-                            log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id} (offset from latest {latest_id}) on cold start.")
+                            log_event(f"[ORCHESTRATOR] Initialized last_processed_id to {last_processed_id} on cold start.")
                             break
                     except Exception:
                         continue
@@ -2695,7 +2756,7 @@ def main():
             cmd = [sys.executable, os.path.join(BASE_DIR, "wait_for_yarik.py"), "--timeout", "900"]
             if last_processed_id is not None:
                 cmd.extend(["--after-id", str(last_processed_id)])
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=960)
 
             stdout = proc.stdout.strip()
             if not stdout:
@@ -2750,10 +2811,11 @@ def main():
                     elif source == "yarik":
                         handle_yarik_message(m, chat_title=data.get("chat_title", "Ярик"))
                 finally:
-                    # After viewing/processing TikTok or any video, immediately delete to save disk/memory
-                    vid_candidate = m.get("video") or (m.get("photo") if (m.get("photo") and m.get("photo").lower().endswith((".mp4", ".mov", ".avi", ".webm", ".mkv", ".ts"))) else None)
-                    if vid_candidate:
-                        cleanup_video_file(vid_candidate)
+                    # After viewing/processing TikTok or any video, delete unless handed off to async worker
+                    if not m.get("handed_off_to_async"):
+                        vid_candidate = m.get("video") or (m.get("photo") if (m.get("photo") and m.get("photo").lower().endswith((".mp4", ".mov", ".avi", ".webm", ".mkv", ".ts"))) else None)
+                        if vid_candidate:
+                            cleanup_video_file(vid_candidate)
 
         except Exception as e:
             log_event(f"[ORCHESTRATOR EXCEPTION] Unexpected error in duty loop: {e}")

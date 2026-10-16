@@ -308,6 +308,8 @@ def find_and_download_music(query, max_filesize="30M"):
     # Для обычных песен (не классика) — НИКОГДА не подсовывать Бетховена!
     return None, clean_q
 
+find_and_download_audio = find_and_download_music
+
 def find_and_download_gif(query):
     clean_q = clean_query(query, "gif")
     q_hash = hashlib.md5(clean_q.lower().encode()).hexdigest()[:10]

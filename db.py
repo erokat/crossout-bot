@@ -336,8 +336,19 @@ STD_LIB_MODULES = {
     "string", "struct", "base64", "uuid", "inspect", "unittest", "fcntl",
     "errno", "gc", "signal", "ctypes", "select", "csv", "xml", "email",
     "contextlib", "queue", "operator", "decimal", "fractions", "pickle", "pprint",
-    "enum", "dataclasses", "abc", "typing_extensions", "warnings", "platform",
+    "enum", "dataclasses", "abc", "warnings", "platform",
     "builtins", "__future__", "calendar", "zipfile", "tarfile", "gzip", "bz2", "zlib"
+}
+
+PACKAGE_MODULE_MAPPING = {
+    "pillow": "PIL",
+    "beautifulsoup4": "bs4",
+    "opencv-python": "cv2",
+    "opencv-python-headless": "cv2",
+    "pyyaml": "yaml",
+    "scikit-learn": "sklearn",
+    "protobuf": "google.protobuf",
+    "python-dateutil": "dateutil",
 }
 
 def clean_requirement_name(req):
@@ -492,8 +503,26 @@ def restore_dynamic_skills(skills_dir=None, install_requirements=True):
             pkg = clean_requirement_name(pkg)
             if not pkg:
                 continue
-            base_mod = pkg.split("[")[0].split("=")[0].split("<")[0].split(">")[0].strip().replace("-", "_")
-            # Skip if already importable/installed
+            raw_pkg = re.split(r"[=<>[\]~!\s]", pkg)[0].strip()
+            # 1. Check via importlib.metadata.distribution() by pip name
+            try:
+                import importlib.metadata
+                importlib.metadata.distribution(raw_pkg)
+                continue
+            except Exception:
+                pass
+
+            # 2. Check mapped module name (e.g. pillow -> PIL, beautifulsoup4 -> bs4)
+            mapped_mod = PACKAGE_MODULE_MAPPING.get(raw_pkg.lower())
+            if mapped_mod:
+                try:
+                    if importlib.util.find_spec(mapped_mod) is not None:
+                        continue
+                except Exception:
+                    pass
+
+            # 3. Check base module name
+            base_mod = raw_pkg.replace("-", "_")
             try:
                 if importlib.util.find_spec(base_mod) is not None:
                     continue
@@ -691,6 +720,44 @@ def get_last_sent_meme(sent_to=None):
 
 MEMORIES_FILE = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "bot_memories.json")
 
+def stem_memory_word(w):
+    """
+    Stemming rule:
+    Truncate 2 characters for words >= 5 letters, 1 character for words of 4 letters.
+    """
+    w = str(w).lower()
+    if len(w) >= 5:
+        return w[:-2]
+    elif len(w) == 4:
+        return w[:-1]
+    return w
+
+def sync_memories_to_cloud(async_mode=True):
+    """
+    Syncs bot_memories.json to GitHub repository and Google Drive (folder 'memory').
+    """
+    def _do_sync():
+        try:
+            from github_sync import push_memories_to_github
+            push_memories_to_github(MEMORIES_FILE)
+        except Exception as e:
+            print(f"[MEMORY CLOUD SYNC] GitHub push error: {e}")
+
+        try:
+            from gdrive import upload_memory_to_drive, get_valid_access_token
+            if get_valid_access_token():
+                upload_memory_to_drive(MEMORIES_FILE)
+        except Exception as e:
+            print(f"[MEMORY CLOUD SYNC] Google Drive push error: {e}")
+
+    if async_mode:
+        t = threading.Thread(target=_do_sync, daemon=True)
+        t.start()
+        return t
+    else:
+        _do_sync()
+        return None
+
 def save_bot_memory(fact, topic="", full_text="", author=""):
     if not fact:
         return False
@@ -700,7 +767,7 @@ def save_bot_memory(fact, topic="", full_text="", author=""):
     author = str(author).strip() if author else ""
 
     if not topic:
-        about_match = re.search(r"(?:про|о|об|насчет|по поводу)\s+([а-яa-z0-9\s]+?)(?:\s+(?:связан|это|что|было|много|мало)|[,\.!?:\n\"]|$)", full_text, re.IGNORECASE)
+        about_match = re.search(r"\b(?:про|о|об|насчет|по поводу)\b\s+([а-яёa-z0-9\s]+?)(?:\s+(?:связан|это|что|было|много|мало)|[,\.!?:\n\"]|$)", full_text, re.IGNORECASE)
         if about_match:
             topic = about_match.group(1).strip()[:50]
         else:
@@ -708,7 +775,7 @@ def save_bot_memory(fact, topic="", full_text="", author=""):
             if quotes:
                 topic = quotes[0][:50]
             else:
-                words = [w for w in re.findall(r'\b[а-яa-z0-9]{4,}\b', full_text.lower()) if w not in {"запомни", "сделай", "пожалуйста", "короче", "смотри"}]
+                words = [w for w in re.findall(r'\b[а-яёa-z0-9]{4,}\b', full_text.lower()) if w not in {"запомни", "сделай", "пожалуйста", "короче", "смотри"}]
                 topic = " ".join(words[:3])
 
     with get_db() as conn:
@@ -719,6 +786,7 @@ def save_bot_memory(fact, topic="", full_text="", author=""):
 
     try:
         sync_memories_to_disk()
+        sync_memories_to_cloud(async_mode=True)
     except Exception:
         pass
     return True
@@ -734,6 +802,26 @@ def sync_memories_to_disk():
         json.dump(rows, f, ensure_ascii=False, indent=2)
 
 def restore_bot_memories():
+    # If local file missing, try to restore from GitHub or Google Drive
+    if not os.path.exists(MEMORIES_FILE) or os.path.getsize(MEMORIES_FILE) == 0:
+        try:
+            from github_sync import fetch_memories_from_github
+            gh_content = fetch_memories_from_github()
+            if gh_content:
+                with open(MEMORIES_FILE, "w", encoding="utf-8") as f:
+                    f.write(gh_content)
+                print(f"[MEMORY] Restored bot_memories.json from GitHub")
+        except Exception as e:
+            print(f"[MEMORY WARNING] Error restoring from GitHub: {e}")
+
+        if not os.path.exists(MEMORIES_FILE) or os.path.getsize(MEMORIES_FILE) == 0:
+            try:
+                from gdrive import download_memory_from_drive, get_valid_access_token
+                if get_valid_access_token():
+                    download_memory_from_drive(MEMORIES_FILE)
+            except Exception as e:
+                print(f"[MEMORY WARNING] Error restoring from Google Drive: {e}")
+
     if not os.path.exists(MEMORIES_FILE):
         return 0
     try:
@@ -771,15 +859,15 @@ def get_relevant_memories(query="", limit=5):
     if not query:
         return get_all_memories(limit=limit)
 
-    q_words = [w.lower() for w in re.findall(r'\b[а-яa-z0-9]{3,}\b', query.lower()) if w not in {"бот", "сделай", "мем", "картинку", "скинь", "про", "как", "что", "это", "нарисуй", "покажи"}]
+    q_words = [w.lower() for w in re.findall(r'\b[а-яёa-z0-9]{3,}\b', query.lower()) if w not in {"бот", "сделай", "мем", "картинку", "скинь", "про", "как", "что", "это", "нарисуй", "покажи"}]
     if not q_words:
-        return get_all_memories(limit=limit)
+        return []
 
     with get_db() as conn:
         conditions = []
         params = []
         for w in q_words:
-            stem = w[:-1] if len(w) >= 5 else w
+            stem = stem_memory_word(w)
             conditions.append("(lower(topic) LIKE ? OR lower(fact) LIKE ? OR lower(full_text) LIKE ?)")
             p = f"%{stem}%"
             params.extend([p, p, p])
@@ -793,7 +881,7 @@ def get_relevant_memories(query="", limit=5):
                 {"id": r[0], "topic": r[1], "fact": r[2], "full_text": r[3], "author": r[4], "created_at": r[5]}
                 for r in rows
             ]
-    return get_all_memories(limit=limit)
+    return []
 
 def format_memory_context(query="", limit=4):
     mems = get_relevant_memories(query=query, limit=limit)
@@ -817,24 +905,22 @@ def delete_bot_memory(query):
         )
         deleted = cur.rowcount
         if deleted == 0:
-            q_words = [w for w in re.findall(r'\b[а-яa-z0-9]{4,}\b', q) if w not in {"забудь", "удали", "памяти", "информацию", "про"}]
+            q_words = [w for w in re.findall(r'\b[а-яёa-z0-9]{4,}\b', q) if w not in {"забудь", "удали", "памяти", "информацию", "про"}]
             if q_words:
                 conds = []
                 params = []
                 for w in q_words:
-                    stem = w[:-1] if len(w) >= 5 else w
+                    stem = stem_memory_word(w)
                     conds.append("(lower(topic) LIKE ? OR lower(fact) LIKE ? OR lower(full_text) LIKE ?)")
                     p = f"%{stem}%"
                     params.extend([p, p, p])
                 cur = conn.execute(f"DELETE FROM bot_memory WHERE {' AND '.join(conds)}", params)
                 deleted = cur.rowcount
-                if deleted == 0:
-                    cur = conn.execute(f"DELETE FROM bot_memory WHERE {' OR '.join(conds)}", params)
-                    deleted = cur.rowcount
 
     if deleted:
         try:
             sync_memories_to_disk()
+            sync_memories_to_cloud(async_mode=True)
         except Exception:
             pass
     return deleted
@@ -845,9 +931,13 @@ def clear_all_bot_memories():
     try:
         if os.path.exists(MEMORIES_FILE):
             os.remove(MEMORIES_FILE)
+        with open(MEMORIES_FILE, "w", encoding="utf-8") as f:
+            json.dump([], f)
+        sync_memories_to_cloud(async_mode=True)
     except Exception:
         pass
     return True
+
 
 # Initialize tables on import
 try:

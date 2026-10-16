@@ -184,12 +184,15 @@ async def send_via_telethon(cfg, chat_id, text=None, photo_path=None, reply_to=N
                     sys.stderr.write(f"Error: Photo path not found: {photo_path}\n")
                     sys.exit(1)
 
-                # 1. Save local copy into SAVED_MEMES_DIR
-                os.makedirs(SAVED_MEMES_DIR, exist_ok=True)
-                dest_file = os.path.join(SAVED_MEMES_DIR, os.path.basename(photo_path))
-                if os.path.abspath(photo_path) != os.path.abspath(dest_file):
-                    shutil.copy2(photo_path, dest_file)
-                print(f"Meme copy saved: {dest_file}")
+                # 1. Save local copy into SAVED_MEMES_DIR (only images, never heavy videos/audio - Rule 4)
+                ext = os.path.splitext(photo_path)[1].lower()
+                if ext in [".png", ".jpg", ".jpeg", ".webp"]:
+                    os.makedirs(SAVED_MEMES_DIR, exist_ok=True)
+                    dest_file = os.path.join(SAVED_MEMES_DIR, os.path.basename(photo_path))
+                    if os.path.abspath(photo_path) != os.path.abspath(dest_file):
+                        shutil.copy2(photo_path, dest_file)
+                    print(f"Meme copy saved: {dest_file}")
+
 
                 # 1. Send to chat (Yarik) via Telethon
                 msg = await client.send_file(

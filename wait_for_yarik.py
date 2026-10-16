@@ -43,7 +43,7 @@ def is_bot_mention(text):
         "не удалось найти", "держи трек", "держи симфонию", "⚠️", "принял,", "запустил", "отправил", "закинул", "🎻", "🎵", "🎨"
     ]):
         return False
-    triggers = ["!бот", "!bot", "/бот", "/bot", "бот ответь", "бот,", "ботяра", "ботик", "робот", "стикерпак", "стикеры"]
+    triggers = ["!бот", "!bot", "/бот", "/bot", "бот ответь", "бот,", "ботяра", "ботик", "робот"]
     if any(tr in t for tr in triggers):
         return True
     if re.search(r"\bбот\b", t):
@@ -59,10 +59,9 @@ def check_is_mention_or_proposal(text, reply_to_id=None, sender_uid=None, yarik_
         return True
 
     # 2. Подтверждение или отказ при наличии активного предложения создать навык/дополнение
-    # Срабатывает ТОЛЬКО если есть активное предложение И пользователь ответил (reply) на сообщение с предложением!
     t = (text or "").lower().strip()
     is_confirm_or_reject = bool(re.search(r"^(?:да|делай|давай|сделай|го|ок|ага|да делай|да сгенерируй|да создай|делай давай|конечно|генерируй|создавай|пилим|нет|не надо|отмена|отбой|не делай|забей|yes|no)\b", t))
-    if is_confirm_or_reject and reply_to_id:
+    if is_confirm_or_reject:
         try:
             from dynamic_agent import get_pending_proposal
             keys = ["yarik", "owner"]
@@ -74,10 +73,12 @@ def check_is_mention_or_proposal(text, reply_to_id=None, sender_uid=None, yarik_
                 p = get_pending_proposal(k)
                 if p and p.get("task_text"):
                     prop_id = p.get("proposal_msg_id")
-                    if prop_id and reply_to_id == prop_id:
+                    prop_time = p.get("created_at") or 0
+                    if (prop_id and reply_to_id == prop_id) or (time.time() - float(prop_time) <= 300):
                         return True
         except Exception:
             pass
+
 
     # Во всех остальных случаях при отсутствии слова "бот" — строгое радиомолчание (Правило 2)!
     return False
@@ -242,8 +243,8 @@ async def poll_control_bot(cfg, exit_event, result_box):
                         is_rejection = bool(re.search(r"(?:\b(?:нет|отказ[а-я]*|нельзя|отмен[а-я]*|отбой|reject)\b|(?<!\S)-(?!\S))", t_lower) or re.search(r"\bне\s+(?:удаляй|надо|трогай|делай|разрешай)", t_lower))
                         is_approval = bool(not is_rejection and re.search(r"(?:\b(?:да|разреш[а-я]*|ок|удаляй|сноси|подтвержд[а-я]*|yes)\b|(?<!\S)\+(?!\S))", t_lower))
 
-                        if is_reply_to_prompt or is_approval or is_rejection:
-                            status = "rejected" if is_rejection else ("approved" if (is_approval or is_reply_to_prompt) else "rejected")
+                        if is_approval or is_rejection:
+                            status = "rejected" if is_rejection else "approved"
                             resolve_confirmation(pending_conf["req_id"], status, comment=f"Текст владельца: {text}")
                             add_handled_id(msg_id, owner_id)
                             mark_message_handled(msg_id, owner_id)

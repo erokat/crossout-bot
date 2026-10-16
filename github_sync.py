@@ -532,3 +532,122 @@ def sync_skills_from_github(skills_dir=None, install_requirements=True, push_mis
                 print(f"[GITHUB SYNC] Error installing {pkg}: {e}")
 
     return synced_count
+
+
+def push_memories_to_github(file_path=None, commit_message=None, timeout=DEFAULT_TIMEOUT):
+    """
+    Uploads or updates bot_memories.json in GitHub repository via PUT /repos/{owner}/{repo}/contents/bot_memories.json.
+    Includes '[skip render]' in commit message to prevent container restarts.
+    """
+    token, repo = get_github_config()
+    if not token:
+        print("[GITHUB SYNC] GITHUB_TOKEN not configured. Skipping GitHub memories push.")
+        return False, "GITHUB_TOKEN not configured"
+
+    fpath = file_path or os.path.join(BASE_DIR, "bot_memories.json")
+    if not os.path.exists(fpath):
+        return False, f"File does not exist: {fpath}"
+
+    try:
+        with open(fpath, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return False, f"Could not read {fpath}: {e}"
+
+    if not commit_message:
+        commit_message = "feat(memory): sync bot_memories.json [skip render]"
+    elif "[skip render]" not in commit_message:
+        commit_message = f"{commit_message} [skip render]"
+
+    github_path = "bot_memories.json"
+    sha = get_file_sha(repo, github_path, token=token, timeout=timeout)
+
+    content_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    payload = {
+        "message": commit_message,
+        "content": content_b64
+    }
+    if sha:
+        payload["sha"] = sha
+
+    encoded_path = urllib.parse.quote(github_path, safe="/")
+    url = f"https://api.github.com/repos/{repo}/contents/{encoded_path}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Crossout-Bot-MemoriesSync/1.0",
+        "Content-Type": "application/json"
+    }
+
+    req_data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=req_data, headers=headers, method="PUT")
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status in (200, 201):
+                resp_json = json.loads(resp.read().decode("utf-8"))
+                commit_sha = resp_json.get("commit", {}).get("sha", "")[:7]
+                print(f"[GITHUB SYNC] Successfully pushed bot_memories.json to GitHub [{commit_sha}]. Tag: [skip render]")
+                return True, resp_json
+            else:
+                return False, f"Unexpected status {resp.status}"
+    except urllib.error.HTTPError as he:
+        if he.code in (409, 422):
+            try:
+                new_sha = get_file_sha(repo, github_path, token=token, timeout=timeout)
+                if new_sha:
+                    payload["sha"] = new_sha
+                    retry_data = json.dumps(payload).encode("utf-8")
+                    retry_req = urllib.request.Request(url, data=retry_data, headers=headers, method="PUT")
+                    with urllib.request.urlopen(retry_req, timeout=timeout) as retry_resp:
+                        if retry_resp.status in (200, 201):
+                            resp_json = json.loads(retry_resp.read().decode("utf-8"))
+                            print(f"[GITHUB SYNC] Successfully updated bot_memories.json on GitHub after resolving {he.code} conflict.")
+                            return True, resp_json
+            except Exception as retry_e:
+                print(f"[GITHUB SYNC] Conflict retry failed for bot_memories.json: {retry_e}")
+
+        err_body = he.read().decode("utf-8", errors="ignore")[:200]
+        print(f"[GITHUB SYNC] HTTPError {he.code} pushing bot_memories.json: {err_body}")
+        return False, f"HTTP {he.code}: {err_body}"
+    except Exception as e:
+        print(f"[GITHUB SYNC] Error pushing bot_memories.json: {e}")
+        return False, str(e)
+
+
+def fetch_memories_from_github(timeout=DEFAULT_TIMEOUT):
+    """
+    Downloads bot_memories.json from GitHub if it exists.
+    Returns decoded string content, or None if not found or error.
+    """
+    token, repo = get_github_config()
+    if not repo:
+        return None
+
+    github_path = "bot_memories.json"
+    encoded_path = urllib.parse.quote(github_path, safe="/")
+    url = f"https://api.github.com/repos/{repo}/contents/{encoded_path}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Crossout-Bot-MemoriesSync/1.0"
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                if data.get("content"):
+                    raw_b64 = data["content"].replace("\n", "").replace("\r", "")
+                    return base64.b64decode(raw_b64).decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            print(f"[GITHUB SYNC] HTTPError {e.code} fetching bot_memories.json from GitHub")
+        return None
+    except Exception as e:
+        print(f"[GITHUB SYNC] Error fetching bot_memories.json: {e}")
+        return None
+    return None
+

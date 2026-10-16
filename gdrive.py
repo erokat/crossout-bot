@@ -320,3 +320,48 @@ def upload_and_cleanup(file_path, folder_type="memes"):
         except Exception as e:
             print(f"[STORAGE CLEANUP WARNING] Could not remove {file_path}: {e}")
     return res
+
+def upload_memory_to_drive(file_path=None):
+    """Выгружает bot_memories.json на Google Диск в папку 'memory'."""
+    fpath = file_path or os.path.join(BASE_DIR, "bot_memories.json")
+    if not os.path.exists(fpath):
+        return None
+    return upload_file_to_drive(fpath, folder_type="memory")
+
+def download_memory_from_drive(target_path=None):
+    """
+    Скачивает bot_memories.json из папки 'memory' на Google Диске при наличии доступа.
+    """
+    access_token = get_valid_access_token()
+    if not access_token:
+        return None
+
+    folder_id = ensure_folder(access_token, "memory")
+    if not folder_id:
+        return None
+
+    target = target_path or os.path.join(BASE_DIR, "bot_memories.json")
+    query = urllib.parse.quote(f"name = 'bot_memories.json' and '{folder_id}' in parents and trashed = false")
+    search_url = f"https://www.googleapis.com/drive/v3/files?q={query}&fields=files(id,name)"
+    req = urllib.request.Request(search_url, headers={"Authorization": f"Bearer {access_token}"})
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        files = data.get("files", [])
+        if not files:
+            return None
+        file_id = files[0]["id"]
+
+        dl_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        dl_req = urllib.request.Request(dl_url, headers={"Authorization": f"Bearer {access_token}"})
+        with urllib.request.urlopen(dl_req, timeout=20) as dl_resp:
+            content = dl_resp.read()
+        with open(target, "wb") as f:
+            f.write(content)
+        print(f"[GDRIVE] Successfully downloaded bot_memories.json from Google Drive (ID: {file_id})")
+        return target
+    except Exception as e:
+        sys.stderr.write(f"[GDRIVE ERROR] Download bot_memories.json failed: {e}\n")
+        return None
+

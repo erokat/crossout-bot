@@ -76,34 +76,82 @@ def video_to_gif(video_path, fps=12, scale_w=480):
         return out_path
     return None
 
+def build_atempo_filter(speed):
+    """
+    Constructs ffmpeg atempo filter cascade for any speed > 0.
+    In ffmpeg, a single atempo filter only supports values between 0.5 and 2.0.
+    For speed > 2.0 (e.g. 3.0), chains atempo=2.0,atempo=1.5.
+    For speed < 0.5 (e.g. 0.25), chains atempo=0.5,atempo=0.5.
+    """
+    speed = float(speed)
+    if speed <= 0:
+        return "atempo=1.0"
+    filters = []
+    curr = speed
+    if curr > 2.0:
+        while curr > 2.0:
+            filters.append("atempo=2.0")
+            curr /= 2.0
+        if curr > 1.0001 or not filters:
+            filters.append(f"atempo={curr:.4f}")
+    elif curr < 0.5:
+        while curr < 0.5:
+            filters.append("atempo=0.5")
+            curr /= 0.5
+        if curr < 0.9999 or not filters:
+            filters.append(f"atempo={curr:.4f}")
+    else:
+        filters.append(f"atempo={curr:.4f}")
+    return ",".join(filters)
+
+def has_audio_stream(video_path):
+    """Checks via ffprobe whether video contains at least one audio stream."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=codec_type",
+        "-of", "csv=p=0",
+        video_path
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        return bool(res.stdout.strip())
+    except Exception:
+        return True
+
 def change_video_speed(video_path, speed=2.0):
     """Изменяет скорость видео (ускорение или замедление)."""
     out_name = f"speed_{int(time.time())}_{os.getpid()}.mp4"
     out_path = os.path.join(VIDEO_DIR, out_name)
     pts = 1.0 / speed
-    atempo = min(2.0, max(0.5, speed))
-    cmd = [
-        "ffmpeg", "-i", video_path,
-        "-filter_complex", f"[0:v]setpts={pts:.4f}*PTS[v];[0:a]atempo={atempo:.4f}[a]",
-        "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
-        "-y", out_path
-    ]
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    if res.returncode != 0:
-        # Попробуем без звука, если в исходном видео нет аудиодорожки
-        cmd_no_audio = [
-            "ffmpeg", "-i", video_path,
-            "-filter_complex", f"[0:v]setpts={pts:.4f}*PTS[v]",
-            "-map", "[v]",
-            "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
-            "-an", "-y", out_path
-        ]
-        res = subprocess.run(cmd_no_audio, capture_output=True, text=True, timeout=60)
+    has_audio = has_audio_stream(video_path)
 
+    if has_audio:
+        atempo_chain = build_atempo_filter(speed)
+        cmd = [
+            "ffmpeg", "-i", video_path,
+            "-filter_complex", f"[0:v]setpts={pts:.4f}*PTS[v];[0:a]{atempo_chain}[a]",
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+            "-y", out_path
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
+            return out_path
+
+    # Fallback or direct execution for videos without audio stream
+    cmd_no_audio = [
+        "ffmpeg", "-i", video_path,
+        "-filter_complex", f"[0:v]setpts={pts:.4f}*PTS[v]",
+        "-map", "[v]",
+        "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+        "-an", "-y", out_path
+    ]
+    res = subprocess.run(cmd_no_audio, capture_output=True, text=True, timeout=60)
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
         return out_path
     return None
+
 
 def reverse_video(video_path):
     """Проигрывает видео задом наперед."""

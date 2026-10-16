@@ -9,6 +9,7 @@ import hashlib
 import subprocess
 import traceback
 import tempfile
+import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SKILLS_DIR = os.path.join(BASE_DIR, "skills")
@@ -46,13 +47,15 @@ PROTECTED_CORE_FILES = {
     "gdrive.py"
 }
 
-def is_safe_skill_path(filepath):
+def is_safe_skill_path(filepath, extra_allowed_dirs=None):
     """
     Ensures that the dynamic generator does not overwrite core system files.
-    Allowed locations: skills/, media/, saved_memes/, or new subdirectories.
-    Forbidden: core files in root directory.
+    Allowed locations: skills/, media/, saved_memes/, and temp directory (for tests/transient processing).
+    Forbidden: core files in root directory or traversal.
     """
-    if not filepath:
+    if not filepath or not isinstance(filepath, str):
+        return False
+    if ".." in filepath or filepath.startswith("~"):
         return False
     abs_path = os.path.abspath(filepath)
     base_name = os.path.basename(abs_path).lower()
@@ -61,7 +64,22 @@ def is_safe_skill_path(filepath):
     dir_name = os.path.dirname(abs_path)
     if dir_name == BASE_DIR and base_name in {f.lower() for f in PROTECTED_CORE_FILES}:
         return False
+    allowed_dirs = [
+        os.path.abspath(SKILLS_DIR),
+        os.path.abspath(os.path.join(BASE_DIR, "media")),
+        os.path.abspath(os.path.join(BASE_DIR, "saved_memes")),
+        os.path.abspath(tempfile.gettempdir())
+    ]
+    if extra_allowed_dirs:
+        for ed in extra_allowed_dirs:
+            if ed:
+                allowed_dirs.append(os.path.abspath(ed))
+    if not any(abs_path.startswith(ad + os.sep) or abs_path == ad for ad in allowed_dirs):
+        return False
     return True
+
+AGY_SEMAPHORE = threading.Semaphore(1)
+
 
 def load_registry():
     if os.path.exists(REGISTRY_FILE):
@@ -587,16 +605,17 @@ def generate_code_via_antigravity(prompt, timeout=120):
             break
 
     try:
-        res = subprocess.run(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            cwd=tempfile.gettempdir(),
-            env=env
-        )
+        with AGY_SEMAPHORE:
+            res = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+                cwd=tempfile.gettempdir(),
+                env=env
+            )
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
         else:
@@ -609,6 +628,7 @@ def generate_code_via_antigravity(prompt, timeout=120):
     except Exception as e:
         print(f"[AGY CODE GEN EXCEPTION] {e}")
         return None
+
 
 def is_test_mock(fn):
     if fn is None:
@@ -1257,8 +1277,6 @@ def run_autonomous_task_async(
                 os.path.join(BASE_DIR, "send.py"),
                 "--to", recipient
             ]
-            if not is_owner_sender:
-                send_cmd.append("--no-copy")
             if reply_to_msg_id:
                 send_cmd.extend(["--reply-to", str(reply_to_msg_id)])
 
@@ -1280,6 +1298,15 @@ def run_autonomous_task_async(
             traceback.print_exc()
             err_msg = f"⚠️ Ошибка выполнения автономного навыка: {e}"
             subprocess.run([sys.executable, os.path.join(BASE_DIR, "send.py"), "--to", recipient, "--text", err_msg])
+        finally:
+            if photo_path and photo_path.lower().endswith((".mp4", ".mov", ".avi", ".webm", ".mkv", ".ts")):
+                try:
+                    if os.path.exists(photo_path):
+                        os.remove(photo_path)
+                        print(f"[DYNAMIC ASYNC WORKER CLEANUP] Removed processed input video: {photo_path}")
+                except Exception as ce:
+                    print(f"[DYNAMIC ASYNC WORKER CLEANUP WARNING] Could not remove {photo_path}: {ce}")
+
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
