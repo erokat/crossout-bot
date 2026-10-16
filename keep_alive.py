@@ -639,25 +639,35 @@ def run_antigravity_cli(prompt, timeout=40):
     finally:
         AGY_SEMAPHORE.release()
 
+DEFAULT_BOT_SYSTEM_INSTRUCTION = (
+    "Ты — верный, живой, остроумный бро и друг в Telegram-чате с Яриком и Мишей. "
+    "СТРОЖАЙШИЙ ЗАПРЕТ НА CROSSOUT/ГАЗГЕН: КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО упоминать игру Crossout, Газген, Пустоши, крафты, ПТУРы, кабины, ховеры, мамонты и игровой сленг, "
+    "если пользователь САМ прямо и явно не написал «кроссаут» или «crossout»! "
+    "В обычных разговорах, шутках, приколах, вопросах по учебе, погоде, фоторедакторе и простом трепе — общаться нормальным человеческим языком без навязчивого игрового бреда. "
+    "К владельцу обращаться строго по имени «Миша» (Миха, Мишан). Категорически запрещено называть 'шеф', 'босс', 'командир' или 'Ярик'. "
+    "К другу обращаться «Ярик»."
+)
+
 def ask_ai(prompt, photo_path=None, system_instruction=None):
+    effective_instruction = system_instruction or DEFAULT_BOT_SYSTEM_INSTRUCTION
     # 0. Приоритет Antigravity CLI (Gemini 3.8 Flash Medium) для веб-поиска, фактов, новостей и кода
     is_search_or_code = any(w in prompt.lower() for w in [
-        "найди в интернете", "поищи в интернете", "погугли", "в сети", "интернет", "новости", "онлайн",
-        "код", "скрипт", "напиши python", "python 3", "динамический", "сгенерируй", "сочини"
+        "найди в интернете", "поищи в интернете", "погугли", "в сети", "интернет поиск",
+        "напиши python", "код на python", "скрипт на python", "python 3", "динамический модуль"
     ])
     if is_search_or_code:
-        search_prompt = prompt if not system_instruction else f"{system_instruction}\n\n{prompt}"
+        search_prompt = f"[СИСТЕМНОЕ ПРАВИЛО: {effective_instruction}]\n\n{prompt}"
         res = run_antigravity_cli(search_prompt, timeout=100)
         if res:
             return res
         # Если CLI не ответил, пробуем прямой Gemini API (если настроен ключ)
-        gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction=system_instruction)
+        gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction=effective_instruction)
         if gemini_res:
             return gemini_res
         return None
 
     # 1. Try Gemini API directly if configured
-    gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction=system_instruction)
+    gemini_res = ask_gemini_api(prompt, photo_path=photo_path, system_instruction=effective_instruction)
     if gemini_res:
         return gemini_res
 
@@ -669,8 +679,7 @@ def ask_ai(prompt, photo_path=None, system_instruction=None):
     combined_prompt = prompt
     if ocr_text:
         combined_prompt = f"Текст с прикрепленной фотографии задания/учебника:\n«««\n{ocr_text}\n»»»\n\nЗапрос пользователя: {prompt}"
-    if system_instruction:
-        combined_prompt = f"{system_instruction}\n\n{combined_prompt}"
+    combined_prompt = f"[СИСТЕМНОЕ ПРАВИЛО: {effective_instruction}]\n\n{combined_prompt}"
 
     # 3. Call Antigravity CLI with adequate timeout
     res = run_antigravity_cli(combined_prompt, timeout=60)
@@ -1697,7 +1706,9 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         "удали всю информацию о кроссауте", "удали информацию о кроссауте",
         "удали кроссаут", "хватит говорить как инвалид", "хватит про кроссаут",
         "перестань говорить про кроссаут", "забудь кроссаут", "не говори про кроссаут",
-        "переиграл в кроссаут", "удали все данные о кроссауте"
+        "переиграл в кроссаут", "удали все данные о кроссауте",
+        "не используй сленг", "хватит сленга", "без сленга", "не используй сленг из игры",
+        "не говори про газген", "хватит про газген", "забудь газген"
     ]):
         target_name = "Миша" if is_owner_sender else "Ярик"
         log_event(f"[ORCHESTRATOR] Disabling Crossout lore permanently by request from {target_name}: {text!r}")
@@ -1711,6 +1722,23 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             os.path.join(BASE_DIR, "send.py"),
             "--to", "yarik",
             "--text", reply_reset,
+            "--reply-to", str(msg_id)
+        ]
+        subprocess.run(send_cmd)
+        return
+
+    if any(w in t_lower for w in [
+        "забудь всю информацию", "забудь все что знаешь", "забудь всё что знаешь",
+        "забудь информацию о ярике", "забудь обо мне", "сотри память", "очисти память",
+        "забудь всё обо мне", "забудь все обо мне", "забудь о ярике", "забудь ярика"
+    ]):
+        target_name = "Миша" if is_owner_sender else "Ярик"
+        reply_forget = f"Принял, {target_name}! Всю оперативку и данные зачистил начисто. Общаемся с чистого листа, по-человечески и без всякого бреда! 🤝"
+        send_cmd = [
+            sys.executable,
+            os.path.join(BASE_DIR, "send.py"),
+            "--to", "yarik",
+            "--text", reply_forget,
             "--reply-to", str(msg_id)
         ]
         subprocess.run(send_cmd)

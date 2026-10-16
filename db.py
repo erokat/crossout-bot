@@ -331,7 +331,11 @@ def parse_skill_metadata_from_code(code, fallback_name="skill", fallback_desc="D
     if trig_match:
         triggers = [t.strip().lower() for t in trig_match.group(1).splitlines()[0].split(",") if t.strip()]
     else:
-        triggers = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", skill_desc.lower()) if len(w) >= 4]
+        stop_words = {
+            "бот", "ботяра", "ботик", "робот", "любую", "дату", "дата", "дате", "даты",
+            "день", "дня", "днях", "время", "регионе", "просто", "сделай", "напиши", "создай", "данные"
+        }
+        triggers = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", skill_desc.lower()) if len(w) >= 4 and w not in stop_words]
 
     req_match = re.search(r'(?:#|"""|\'\'\'|\b)REQUIREMENTS:\s*(.+)', code)
     requirements = [r.strip() for r in req_match.group(1).splitlines()[0].split(",") if r.strip()] if req_match else []
