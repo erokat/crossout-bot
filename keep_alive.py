@@ -85,7 +85,6 @@ from video_editor import (
     process_video_command
 )
 from media_finder import find_and_download_image, extract_image_search_and_caption
-from chess_engine import is_chess_request, process_chess_command
 
 MISHA_CHITCHAT_POOL = [
     "О, Миха! Салют! Чё обсуждаем, какая тема? 🚀",
@@ -1201,22 +1200,7 @@ def handle_owner_message(msg_data):
         subprocess.run(cmd)
         return
 
-    # 0.02. Шахматы и фоторедактор для владельца
-    # 1) Очистка доски по фото
-    if photo and any(w in t_lower for w in ["убери фигуры", "убери все фигуры", "очисти доску", "чистая доска", "убери все фигуры и надписи", "стереть фигуры"]):
-        log_event(f"[ORCHESTRATOR] Clean chess board requested for Owner: {text!r}")
-        chess_img, chess_cap = process_chess_command(text, sender_name="Миша", reply_to_photo=photo)
-        cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "owner",
-            "--photo", chess_img,
-            "--text", chess_cap
-        ]
-        subprocess.run(cmd)
-        return
-
-    # 2) Фоторедактор с фото (прифотошопь, добавь надпись, прилепи стикер поверх фото, обработка)
+    # 0.02. Фоторедактор для владельца (прифотошопь, добавь надпись, прилепи стикер поверх фото, обработка)
     if photo and is_photo_editor_request(text, has_photo=True):
         log_event(f"[ORCHESTRATOR] Routing photo edit task to AI Dynamic Skill Engine for owner: {text!r}")
         ack_cmd = [
@@ -1240,20 +1224,6 @@ def handle_owner_message(msg_data):
             ack_msg_id=ack_msg_id,
             is_owner_sender=True
         )
-        return
-
-    # 3) Шахматы для владельца (генерация доски, фигур, позиций)
-    if is_chess_request(text, has_photo=bool(photo)):
-        log_event(f"[ORCHESTRATOR] Chess engine triggered for Owner: {text!r}")
-        chess_img, chess_cap = process_chess_command(text, sender_name="Миша", reply_to_photo=photo)
-        cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "owner",
-            "--photo", chess_img,
-            "--text", chess_cap
-        ]
-        subprocess.run(cmd)
         return
 
     # 0.0. Проверка ответа на предложение создать дополнение
@@ -2088,26 +2058,11 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
         subprocess.run(send_cmd)
         return
 
-    # 1.35. Шахматы и фоторедактор
+    # 1.35. Фоторедактор
     photo_file = msg_data.get("photo")
     target_name = "Миша" if is_owner_sender else "Ярик"
 
-    # 1) Очистка доски по фото
-    if photo_file and any(w in t_lower for w in ["убери фигуры", "убери все фигуры", "очисти доску", "чистая доска", "убери все фигуры и надписи", "стереть фигуры"]):
-        log_event(f"[ORCHESTRATOR] Clean chess board requested for {target_name}: {text!r}")
-        chess_img, chess_cap = process_chess_command(text, sender_name=target_name, reply_to_photo=photo_file)
-        send_cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "yarik",
-            "--photo", chess_img,
-            "--text", chess_cap,
-            "--reply-to", str(msg_id)
-        ]
-        subprocess.run(send_cmd)
-        return
-
-    # 2) Фоторедактор с фото (прифотошопь, добавь надпись, прилепи стикер поверх фото, обработка)
+    # Фоторедактор с фото (прифотошопь, добавь надпись, прилепи стикер поверх фото, обработка)
     if photo_file and is_photo_editor_request(text, has_photo=True):
         log_event(f"[ORCHESTRATOR] Routing photo edit task to AI Dynamic Skill Engine for {target_name}: {text!r}")
         ack_cmd = [
@@ -2132,21 +2087,6 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
             ack_msg_id=ack_msg_id,
             is_owner_sender=is_owner_sender
         )
-        return
-
-    # 3) Шахматы без фото (генерация доски, тактической позиции, вооруженной фигуры)
-    if is_chess_request(text, has_photo=bool(photo_file)):
-        log_event(f"[ORCHESTRATOR] Chess engine triggered for {target_name}: {text!r}")
-        chess_img, chess_cap = process_chess_command(text, sender_name=target_name, reply_to_photo=photo_file)
-        send_cmd = [
-            sys.executable,
-            os.path.join(BASE_DIR, "send.py"),
-            "--to", "yarik",
-            "--photo", chess_img,
-            "--text", chess_cap,
-            "--reply-to", str(msg_id)
-        ]
-        subprocess.run(send_cmd)
         return
 
     # 1.4. Скачивание и отправка музыки / треков / песен / симфоний в чат

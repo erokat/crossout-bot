@@ -368,9 +368,8 @@ def clean_requirement_name(req):
     # Never install python built-in or stdlib modules
     if base in STD_LIB_MODULES or base in getattr(sys, "stdlib_module_names", set()) or base in sys.builtin_module_names:
         return None
-    # Check if any part matches internal project modules
     words = re.findall(r"\b[a-zA-Z0-9_]+\b", r.lower())
-    internal_mods = {"config", "db", "meme_generator", "meme_engine", "dynamic_agent", "photo_editor", "media_finder", "gdrive", "send", "wait_for_yarik", "ask_owner", "chess_engine", "internal_module"}
+    internal_mods = {"config", "db", "meme_generator", "meme_engine", "dynamic_agent", "photo_editor", "media_finder", "gdrive", "send", "wait_for_yarik", "ask_owner", "internal_module"}
     if any(w in internal_mods for w in words):
         return None
     # Validate against valid PEP 508 requirement syntax (name[extras] op version)
