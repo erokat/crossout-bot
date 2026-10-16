@@ -844,6 +844,15 @@ def search_youtube_video(query):
         print(f"[YOUTUBE SEARCH ERROR] {e}")
     return None, None
 
+def get_bot_sent_ids():
+    if not os.path.exists(BOT_SENT_FILE):
+        return set()
+    try:
+        with open(BOT_SENT_FILE, "r") as f:
+            return {int(line.strip()) for line in f if line.strip().isdigit()}
+    except Exception:
+        return set()
+
 def get_last_bot_sent_id():
     if not os.path.exists(BOT_SENT_FILE):
         return None
@@ -1689,10 +1698,24 @@ def handle_owner_message(msg_data):
 
 def handle_yarik_message(msg_data, chat_title="Ярик"):
     msg_id = msg_data.get("id")
+    if msg_data.get("out") is True:
+        log_event(f"[ORCHESTRATOR] Strictly ignoring outgoing message (out=True): msg_id={msg_id}")
+        return
+
+    bot_sent = get_bot_sent_ids()
+    if msg_id and msg_id in bot_sent:
+        log_event(f"[ORCHESTRATOR] Strictly ignoring bot-sent message: msg_id={msg_id}")
+        return
+
+    stored_my_id = get_kv("my_user_id")
+    sender_id = msg_data.get("sender_id")
+    if stored_my_id and sender_id and str(sender_id) == str(stored_my_id):
+        log_event(f"[ORCHESTRATOR] Strictly ignoring self message (sender_id={sender_id}): msg_id={msg_id}")
+        return
+
     text = msg_data.get("text", "").strip()
     t_lower = text.lower()
     sender = msg_data.get("sender", "yarik")
-    sender_id = msg_data.get("sender_id")
     sender_name = msg_data.get("sender_name", "")
     is_owner_sender = (sender == "owner") or (sender_id == 5067025016) or ("Владелец" in sender_name)
     initiator_label = "Ты (Владелец)" if is_owner_sender else "Ярик"
@@ -2582,8 +2605,13 @@ def main():
 
             for m in messages:
                 mid = m.get("id")
+                chat_id = m.get("chat_id") or (cfg.get("owner_id") if source == "owner" else cfg.get("yarik_chat_id"))
+                if m.get("out") is True or (mid and mid in get_bot_sent_ids()):
+                    if mid:
+                        mark_message_handled(mid, chat_id)
+                    log_event(f"[ORCHESTRATOR] Skipping outgoing/bot-sent message mid={mid}")
+                    continue
                 if mid:
-                    chat_id = m.get("chat_id") or (cfg.get("owner_id") if source == "owner" else cfg.get("yarik_chat_id"))
                     if is_handled(mid, chat_id) or is_message_handled(mid, chat_id):
                         log_event(f"[ORCHESTRATOR] Skipping already handled message id={mid} chat_id={chat_id}")
                         continue

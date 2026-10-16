@@ -471,6 +471,11 @@ async def main():
     try:
         if await client.is_user_authorized():
             try:
+                me = await client.get_me()
+                my_user_id = me.id if me else None
+                if my_user_id:
+                    set_kv("my_user_id", str(my_user_id))
+
                 entity = await client.get_entity(yarik_chat_id)
                 chat_title = getattr(entity, 'title', None) or getattr(entity, 'first_name', 'Ярик')
                 save_chat(yarik_chat_id, chat_title, getattr(entity, 'username', None), "private")
@@ -496,7 +501,15 @@ async def main():
                         continue
 
                     sender_uid = m.sender_id or (getattr(m.from_id, 'user_id', None) if getattr(m, 'from_id', None) else None)
-                    is_owner = getattr(m, 'out', False) or (sender_uid == owner_id) or (sender_uid is not None and sender_uid != yarik_chat_id)
+                    is_out = getattr(m, 'out', False) is True
+                    is_self = is_out or (my_user_id is not None and sender_uid == my_user_id) or (m.id in bot_sent)
+
+                    if is_self:
+                        add_handled_id(m.id, yarik_chat_id)
+                        mark_message_handled(m.id, yarik_chat_id)
+                        continue
+
+                    is_owner = (sender_uid == owner_id)
                     is_from_yarik = not is_owner
                     reply_to_id = getattr(m, "reply_to_msg_id", None) or (m.reply_to.reply_to_msg_id if getattr(m, "reply_to", None) else None)
                     is_mention = check_is_mention_or_proposal(m.message, reply_to_id=reply_to_id, sender_uid=sender_uid, yarik_chat_id=yarik_chat_id, bot_sent=bot_sent)
@@ -586,7 +599,8 @@ async def main():
                             "is_mention": True,
                             "sender": sender_key,
                             "sender_id": sender_uid,
-                            "sender_name": sender_label
+                            "sender_name": sender_label,
+                            "out": is_out
                         }]
                     }
                     exit_event.set()
@@ -601,7 +615,15 @@ async def main():
                         return
 
                     sender_uid = msg.sender_id or (getattr(msg.from_id, 'user_id', None) if getattr(msg, 'from_id', None) else None)
-                    is_owner = getattr(msg, 'out', False) or (sender_uid == owner_id) or (sender_uid is not None and sender_uid != yarik_chat_id)
+                    is_out = getattr(msg, 'out', False) is True
+                    is_self = is_out or (my_user_id is not None and sender_uid == my_user_id) or (msg.id in get_bot_sent_ids())
+
+                    if is_self:
+                        add_handled_id(msg.id, yarik_chat_id)
+                        mark_message_handled(msg.id, yarik_chat_id)
+                        return
+
+                    is_owner = (sender_uid == owner_id)
                     is_from_yarik = not is_owner
                     reply_to_id = getattr(msg, "reply_to_msg_id", None) or (msg.reply_to.reply_to_msg_id if getattr(msg, "reply_to", None) else None)
                     is_mention = check_is_mention_or_proposal(msg.message, reply_to_id=reply_to_id, sender_uid=sender_uid, yarik_chat_id=yarik_chat_id, bot_sent=get_bot_sent_ids())
@@ -694,16 +716,22 @@ async def main():
                             "is_mention": True,
                             "sender": sender_key,
                             "sender_id": sender_uid,
-                            "sender_name": sender_label
+                            "sender_name": sender_label,
+                            "out": is_out
                         }]
                     }
                     exit_event.set()
 
                 @client.on(events.NewMessage(chats=yarik_chat_id))
                 async def on_new_message(event):
+                    if getattr(event.message, 'out', False) or getattr(event, 'out', False):
+                        if hasattr(event.message, 'id'):
+                            add_handled_id(event.message.id, yarik_chat_id)
+                            mark_message_handled(event.message.id, yarik_chat_id)
+                        return
                     await handle_candidate_message(event.message)
 
-                # Periodic polling of chat messages to catch outgoing messages from owner (UpdateShortSentMessage)
+                # Periodic polling of chat messages to catch new messages
                 async def poll_recent_telethon_messages():
                     while not exit_event.is_set():
                         try:
@@ -712,6 +740,11 @@ async def main():
                                 if rm.id in get_bot_sent_ids() or rm.id in get_handled_ids() or is_handled(rm.id, yarik_chat_id) or is_message_handled(rm.id, yarik_chat_id):
                                     continue
                                 if after_id is not None and rm.id <= after_id:
+                                    continue
+                                sender_uid = rm.sender_id or (getattr(rm.from_id, 'user_id', None) if getattr(rm, 'from_id', None) else None)
+                                if getattr(rm, 'out', False) or (my_user_id is not None and sender_uid == my_user_id):
+                                    add_handled_id(rm.id, yarik_chat_id)
+                                    mark_message_handled(rm.id, yarik_chat_id)
                                     continue
                                 if is_bot_mention(rm.message):
                                     await handle_candidate_message(rm)

@@ -1,4 +1,5 @@
 import os
+import sys
 import random
 import time
 import hashlib
@@ -6,6 +7,7 @@ import shutil
 import json
 import re
 import subprocess
+import tempfile
 from PIL import Image, ImageDraw, ImageFont
 
 from config import MEDIA_DIR, SAVED_MEMES_DIR
@@ -644,9 +646,234 @@ CROSSOUT_GENERATORS = [
 
 ALL_GENERATORS = RW_GENERATORS + CROSSOVER_GENERATORS + CROSSOUT_GENERATORS
 
-def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
-    theme_lower = (theme or "").lower()
+def wrap_text_lines(draw, text, font, max_width):
+    words = text.split()
+    lines = []
+    curr = []
+    for w in words:
+        test_line = " ".join(curr + [w])
+        bb = draw.textbbox((0, 0), test_line, font=font)
+        if bb[2] - bb[0] <= max_width:
+            curr.append(w)
+        else:
+            if curr:
+                lines.append(" ".join(curr))
+                curr = [w]
+            else:
+                lines.append(w)
+                curr = []
+    if curr:
+        lines.append(" ".join(curr))
+    return lines
 
+def render_dynamic_pillow_meme(theme="", is_crossout=False, recipient="yarik"):
+    width, height = 960, 960
+    palettes = [
+        {"bg": (18, 22, 34), "card1": (26, 32, 48), "card2": (38, 24, 30), "accent": "#38BDF8", "p1": "#4ADE80", "p2": "#F87171", "quote": "#FBBF24"},
+        {"bg": (22, 18, 28), "card1": (32, 26, 42), "card2": (42, 26, 26), "accent": "#A78BFA", "p1": "#34D399", "p2": "#FB7185", "quote": "#FDE047"},
+        {"bg": (16, 24, 24), "card1": (22, 36, 36), "card2": (36, 24, 28), "accent": "#2DD4BF", "p1": "#A3E635", "p2": "#F43F5E", "quote": "#FACC15"},
+        {"bg": (20, 20, 24), "card1": (30, 32, 42), "card2": (40, 28, 30), "accent": "#60A5FA", "p1": "#6EE7B7", "p2": "#FDA4AF", "quote": "#FBBF24"},
+    ]
+    pal = random.choice(palettes)
+    img = Image.new("RGB", (width, height), pal["bg"])
+    draw = ImageDraw.Draw(img)
+
+    clean_theme = re.sub(r"^(?:!|/)?(?:бот|ботяра|ботик|робот)[,\s]*", "", theme or "жизненный мем", flags=re.I).strip()
+    clean_theme = re.sub(r"^(?:сгенерируй|создай|сделай|запили|склепай|выдай|скинь|нарисуй)\s+(?:мне\s+)?(?:кринжанутый\s+|смешной\s+|угарный\s+)?(?:мем|мемасик|мемчик|пикчу|картинку)?\s*", "", clean_theme, flags=re.I).strip()
+    if not clean_theme:
+        clean_theme = "жизненный мем"
+
+    title_text = f"МЕМ: {clean_theme.upper()[:36]}"
+    draw_text_with_outline(draw, (50, 40), title_text, get_font(34), fill=pal["accent"])
+    draw.line([(40, 95), (width - 40, 95)], fill=pal["accent"], width=3)
+    draw_text_with_outline(draw, (50, 115), "Когда решил проверить всё лично...", get_font(22), fill="#94A3B8")
+
+    # Card 1: Expectation
+    draw.rounded_rectangle([(40, 165), (width - 40, 440)], radius=12, fill=pal["card1"], outline=pal["accent"], width=2)
+    draw_text_with_outline(draw, (65, 185), "ОЖИДАНИЕ:", get_font(28), fill=pal["p1"])
+    if is_crossout:
+        p1_lines = ["• Идеальный крафт с балансом массы и брони", "• Заезжаешь в PvP и разносишь всю команду врага"]
+        gas = get_asset("gasgen.png") or get_asset("ptur.png")
+        if gas:
+            try:
+                g_im = Image.open(gas).convert("RGBA").resize((160, 160))
+                img.paste(g_im, (width - 220, 200), g_im)
+            except Exception:
+                pass
+    else:
+        p1_lines = [f"• Полный контроль ситуации по теме «{clean_theme[:30]}»", "• Всё идет строго по идеальному плану без сбоев"]
+
+    y_pos = 240
+    for l in p1_lines:
+        wrapped = wrap_text_lines(draw, l, get_font(24), width - 300)
+        for wl in wrapped:
+            draw_text_with_outline(draw, (75, y_pos), wl, get_font(24), fill="#FFFFFF")
+            y_pos += 35
+
+    # Card 2: Reality
+    draw.rounded_rectangle([(40, 470), (width - 40, 750)], radius=12, fill=pal["card2"], outline="#EF4444", width=2)
+    draw_text_with_outline(draw, (65, 490), "РЕАЛЬНОСТЬ:", get_font(28), fill=pal["p2"])
+    if is_crossout:
+        p2_lines = ["• Союзник влетел в борт на первой секунде", "• Вражеский ПТУР находит открытый Газген через всю карту 💀"]
+        kap = get_asset("kapkan.png") or get_asset("hover.png")
+        if kap:
+            try:
+                k_im = Image.open(kap).convert("RGBA").resize((160, 160))
+                img.paste(k_im, (width - 220, 510), k_im)
+            except Exception:
+                pass
+    else:
+        p2_lines = ["• Всё пошло наперекосяк на первой же секунде 💀", "• Стоишь в шоке и думаешь, где был просчет"]
+
+    y_pos = 550
+    for l in p2_lines:
+        wrapped = wrap_text_lines(draw, l, get_font(24), width - 300)
+        for wl in wrapped:
+            draw_text_with_outline(draw, (75, y_pos), wl, get_font(24), fill="#FFFFFF")
+            y_pos += 35
+
+    # Footer quote
+    quote_text = "«Классика жанра, которой невозможно противостоять»" if not is_crossout else "«Законы Пустошей беспощадны к смельчакам 🚜💀»"
+    draw_text_with_outline(draw, (80, 810), quote_text, get_font(26), fill=pal["quote"])
+
+    out_name = f"meme_{int(time.time())}_{random.randint(1000, 9999)}.png"
+    out_path = os.path.join(MEDIA_DIR, out_name)
+    img.save(out_path, "PNG")
+
+    saved_copy = os.path.join(SAVED_MEMES_DIR, out_name)
+    try:
+        shutil.copy2(out_path, saved_copy)
+    except Exception:
+        pass
+
+    if os.path.exists(ANDROID_PHOTOS_DIR):
+        try:
+            shutil.copy2(out_path, os.path.join(ANDROID_PHOTOS_DIR, out_name))
+        except Exception:
+            pass
+
+    h = hashlib.sha256(clean_theme.encode("utf-8") + str(time.time()).encode()).hexdigest()
+    record_sent_meme(h, "dynamic_pillow_fallback", f"МЕМ: {clean_theme[:40]}", out_path, sent_to=recipient)
+    return out_path
+
+
+def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
+    """
+    Primary Meme Generator:
+    AI model (agy --model gemini-3.8-flash-medium via generate_code_via_antigravity)
+    generates a Python script with Pillow FROM SCRATCH dynamically tailored to the specific topic/theme requested.
+    The script creates the image, outputs the generated image path via print(out_path),
+    and the bot executes the script and sends the newly generated image.
+    No repeated cached images or static hardcoded templates!
+    """
+    raw_theme = (theme or "").strip()
+    clean_theme = re.sub(r"^(?:!|/)?(?:бот|ботяра|ботик|робот)[,\s]*", "", raw_theme, flags=re.I).strip()
+    clean_theme = re.sub(r"^(?:сгенерируй|создай|сделай|запили|склепай|выдай|скинь|нарисуй)\s+(?:мне\s+)?(?:кринжанутый\s+|смешной\s+|угарный\s+)?(?:мем|мемасик|мемчик|пикчу|картинку)?\s*", "", clean_theme, flags=re.I).strip()
+    if not clean_theme:
+        clean_theme = raw_theme or "жизненный мем"
+
+    theme_lower = raw_theme.lower()
+    is_crossout_topic = any(w in theme_lower for w in ["кроссаут", "кросаут", "crossout"])
+    media_abs = os.path.abspath(MEDIA_DIR)
+
+    if is_crossout_topic:
+        theme_guideline = (
+            f"Тема мема: Crossout (Пустоши, крафты, рандом, PvP/PvE, союзники, взрывы, ховеры, тактика). "
+            f"В каталоге '{media_abs}' есть ассеты игры: "
+            "'gasgen.png', 'ptur.png', 'kapkan.png', 'heather.png', 'mammoth.png', 'scorpion.png', 'yeti.png', 'hover.png', 'harvester.png', 'wheel1.png'. "
+            "Скрипт может загружать нужные ассеты через Image.open(path), масштабировать и накладывать с альфа-каналом, либо рисовать стильную авторскую графику."
+        )
+    else:
+        theme_guideline = (
+            "СТРОЖАЙШИЙ ЗАПРЕТ: НЕ приплетать Crossout, Газген, крафты и Пустоши! "
+            f"Мем должен быть строго про «{clean_theme}» — жизненный, остроумный, смешной, молодежный/пацанский юмор."
+        )
+
+    prompt = f"""Напиши автономный скрипт на Python 3 с использованием библиотеки Pillow (PIL), который С НУЛЯ создает уникальный графический мем по запросу:
+«{clean_theme}»
+
+ТРЕБОВАНИЯ К СКРИПТУ:
+1. Необходимые импорты:
+   `import os, sys, time, random`
+   `from PIL import Image, ImageDraw, ImageFont`
+2. Размер изображения: 900x900 или 1000x1000 пикселей (высокое разрешение).
+3. Графический дизайн:
+   - Фон: стильный темный цвет или градиент (например (20, 24, 34) или (16, 20, 30)).
+   - Структура: контрастные панели, рамки, разделители (например: две секции 'ОЖИДАНИЕ' vs 'РЕАЛЬНОСТЬ', или диалоговые блоки, или карточка с ярким заголовком, пунктами и цитатой).
+4. Шрифты:
+   - Ищи шрифты в '{media_abs}':
+     'RussoOne-Regular.ttf', 'Montserrat.ttf', 'Anton.ttf', 'RobotoCondensed-Bold.ttf', 'Oswald.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'.
+   - Сделай функцию get_font(size), которая пробует загрузить truetype шрифт и падает на ImageFont.load_default() при ошибке.
+5. Текст:
+   - Остроумный, смешной, оригинальный текст строго под тему «{clean_theme}».
+   - Обязательно реализуй перенос строк (word wrap), чтобы текст аккуратно помещался в секциях.
+   - Отрисуй текст с контрастной обводкой (stroke_width=2..3) или на ярких плашках.
+6. {theme_guideline}
+7. Сохранение файла и вывод:
+   - Скрипт должен сохранить итоговую картинку в '{media_abs}' с уникальным именем:
+     `out_path = os.path.join('{media_abs}', f'meme_{{int(time.time())}}_{{random.randint(1000, 9999)}}.png')`
+     `img.save(out_path, 'PNG')`
+   - В САМОЙ ПОСЛЕДНЕЙ СТРОКЕ скрипт ОБЯЗАТЕЛЬНО должен вывести путь к файлу в stdout:
+     `print(out_path)`
+8. Скрипт должен быть полностью самодостаточным, без внешних сетевых запросов и без вызова сторонних библиотек кроме Pillow.
+
+Верни ТОЛЬКО готовый Python 3 код строго внутри одного блока ```python ... ``` без лишнего текста вокруг."""
+
+    code = None
+    try:
+        from dynamic_agent import generate_code_via_antigravity
+        res_ai = generate_code_via_antigravity(prompt, timeout=90)
+        if res_ai:
+            m = re.search(r"```(?:python)?\s*(.*?)\s*```", res_ai, re.DOTALL)
+            code = m.group(1).strip() if m else res_ai.strip()
+    except Exception as e:
+        print(f"[DYNAMIC MEME GEN] Error invoking Antigravity CLI: {e}")
+
+    out_path = None
+    if code:
+        temp_script = os.path.join(tempfile.gettempdir(), f"dyn_meme_{int(time.time()*1000)}_{random.randint(100, 999)}.py")
+        try:
+            with open(temp_script, "w", encoding="utf-8") as f:
+                f.write(code)
+            proc = subprocess.run([sys.executable, temp_script], capture_output=True, text=True, timeout=35)
+            if proc.returncode == 0 and proc.stdout.strip():
+                for line in reversed(proc.stdout.splitlines()):
+                    candidate = line.strip()
+                    if os.path.exists(candidate) and os.path.isfile(candidate) and os.path.getsize(candidate) > 500:
+                        out_path = candidate
+                        break
+            else:
+                print(f"[DYNAMIC MEME GEN] Generated script failed (rc={proc.returncode}): {proc.stderr[:300]}")
+        except Exception as e_run:
+            print(f"[DYNAMIC MEME GEN] Error running generated script: {e_run}")
+        finally:
+            if os.path.exists(temp_script):
+                try:
+                    os.remove(temp_script)
+                except Exception:
+                    pass
+
+    if out_path and os.path.exists(out_path):
+        saved_copy = os.path.join(SAVED_MEMES_DIR, os.path.basename(out_path))
+        try:
+            shutil.copy2(out_path, saved_copy)
+        except Exception:
+            pass
+        if os.path.exists(ANDROID_PHOTOS_DIR):
+            try:
+                shutil.copy2(out_path, os.path.join(ANDROID_PHOTOS_DIR, os.path.basename(out_path)))
+            except Exception:
+                pass
+        h = hashlib.sha256(clean_theme.encode("utf-8") + str(time.time()).encode()).hexdigest()
+        record_sent_meme(h, "ai_gemini_3_8_flash", f"МЕМ: {clean_theme[:40]}", out_path, sent_to=recipient)
+        print(f"[DYNAMIC MEME GEN] Successfully created custom AI meme: {out_path}")
+        return out_path
+
+    # Fallback if AI generation failed or timed out: dynamic Pillow rendering (NEVER static cached templates!)
+    print(f"[DYNAMIC MEME GEN] Falling back to dynamic Pillow generation for '{clean_theme}'")
+    return render_dynamic_pillow_meme(clean_theme, is_crossout=is_crossout_topic, recipient=recipient)
+
+def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
     # If repeat is specifically requested, return the last sent meme if available
     if allow_repeat:
         last = get_last_sent_meme(sent_to=recipient) or get_last_sent_meme()
@@ -654,121 +881,7 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
             print(f"[MEME] Repeat allowed and requested. Returning last meme: {last['file_path']}")
             return last["file_path"]
 
-    is_crossout_topic = any(w in theme_lower for w in ["кроссаут", "кросаут", "crossout"])
-    is_rw_topic = any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
-    is_crossover_topic = is_crossout_topic and is_rw_topic
-    is_ptur_vs = is_crossout_topic and any(w in theme_lower for w in ["птур", "ракета"]) and any(w in theme_lower for w in ["вражеск", "союзн", "враг", "vs", "сравнен", "тиммейт", "свой", "чужой"])
-    is_heather_topic = is_crossout_topic and (("вереск" in theme_lower) or (("птур" in theme_lower or "ракета" in theme_lower) and any(w in theme_lower for w in ["сравнен", "vs", "геймплей"])))
-
-    has_targeted = (
-        is_crossover_topic
-        or (is_rw_topic and not is_crossout_topic)
-        or is_ptur_vs
-        or is_heather_topic
-        or (is_crossout_topic and any(w in theme_lower for w in ["автосборк", "газген", "птур", "скорп", "мамонт", "жнец", "ховер"]))
-        or any(w in theme_lower for w in ["клоун", "доге"])
-    )
-
-    candidates = []
-    if is_crossover_topic:
-        cands = [func for _, func in CROSSOVER_GENERATORS]
-        random.shuffle(cands)
-        candidates = cands
-    elif is_rw_topic and not is_crossout_topic:
-        cands = [func for _, func in RW_GENERATORS]
-        random.shuffle(cands)
-        candidates = cands
-    elif is_ptur_vs:
-        candidates = [gen_enemy_ptur_vs_ally_ptur]
-    elif is_heather_topic:
-        candidates = [gen_heather_vs_ptur]
-    elif is_crossout_topic and "автосборк" in theme_lower:
-        candidates = [gen_autobuild]
-    elif is_crossout_topic and "газген" in theme_lower:
-        candidates = [gen_gasgen_blast]
-    elif is_crossout_topic and any(w in theme_lower for w in ["птур", "ракета"]):
-        candidates = [gen_ptur_sniper]
-    elif is_crossout_topic and any(w in theme_lower for w in ["скорп", "реликт"]):
-        candidates = [gen_scorpion_relic]
-    elif is_crossout_topic and any(w in theme_lower for w in ["мамонт", "чугун", "тяж"]):
-        candidates = [gen_mammoth_tank]
-    elif is_crossout_topic and any(w in theme_lower for w in ["жнец", "пилы", "комбайн", "инвиз"]):
-        candidates = [gen_harvester_ambush]
-    elif is_crossout_topic and any(w in theme_lower for w in ["ховер", "полет"]):
-        candidates = [gen_hover_physics]
-    elif any(w in theme_lower for w in ["клоун", "стадии"]):
-        candidates = [gen_clown_progression]
-    elif any(w in theme_lower for w in ["доге", "дог", "сравнен"]):
-        candidates = [gen_doge_comparison]
-    elif is_crossout_topic:
-        cands = [func for _, func in CROSSOUT_GENERATORS]
-        random.shuffle(cands)
-        candidates = cands
-    else:
-        candidates = [gen_doge_comparison, gen_clown_progression]
-
-    # 1. Если тема точно соответствует целевому генератору (Вереск vs ПТУР, Газген, Скорпион и т.д.) — генерируем точный тематический мем!
-    if has_targeted:
-        selected_meme = None
-        for gen_func in candidates:
-            try:
-                img, tpl_name, headline = gen_func()
-            except Exception as e:
-                continue
-
-            h = hashlib.sha256(headline.encode("utf-8") + img.tobytes()).hexdigest()
-            if not allow_repeat and is_meme_already_sent(meme_hash=h, headline=headline):
-                if selected_meme is None:
-                    selected_meme = (img, tpl_name, headline, h)
-                continue
-
-            selected_meme = (img, tpl_name, headline, h)
-            break
-
-        if selected_meme:
-            img, tpl_name, headline, h = selected_meme
-            out_name = f"meme_{int(time.time())}_{random.randint(1000, 9999)}.png"
-            out_path = os.path.join(MEDIA_DIR, out_name)
-            img.save(out_path, "PNG")
-
-            saved_copy = os.path.join(SAVED_MEMES_DIR, out_name)
-            try: shutil.copy2(out_path, saved_copy)
-            except Exception: pass
-
-            if os.path.exists(ANDROID_PHOTOS_DIR):
-                try: shutil.copy2(out_path, os.path.join(ANDROID_PHOTOS_DIR, out_name))
-                except Exception: pass
-
-            record_sent_meme(h, tpl_name, headline, out_path, sent_to=recipient)
-            print(f"[MEME GENERATOR] Generated targeted in-theme meme: {out_path} ({headline})")
-            return out_path
-
-    # 2. Если точного совпадения нет — используем универсальный AI-генератор мемов
-    try:
-        from meme_engine import generate_universal_meme
-        out_path, headline = generate_universal_meme(theme=theme, allow_repeat=allow_repeat, recipient=recipient)
-        h = hashlib.sha256(headline.encode("utf-8") + str(time.time()).encode()).hexdigest()
-        record_sent_meme(h, "universal_engine", headline, out_path, sent_to=recipient)
-        print(f"[MEME ENGINE] Successfully generated diverse meme: {out_path} ({headline})")
-        return out_path
-    except Exception as e:
-        print(f"[MEME ENGINE] Universal engine error: {e}, falling back to local pool")
-
-    # 3. Локальный резервный пул
-    for gen_func in candidates:
-        try:
-            img, tpl_name, headline = gen_func()
-            out_name = f"meme_{int(time.time())}_{random.randint(1000, 9999)}.png"
-            out_path = os.path.join(MEDIA_DIR, out_name)
-            img.save(out_path, "PNG")
-            record_sent_meme(hashlib.sha256(headline.encode("utf-8")).hexdigest(), tpl_name, headline, out_path, sent_to=recipient)
-            return out_path
-        except Exception:
-            continue
-
-    from meme_engine import generate_universal_meme
-    out_path, headline = generate_universal_meme(theme=theme or "жизненный мем", allow_repeat=True, recipient=recipient)
-    return out_path
+    return generate_dynamic_meme_via_ai(theme=theme, recipient=recipient)
 
 # Alias for universal meme generation
 generate_meme = generate_crossout_meme

@@ -506,6 +506,10 @@ def sync_skills_from_github(skills_dir=None, install_requirements=True, push_mis
         import importlib.util
 
         for pkg in all_new_reqs:
+            from db import clean_requirement_name
+            pkg = clean_requirement_name(pkg)
+            if not pkg:
+                continue
             base_mod = pkg.split("[")[0].split("=")[0].split("<")[0].split(">")[0].strip().replace("-", "_")
             try:
                 if importlib.util.find_spec(base_mod) is not None:

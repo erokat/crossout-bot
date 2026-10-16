@@ -42,7 +42,7 @@ def send_via_bot_api(bot_token, chat_id, text=None, file_path=None, reply_to=Non
         return None
 
     try:
-        if file_path and os.path.exists(file_path):
+        if file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
             ext = os.path.splitext(file_path)[1].lower()
             if ext in [".gif"]:
                 endpoint = "sendAnimation"
@@ -62,15 +62,20 @@ def send_via_bot_api(bot_token, chat_id, text=None, file_path=None, reply_to=Non
                 mime_type = "image/png"
             url = f"https://api.telegram.org/bot{bot_token}/{endpoint}"
 
-            
             with open(file_path, "rb") as f:
                 content = f.read()
 
             fields = {"chat_id": chat_id}
             if text:
-                fields["caption"] = text
+                caption = str(text).strip()
+                if len(caption) > 1024:
+                    caption = caption[:1020] + "..."
+                fields["caption"] = caption
             if reply_to:
-                fields["reply_to_message_id"] = reply_to
+                try:
+                    fields["reply_to_message_id"] = int(reply_to)
+                except (ValueError, TypeError):
+                    pass
 
             files = {file_field: (os.path.basename(file_path), content, mime_type)}
             body, ctype = make_multipart_body(fields, files)
@@ -82,14 +87,49 @@ def send_via_bot_api(bot_token, chat_id, text=None, file_path=None, reply_to=Non
 
         elif text:
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            payload = {"chat_id": chat_id, "text": text}
+            msg_text = str(text).strip()
+            if len(msg_text) > 4096:
+                msg_text = msg_text[:4090] + "..."
+            payload = {"chat_id": chat_id, "text": msg_text}
             if reply_to:
-                payload["reply_to_message_id"] = reply_to
+                try:
+                    payload["reply_to_message_id"] = int(reply_to)
+                except (ValueError, TypeError):
+                    pass
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return json.loads(resp.read().decode("utf-8"))
 
+    except urllib.error.HTTPError as he:
+        err_body = he.read().decode("utf-8", errors="ignore") if hasattr(he, "read") else ""
+        sys.stderr.write(f"Bot API send error: HTTP {he.code}: {he.reason} - {err_body}\n")
+        # If reply_to was specified and it failed with 400, retry without reply_to!
+        if reply_to:
+            sys.stderr.write("Bot API: Retrying without reply_to...\n")
+            return send_via_bot_api(bot_token, chat_id, text=text, file_path=file_path, reply_to=None)
+        # If media failed with 400, retry as document or text fallback
+        if file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+            try:
+                sys.stderr.write("Bot API: Retrying media via sendDocument...\n")
+                doc_url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+                with open(file_path, "rb") as df:
+                    doc_content = df.read()
+                doc_fields = {"chat_id": chat_id}
+                if text:
+                    doc_cap = str(text).strip()
+                    doc_fields["caption"] = doc_cap[:1020] + "..." if len(doc_cap) > 1024 else doc_cap
+                doc_files = {"document": (os.path.basename(file_path), doc_content, "application/octet-stream")}
+                d_body, d_ctype = make_multipart_body(doc_fields, doc_files)
+                d_req = urllib.request.Request(doc_url, data=d_body, headers={"Content-Type": d_ctype, "User-Agent": "CrossoutBot/1.0"})
+                with urllib.request.urlopen(d_req, timeout=30) as d_resp:
+                    return json.loads(d_resp.read().decode("utf-8"))
+            except Exception as de:
+                sys.stderr.write(f"Bot API sendDocument fallback error: {de}\n")
+        # Final fallback: send text if text exists
+        if text and file_path:
+            return send_via_bot_api(bot_token, chat_id, text=text, file_path=None, reply_to=None)
+        return None
     except Exception as e:
         sys.stderr.write(f"Bot API send error: {e}\n")
         return None

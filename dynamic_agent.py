@@ -362,10 +362,16 @@ def auto_install_missing_packages(error_output):
     }
 
     for mod in set(missing_mods):
-        base_mod = mod.split(".")[0]
+        base_mod = mod.split(".")[0].strip()
         if base_mod in local_modules:
             continue
-        pkg_name = module_pkg_map.get(base_mod, base_mod)
+        from db import clean_requirement_name, STD_LIB_MODULES
+        if base_mod in STD_LIB_MODULES or base_mod in getattr(sys, "stdlib_module_names", set()) or base_mod in sys.builtin_module_names:
+            continue
+        cleaned = clean_requirement_name(base_mod)
+        if not cleaned:
+            continue
+        pkg_name = module_pkg_map.get(base_mod, cleaned)
         print(f"[DYNAMIC AGENT] Auto-installing missing dependency: {pkg_name} ...")
         try:
             cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", pkg_name]
@@ -616,9 +622,7 @@ def is_test_mock(fn):
 
 def synthesize_meme_extension_code(task_text, ext_slug, ext_desc):
     clean_theme = task_text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
-    is_crossout = any(w in clean_theme.lower() for w in ["кросаут", "кроссаут", "crossout"])
-    if is_crossout:
-        return f'''# -*- coding: utf-8 -*-
+    return f'''# -*- coding: utf-8 -*-
 # EXTENSION: {ext_slug} | {ext_desc}
 import os
 import sys
@@ -637,65 +641,6 @@ if meme_file and os.path.exists(meme_file):
     print("Мем успешно сгенерирован по теме:", theme)
 else:
     sys.exit(1)
-'''
-    else:
-        return f'''# -*- coding: utf-8 -*-
-# EXTENSION: {ext_slug} | {ext_desc}
-import os
-import sys
-from PIL import Image, ImageDraw, ImageFont
-
-_cur_dir = os.path.dirname(os.path.abspath(__file__))
-_parent_dir = os.path.dirname(_cur_dir)
-media_dir = os.path.join(_parent_dir, "media")
-os.makedirs(media_dir, exist_ok=True)
-
-theme = "{clean_theme}"
-
-def get_font(size):
-    candidates = [
-        os.path.join(media_dir, "RussoOne-Regular.ttf"),
-        os.path.join(media_dir, "Montserrat.ttf"),
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-    ]
-    for c in candidates:
-        if os.path.exists(c):
-            try:
-                return ImageFont.truetype(c, size)
-            except Exception:
-                pass
-    return ImageFont.load_default()
-
-width, height = 1000, 1000
-img = Image.new("RGB", (width, height), (18, 20, 26))
-draw = ImageDraw.Draw(img)
-draw.rectangle([(40, 40), (width - 40, height - 40)], fill=(28, 32, 42), outline=(70, 80, 100), width=3)
-
-font_title = get_font(40)
-font_body = get_font(28)
-
-draw.text((width // 2, 100), "МЕМ // ЮМОР", font=font_title, fill="#FFCC00", anchor="mm")
-
-words = theme.split()
-lines = []
-curr = []
-for w in words:
-    curr.append(w)
-    if len(" ".join(curr)) > 35:
-        lines.append(" ".join(curr[:-1]))
-        curr = [w]
-if curr:
-    lines.append(" ".join(curr))
-
-y = 350
-for l in lines:
-    draw.text((width // 2, y), l, font=font_body, fill="#FFFFFF", anchor="mm")
-    y += 45
-
-out_path = os.path.join(media_dir, f"meme_{abs(hash(theme)) % 100000}.png")
-img.save(out_path, "PNG")
-print(out_path)
-print("Держи мем по твоему запросу! 🔥")
 '''
 
 def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=None, sender_key=None, retry_context=None):

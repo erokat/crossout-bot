@@ -22,9 +22,12 @@ def send_bot_message(bot_token, chat_id, text, reply_markup=None):
     if not bot_token:
         return None
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    clean_text = str(text).strip()
+    if len(clean_text) > 4096:
+        clean_text = clean_text[:4090] + "..."
     payload = {
         "chat_id": chat_id,
-        "text": text,
+        "text": clean_text,
         "parse_mode": "HTML"
     }
     if reply_markup:
@@ -34,6 +37,17 @@ def send_bot_message(bot_token, chat_id, text, reply_markup=None):
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as he:
+        # If HTML parse error (400), retry without parse_mode
+        try:
+            payload.pop("parse_mode", None)
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "CrossoutBot/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as retry_e:
+            sys.stderr.write(f"Failed to send bot message fallback: {retry_e}\n")
+            return None
     except Exception as e:
         sys.stderr.write(f"Failed to send bot message: {e}\n")
         return None

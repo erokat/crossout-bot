@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import sys
+import re
 import time
 import json
 import fcntl
@@ -312,6 +314,45 @@ def delete_dynamic_skill(skill_name):
     with get_db() as conn:
         conn.execute("DELETE FROM dynamic_skills WHERE skill_name = ?", (skill_name,))
 
+STD_LIB_MODULES = {
+    "os", "sys", "re", "time", "json", "math", "random", "datetime", "asyncio",
+    "shutil", "urllib", "pathlib", "tempfile", "hashlib", "subprocess", "io",
+    "typing", "collections", "itertools", "functools", "sqlite3", "threading",
+    "multiprocessing", "traceback", "copy", "glob", "socket", "http", "logging",
+    "string", "struct", "base64", "uuid", "inspect", "unittest", "fcntl",
+    "errno", "gc", "signal", "ctypes", "select", "csv", "xml", "email",
+    "contextlib", "queue", "operator", "decimal", "fractions", "pickle", "pprint",
+    "enum", "dataclasses", "abc", "typing_extensions", "warnings", "platform",
+    "builtins", "__future__", "calendar", "zipfile", "tarfile", "gzip", "bz2", "zlib"
+}
+
+def clean_requirement_name(req):
+    if not req or not isinstance(req, str):
+        return None
+    r = req.strip()
+    # Strip any leading 'import ' or 'from '
+    r = re.sub(r"^(?:import|from)\s+", "", r).strip()
+    # Strip comments if any
+    r = r.split("#")[0].strip()
+    if not r:
+        return None
+    # Extract base package name before version specifiers or extras
+    base = re.split(r"[=<>[\]~!\s]", r)[0].strip().replace("-", "_").lower()
+    if not base:
+        return None
+    # Never install python built-in or stdlib modules
+    if base in STD_LIB_MODULES or base in getattr(sys, "stdlib_module_names", set()) or base in sys.builtin_module_names:
+        return None
+    # Check if any part matches internal project modules
+    words = re.findall(r"\b[a-zA-Z0-9_]+\b", r.lower())
+    internal_mods = {"config", "db", "meme_generator", "meme_engine", "dynamic_agent", "photo_editor", "media_finder", "gdrive", "send", "wait_for_yarik", "ask_owner", "chess_engine", "internal_module"}
+    if any(w in internal_mods for w in words):
+        return None
+    # Validate against valid PEP 508 requirement syntax (name[extras] op version)
+    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*(?:\[[a-zA-Z0-9_.,-]+\])?(?:\s*(?:==|>=|<=|~=|!=|<|>|===)\s*[a-zA-Z0-9_.*+-]+)?$", r):
+        return None
+    return r
+
 def parse_skill_metadata_from_code(code, fallback_name="skill", fallback_desc="Dynamic Skill"):
     import re
     if not code:
@@ -338,7 +379,15 @@ def parse_skill_metadata_from_code(code, fallback_name="skill", fallback_desc="D
         triggers = [w for w in re.findall(r"\b[а-яa-z]{4,}\b", skill_desc.lower()) if len(w) >= 4 and w not in stop_words]
 
     req_match = re.search(r'(?:#|"""|\'\'\'|\b)REQUIREMENTS:\s*(.+)', code)
-    requirements = [r.strip() for r in req_match.group(1).splitlines()[0].split(",") if r.strip()] if req_match else []
+    if req_match:
+        raw_reqs = [r.strip() for r in req_match.group(1).splitlines()[0].split(",") if r.strip()]
+        requirements = []
+        for rr in raw_reqs:
+            cleaned = clean_requirement_name(rr)
+            if cleaned and cleaned not in requirements:
+                requirements.append(cleaned)
+    else:
+        requirements = []
 
     return skill_name, skill_desc, triggers, requirements
 
@@ -419,12 +468,16 @@ def restore_dynamic_skills(skills_dir=None, install_requirements=True):
             restored_count += 1
 
         for req in skill.get("requirements", []):
-            if req and isinstance(req, str):
-                all_requirements.add(req.strip())
+            cleaned = clean_requirement_name(req)
+            if cleaned:
+                all_requirements.add(cleaned)
 
     # 3. Fast dependency installation for missing requirements
     if install_requirements and all_requirements:
         for pkg in all_requirements:
+            pkg = clean_requirement_name(pkg)
+            if not pkg:
+                continue
             base_mod = pkg.split("[")[0].split("=")[0].split("<")[0].split(">")[0].strip().replace("-", "_")
             # Skip if already importable/installed
             try:
