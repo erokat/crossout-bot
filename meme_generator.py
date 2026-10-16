@@ -861,11 +861,15 @@ def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
      try:
          with urllib.request.urlopen(req, timeout=20) as resp:
              art = Image.open(io.BytesIO(resp.read())).convert("RGB")
+             if art.height > 100:
+                 art = art.crop((0, 0, art.width, art.height - 40)) # срезаем водяной знак pollinations.ai!
              # используй art как фон или элемент коллажа
      except Exception:
          pass
      ```
-   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО пытаться рисовать реалистичные объекты примитивными полигонами (draw.polygon, draw.arc)! Если нет готового изображения или сети — делай стильный типографический мем-карточку с градиентным фоном и крупными текстовыми блоками.{memory_info}
+   - ДЛЯ ИГРОВЫХ ПЕРСОНАЖЕЙ (Rain World, Minecraft, CS, Dota и др.):
+     КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать нейросеть Pollinations (она не знает персонажей). Используй поиск реальных скриншотов и спрайтов через `from media_finder import find_and_download_image`!
+   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО рисовать реалистичные объекты примитивными полигонами (draw.polygon, draw.arc)! Если нет готового изображения или сети — делай стильный типографический мем-карточку с градиентным фоном и крупными текстовыми блоками.{memory_info}
 
 Верни ТОЛЬКО готовый Python 3 код строго внутри одного блока ```python ... ``` без лишнего текста вокруг."""
 
