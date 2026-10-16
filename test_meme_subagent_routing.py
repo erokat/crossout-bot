@@ -11,9 +11,10 @@ if BASE_DIR not in sys.path:
 from keep_alive import spawn_meme_creator_subagent, handle_yarik_message, handle_owner_message
 
 class TestMemeSubagentRouting(unittest.TestCase):
+    @patch("keep_alive.ask_ai", return_value="Ярик, лови мем!")
     @patch("keep_alive.subprocess.run")
     @patch("keep_alive.generate_crossout_meme")
-    def test_spawn_meme_creator_subagent_non_blocking(self, mock_gen, mock_subproc):
+    def test_spawn_meme_creator_subagent_non_blocking(self, mock_gen, mock_subproc, mock_ask_ai):
         mock_gen.return_value = os.path.join(BASE_DIR, "media", "gasgen.png")
         mock_subproc.return_value = MagicMock(returncode=0)
 
