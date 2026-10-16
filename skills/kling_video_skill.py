@@ -34,7 +34,18 @@ def handle_task(task_text, photo_path=None, **kwargs):
             prompt = prompt[idx:].strip()
 
     prompt = prompt.strip(" :,-") or "Кинематографичный ролик с динамичным освещением"
-    return f"Запуск генерации видео Kling AI по запросу: «{prompt}»...", None
+    is_owner = kwargs.get("is_owner_sender", False)
+    reply_to_id = kwargs.get("reply_to_id")
+    target_chat = kwargs.get("target_chat") or ("owner" if is_owner else "yarik")
+
+    generate_kling_video_async(
+        prompt=prompt,
+        image_path=photo_path,
+        reply_to_id=reply_to_id,
+        target_chat=target_chat,
+        is_owner=is_owner
+    )
+    return f"🎬 Запуск генерации видео Kling AI по запросу: «{prompt}»...", None
 
 if __name__ == "__main__":
     text = sys.argv[1] if len(sys.argv) > 1 else "тест"
