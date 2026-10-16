@@ -510,17 +510,18 @@ def extract_image_search_and_caption(text):
         return False, None, None
     t = text.strip()
     t_clean = re.sub(r"(?i)^(?:!бот|!bot|/бот|/bot|бот[,\s]*|ботик[,\s]*|пожалуйста[,\s]*|плиз[,\s]*)\s*", "", t).strip()
+    t_lower = t_clean.lower()
 
-    search_pat = r"(?i)^(?:найди(?:\s+в\s+интернете|\s+в\s+сети|\s+в\s+гугле|\s+в\s+яндексе)?|скинь|поищи|покажи|скачай|отправь|кинь)\s+(?:фото|фотку|картинку|пикчу|арт|изображение|в\s+интернете|в\s+сети|в\s+яндексе|в\s+гугле)\s*(.+)$"
+    # Если пользователь явно ищет информацию/факты/статью — это текстовый поиск знаний, а не чистый поиск фото!
+    info_keywords = ["информаци", "инфу", "стать", "новост", "факты", "что такое", "кто такой", "справк", "описание"]
+    if any(k in t_lower for k in info_keywords):
+        return False, None, None
+
+    search_pat = r"(?i)^(?:найди(?:\s+в\s+интернете|\s+в\s+сети|\s+в\s+гугле|\s+в\s+яндексе)?|скинь|поищи|покажи|скачай|отправь|кинь)\s+(?:фото|фотку|картинку|пикчу|арт|изображение|обои)\s*(.+)$"
     m = re.search(search_pat, t_clean)
     if not m:
-        m2 = re.search(r"(?i)^найди\s+в\s+интернете\s+(.+)$", t_clean)
-        if m2:
-            body = m2.group(1).strip()
-        else:
-            return False, None, None
-    else:
-        body = m.group(1).strip()
+        return False, None, None
+    body = m.group(1).strip()
 
     caption_pat = r"(?i)\s*(?:,\s*)?(?:\bи\s+)?(?:добавь\s+надпись|сделай\s+надпись|напиши|подпиши|с\s+надписью|с\s+текстом|добавь\s+текст|сделай\s+мем)\s*[:\s-]+\s*(.+)$"
     m_cap = re.search(caption_pat, body)

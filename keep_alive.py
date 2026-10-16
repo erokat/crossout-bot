@@ -2223,7 +2223,18 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                     cap = f"Держи фото «{clean_title}», {target_name}! 📸"
             else:
                 final_img = img_path
-                cap = f"Миша, вот фото: «{clean_title}»! 📸" if is_owner_sender else f"Ярик, лови фото по запросу «{clean_title}»! 📸🚜"
+                brief_info = ""
+                try:
+                    from skills.web_search_skill import search_wikipedia
+                    w_res = search_wikipedia(search_q)
+                    if w_res and w_res.get("extract"):
+                        brief_info = f"\n\n📖 {w_res['extract']}"
+                except Exception:
+                    pass
+                base_cap = f"Миша, вот фото: «{clean_title}»! 📸" if is_owner_sender else f"Ярик, лови фото по запросу «{clean_title}»! 📸🚜"
+                cap = base_cap + brief_info
+                if len(cap) > 1020:
+                    cap = cap[:1017] + "..."
 
             send_cmd = [
                 sys.executable,

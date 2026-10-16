@@ -521,11 +521,7 @@ def get_all_media_snapshot():
     return snapshot
 
 def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script_path=None):
-    # 0. Если задача чисто текстовая (погода, расчеты, курсы и т.д.) — медиафайл исключен!
-    if is_pure_text_task(task_text, script_path):
-        return None
-
-    # 1. Проверяем явный путь в stdout
+    # 1. Проверяем явный путь в stdout (если скрипт сам вывел путь к файлу — он приоритетен)
     if stdout:
         m = re.findall(r"([/\w.-]+\.(?:png|jpg|jpeg|gif|webp|mp4|webm|mov|mp3|ogg|wav|xlsx|pdf))", stdout, re.IGNORECASE)
         for raw_cand in reversed(m):
@@ -544,8 +540,8 @@ def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script
                     # Если путь явно выведен скриптом в stdout — это и есть готовый результат!
                     return os.path.abspath(cand)
 
-    # 2. Если в stdout путь не был напечатан, ищем в папках ТОЛЬКО если задача явно просила файл/медиа
-    if not is_media_task(task_text):
+    # 2. Если в stdout путь не был напечатан, для чисто текстовых задач медиа не ищем
+    if is_pure_text_task(task_text, script_path) or not is_media_task(task_text):
         return None
 
     # 3. Проверяем папки media/ и extensions/
@@ -710,24 +706,25 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
         print(f"[DYNAMIC AGENT] Reusing existing extension: {existing_script}")
         code_rc, stdout, stderr = run_script(existing_script, input_file=photo_path, task_text=task_text)
         if code_rc == 0:
-            if not ext_produces_media or is_pure_text_task(task_text, existing_script):
-                new_media = None
-            else:
-                new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=existing_script)
+            new_media = find_newest_media(before_files, stdout=stdout, min_mtime=start_time, task_text=task_text, script_path=existing_script)
 
             if new_media and os.path.exists(new_media):
                 clean_lines = []
                 if stdout:
+                    skip_media_line = True
                     for line in stdout.splitlines():
                         line_str = line.strip()
-                        if not line_str or line_str.startswith("/") or line_str.startswith("media/") or line_str.endswith((".png", ".jpg", ".mp4", ".mp3", ".xlsx", ".pdf", ".gif")):
+                        if skip_media_line and line_str and (line_str.startswith("/") or line_str.startswith("media/") or line_str.endswith((".png", ".jpg", ".mp4", ".mp3", ".xlsx", ".pdf", ".gif"))):
+                            skip_media_line = False
                             continue
-                        if any(tech_w in line_str.lower() for tech_w in ["traceback", "module", "saved to", "successfully", "extension", "/app/"]):
+                        if line_str and any(tech_w in line_str.lower() for tech_w in ["traceback", "module", "saved to", "successfully", "extension", "/app/"]):
                             continue
                         clean_lines.append(line_str)
 
-                natural_caption = " ".join(clean_lines).strip() if (clean_lines and len(" ".join(clean_lines)) < 160) else ""
-                if not natural_caption:
+                full_caption = "\n".join(clean_lines).strip()
+                if full_caption:
+                    natural_caption = full_caption if len(full_caption) <= 1020 else full_caption[:1017] + "..."
+                else:
                     natural_caption = f"Готово, {sender_name}! Лови результат 🔥"
                 return natural_caption, new_media
 

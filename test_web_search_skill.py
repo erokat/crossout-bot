@@ -100,5 +100,14 @@ class TestWebSearchSkill(unittest.TestCase):
         self.assertNotIn("интернете_", parsed_msg)
         self.assertTrue(any(e.__class__.__name__ == "MessageEntityItalic" for e in entities))
 
+    def test_image_search_not_hijacking_info(self):
+        from media_finder import extract_image_search_and_caption
+        is_img, query, cap = extract_image_search_and_caption("бот найди в интернете информацию о горбатых калоедах(о Ярике)")
+        self.assertFalse(is_img)
+
+        is_img2, query2, cap2 = extract_image_search_and_caption("бот найди в интернете фото горбатых калоедов")
+        self.assertTrue(is_img2)
+        self.assertIn("горбатых калоедов", query2)
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SKILL_NAME: web_search_skill
 # DESCRIPTION: Умный поиск информации, новостей, фактов и ответов на вопросы в интернете
-# TRIGGERS: найди в интернете, поиск в интернете, погугли, найди в сети, что известно о, поищи в интернете, поиск информации, найди информацию, загугли, в интернете, найти в интернете, поищи в сети, поиск в сети
+# TRIGGERS: найди в интернете, поиск в интернете, погугли, найди в сети, что известно о, поищи в интернете, поиск информации, найди информацию, загугли, в интернете, найти в интернете, поищи в сети, поиск в сети, информацию о, информацию про
 # REQUIREMENTS: 
 
 import os
@@ -9,8 +9,11 @@ import sys
 import re
 import json
 import html
+import hashlib
 import urllib.request
 import urllib.parse
+
+MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "media")
 
 def clean_query(raw_query):
     if not raw_query:
@@ -19,24 +22,30 @@ def clean_query(raw_query):
     # Strip bot address prefixes
     q = re.sub(r"^(?:[!/]?бот[,\s]*|ботик[,\s]*|ботяра[,\s]*|bot[,\s]*)", "", q, flags=re.IGNORECASE).strip()
     
-    # Strip search command triggers
+    # Strip joke parenthetical remarks like (о Ярике), (про Ярика), etc.
+    q = re.sub(r"\s*\([^)]*(?:ярик|миш|прикол|мем)[^)]*\)\s*", " ", q, flags=re.IGNORECASE).strip()
+    
     patterns = [
-        r"^найди(?:-ка)?\s+(?:всё\s+)?в\s+(?:интернете|сети)\s+(?:про|о|об|насчёт)?\s*",
-        r"^поищи(?:-ка)?\s+(?:всё\s+)?в\s+(?:интернете|сети)\s+(?:про|о|об|насчёт)?\s*",
-        r"^поиск\s+(?:в\s+(?:интернете|сети)|информации)\s+(?:про|о|об|насчёт)?\s*",
-        r"^найди\s+информацию\s+(?:про|о|об|насчёт)?\s*",
-        r"^поищи\s+информацию\s+(?:про|о|об|насчёт)?\s*",
-        r"^что\s+известно\s+(?:про|о|об|насчёт)\s*",
-        r"^расскажи\s+(?:про|о|об|насчёт)\s*",
-        r"^погугли\s+(?:про|о|об|насчёт)?\s*",
-        r"^загугли\s+(?:про|о|об|насчёт)?\s*",
-        r"^найди\s+(?:про|о|об|насчёт)?\s*",
-        r"^поищи\s+(?:про|о|об|насчёт)?\s*",
+        r"^найди(?:-ка)?\s+(?:всё\s+)?в\s+(?:интернете|сети)\s*",
+        r"^поищи(?:-ка)?\s+(?:всё\s+)?в\s+(?:интернете|сети)\s*",
+        r"^поиск\s+(?:в\s+(?:интернете|сети)|информации)\s*",
+        r"^найди\s+(?:всю\s+)?информацию\s*",
+        r"^поищи\s+(?:всю\s+)?информацию\s*",
+        r"^(?:информаци[юяи]|инфу|справку|данные|статью|новости|факты)\s*",
+        r"^(?:что\s+известно|расскажи|погугли|загугли|найди|поищи)\s*",
+        r"^(?:про|о|об|насчёт)\s*",
         r"\s+в\s+(?:интернете|сети)$",
     ]
-    for pat in patterns:
-        q = re.sub(pat, "", q, flags=re.IGNORECASE).strip()
-    
+    for _ in range(4):
+        changed = False
+        for pat in patterns:
+            new_q = re.sub(pat, "", q, flags=re.IGNORECASE).strip()
+            if new_q != q and new_q:
+                q = new_q
+                changed = True
+        if not changed:
+            break
+            
     # Strip quotes if surrounded
     if (q.startswith('"') and q.endswith('"')) or (q.startswith('«') and q.endswith('»')):
         q = q[1:-1].strip()
@@ -44,7 +53,7 @@ def clean_query(raw_query):
     return q or raw_query.strip()
 
 def search_wikipedia(query):
-    """Ищет краткую энциклопедическую выжимку в Википедии (REST API / Search API)."""
+    """Ищет краткую энциклопедическую выжимку и фото в Википедии (REST API / Search API)."""
     if not query:
         return None
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -58,11 +67,13 @@ def search_wikipedia(query):
             extract = data.get("extract")
             title = data.get("title")
             page_url = data.get("content_urls", {}).get("desktop", {}).get("page")
-            if extract and len(extract) > 40:
+            img_url = data.get("originalimage", {}).get("source") or data.get("thumbnail", {}).get("source")
+            if extract and len(extract) > 30:
                 return {
                     "title": title,
                     "extract": extract.strip(),
-                    "url": page_url or f"https://ru.wikipedia.org/wiki/{urllib.parse.quote(title)}"
+                    "url": page_url or f"https://ru.wikipedia.org/wiki/{urllib.parse.quote(title)}",
+                    "image_url": img_url
                 }
     except Exception:
         pass
@@ -82,18 +93,20 @@ def search_wikipedia(query):
                 snippet = results[0].get("snippet", "")
                 snippet_clean = html.unescape(re.sub(r"<[^>]+>", "", snippet)).strip()
                 
-                # Fetch full extract for top match
+                # Fetch full extract and thumbnail for top match
                 url_sum = f"https://ru.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(top_title)}"
                 req_sum = urllib.request.Request(url_sum, headers=headers)
                 try:
                     with urllib.request.urlopen(req_sum, timeout=5) as r_sum:
                         d_sum = json.loads(r_sum.read().decode("utf-8"))
                         ext = d_sum.get("extract")
+                        top_img = d_sum.get("originalimage", {}).get("source") or d_sum.get("thumbnail", {}).get("source")
                         if ext:
                             return {
                                 "title": top_title,
                                 "extract": ext.strip(),
-                                "url": f"https://ru.wikipedia.org/wiki/{urllib.parse.quote(top_title)}"
+                                "url": f"https://ru.wikipedia.org/wiki/{urllib.parse.quote(top_title)}",
+                                "image_url": top_img
                             }
                 except Exception:
                     pass
@@ -102,7 +115,8 @@ def search_wikipedia(query):
                     return {
                         "title": top_title,
                         "extract": snippet_clean,
-                        "url": f"https://ru.wikipedia.org/wiki/{urllib.parse.quote(top_title)}"
+                        "url": f"https://ru.wikipedia.org/wiki/{urllib.parse.quote(top_title)}",
+                        "image_url": None
                     }
     except Exception:
         pass
@@ -159,6 +173,24 @@ def search_duckduckgo(query, max_results=4):
     
     return results
 
+def download_topic_image(image_url, query_name):
+    """Скачивает иллюстративное фото темы в ./media/ для наглядности."""
+    if not image_url:
+        return None
+    try:
+        os.makedirs(MEDIA_DIR, exist_ok=True)
+        q_hash = hashlib.md5(query_name.encode("utf-8")).hexdigest()[:8]
+        ext = ".png" if ".png" in image_url.lower() else ".jpg"
+        out_path = os.path.join(MEDIA_DIR, f"search_{q_hash}{ext}")
+        req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        with urllib.request.urlopen(req, timeout=8) as resp, open(out_path, "wb") as f:
+            f.write(resp.read())
+        if os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
+            return out_path
+    except Exception:
+        pass
+    return None
+
 def web_search(query_text=""):
     raw_input = query_text or os.environ.get("TASK_TEXT", "") or (sys.argv[1] if len(sys.argv) > 1 else "")
     sender_name = os.environ.get("SENDER_NAME", "Миша")
@@ -177,6 +209,11 @@ def web_search(query_text=""):
     
     if not wiki_info and not web_results:
         return f"🔍 {sender_name}, по запросу «{clean_q}» ничего не удалось найти в сети. Попробуй переформулировать запрос!"
+    
+    # Try downloading topic image if available from Wikipedia
+    local_image = None
+    if wiki_info and wiki_info.get("image_url"):
+        local_image = download_topic_image(wiki_info["image_url"], clean_q)
     
     lines = [f"🔍 **Результаты поиска в интернете по запросу:** «{clean_q}»\n"]
     
@@ -199,11 +236,16 @@ def web_search(query_text=""):
             
             lines.append(f"{idx}. [{title}]({url})")
             if snippet:
-                lines.append(f"   _{snippet}_")
+                lines.append(f"   {snippet}")
         lines.append("")
         
-    lines.append(f"✨ _Найдено в сети для {sender_name}_")
-    return "\n".join(lines)
+    lines.append(f"✨ Найдено в сети для {sender_name}")
+    report_text = "\n".join(lines)
+
+    # If an image was downloaded, output path first so dynamic engine pairs photo with text
+    if local_image and os.path.exists(local_image):
+        return f"{local_image}\n{report_text}"
+    return report_text
 
 if __name__ == "__main__":
     task_input = " ".join(sys.argv[1:]) or os.environ.get("TASK_TEXT", "")
