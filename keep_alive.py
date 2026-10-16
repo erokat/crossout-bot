@@ -860,25 +860,24 @@ def spawn_meme_creator_subagent(
                 return
 
             t_lower = (theme or "").lower()
-            is_crossout_topic = any(w in t_lower for w in ["кросс", "крос", "crossout", "газген", "птур", "ховер", "утюг", "капкан", "мамонт", "скорпион"])
+            is_crossout_topic = any(w in t_lower for w in ["кроссаут", "кросаут", "crossout"])
             num_suffix = f" (#{meme_index})" if total_count > 1 else ""
 
             def get_smart_meme_caption(recipient_role, user_text, suffix=""):
                 if is_crossout_topic:
                     if recipient_role == "owner":
                         pool = [
-                            f"Миха, свежий прикол прямиком со сварочного стола! Оцени инженерную мысль 🚜💥{suffix}",
-                            f"Мишан, зацени этот шедевр! Когда собрал идеальный крафт, но рандом решил иначе 💀🚜{suffix}",
-                            f"Миха, лови годный мемасик! Чистая правда жизни в Пустошах 🚜🔥{suffix}",
-                            f"Миха, горячий мемчик прямо из печи Скитальцев! Как тебе? 🔥🚜{suffix}",
-                            f"Миха, чистейшая база из рандома! Такое только в Crossout можно увидеть 🚜💀{suffix}"
+                            f"Миха, свежий мемчик прямо со стола! Оцени задумку 🚜💥{suffix}",
+                            f"Мишан, зацени этот шедевр! 💀🚜{suffix}",
+                            f"Миха, лови годный мемасик! 🚜🔥{suffix}",
+                            f"Миха, чистейшая база! 🚜💀{suffix}"
                         ]
                     else:
                         pool = [
-                            f"Ярик, держи свежак из Пустошей! Оценивай по шкале от 1 до 10 🚜💥{suffix}",
-                            f"Ярик, лови годную жизу! Когда рандом опять преподносит сюрпризы 💀🚜{suffix}",
-                            f"Ярик, зацени этот шедевр инженерной мысли! Газген на кабине — классика 🚜🔥{suffix}",
-                            f"Ярик, лови жизу про Пустоши! Чистая правда любого рандомного боя 🚜🔥{suffix}"
+                            f"Ярик, лови свежий мемчик! Оценивай по шкале от 1 до 10 🔥{suffix}",
+                            f"Ярик, зацени этот шедевр! Оценивай по шкале от 1 до 10 💥{suffix}",
+                            f"Ярик, лови прикол! Чистая жиза от 1 до 10 ⚡{suffix}",
+                            f"Ярик, как тебе такой мемчик? Оцени по шкале от 1 до 10 🎯{suffix}"
                         ]
                 else:
                     if recipient_role == "owner":
@@ -897,7 +896,7 @@ def spawn_meme_creator_subagent(
                 return random.choice(pool)
 
             fallback_cap = get_smart_meme_caption("owner" if (recipient == "owner" or is_owner_sender) else "yarik", theme, suffix=num_suffix)
-            topic_warning = " СТРОГИЙ ЗАПРЕТ: НЕ приплетай Crossout, Пустоши или Газген, если тема не о Crossout!" if not is_crossout_topic else ""
+            topic_warning = " СТРОГИЙ ЗАПРЕТ: НЕ приплетай Crossout, Пустоши, крафты или Газген, если тема не о Crossout!" if not is_crossout_topic else ""
 
             ai_fn = ask_ai_fn or ask_ai
             caption = None
@@ -912,9 +911,9 @@ def spawn_meme_creator_subagent(
                     )
                 elif is_owner_sender and recipient == "yarik":
                     prompt_cap = (
-                        f"Владелец бота поручил отправить Ярику мем{num_suffix} по теме: «{theme}». "
-                        "Напиши короткую, живую, угарную подпись корешу в чат (1-2 предложения), как реальный заядлый геймер в тему этого мема, "
-                        "и попроси его дать строгую экспертную оценку этому шедевру. Выдай ТОЛЬКО текст реплики."
+                        f"Владелец бота поручил отправить Ярику мем{num_suffix} по теме: «{theme}».{topic_warning} "
+                        "Напиши короткую, живую, угарную подпись корешу в чат (1-2 предложения), как нормальный реальный друг в тему этого мема, "
+                        "и попроси его дать оценку по шкале от 1 до 10. Выдай ТОЛЬКО текст реплики."
                     )
                 else:
                     prompt_cap = (
@@ -2043,18 +2042,18 @@ def handle_yarik_message(msg_data, chat_title="Ярик"):
                 "ОБЯЗАТЕЛЬНО включи саму ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
                 "Выдай ТОЛЬКО чистый текст реплики."
             )
-            fallback_stk = "Держи наш склад отборного позора и детонаций, Миша: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
+            fallback_stk = "Держи ссылку на наш стикерпак, Миша: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥"
         else:
             prompt_stk_share = (
-                "Ярик в чате попросил скинуть ссылку на наш стикерпак по игре Crossout: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
+                "Ярик в чате попросил скинуть ссылку на наш стикерпак: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
                 f"Его сообщение: «{text}»\n"
-                "Напиши угарный, живой, пацанский ответ корешу Ярику в чат (1-2 предложения), как реальный заядлый игрок в Crossout "
-                "(с юмором, сарказмом и иронией про взрывы Газгенов, рандомных раков, позор Пустошей, мол держи святой артефакт и спамь на здоровье). "
+                "Напиши бодрый, живой, дружеский ответ корешу Ярику в чат (1-2 предложения), как нормальный пацан и друг. "
+                "СТРОЖАЙШИЙ ЗАПРЕТ: НЕ приплетай Газген, взрывы, раков и Пустоши! "
                 "Категорически без официоза, без шаблонных фраз роботов. "
                 "ОБЯЗАТЕЛЬНО включи саму ссылку: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat\n"
                 "Выдай ТОЛЬКО чистый текст реплики в чат."
             )
-            fallback_stk = "Держи наш склад отборного позора и детонаций, Ярик, спамь пока раму не оторвало: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥🚜"
+            fallback_stk = "Держи ссылку на наш стикерпак, Ярик: https://t.me/addstickers/crossout_memes_arhfb8_by_erokat 🔥"
 
         reply = ask_ai(prompt_stk_share)
         if not reply or "https://t.me/addstickers/crossout_memes_arhfb8_by_erokat" not in reply:

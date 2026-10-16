@@ -523,7 +523,7 @@ def find_newest_media(before_files, stdout="", min_mtime=0, task_text="", script
 
 def synthesize_meme_extension_code(task_text, ext_slug, ext_desc):
     clean_theme = task_text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
-    is_crossout = any(w in clean_theme.lower() for w in ["кросаут", "кроссаут", "crossout", "газген", "птур", "ховер", "утюг", "капкан", "мамонт", "скорпион"])
+    is_crossout = any(w in clean_theme.lower() for w in ["кросаут", "кроссаут", "crossout"])
     is_chess = any(w in clean_theme.lower() for w in ["шахмат", "доск", "слон", "ферз", "ладь"])
     if is_chess:
         return f'''# -*- coding: utf-8 -*-

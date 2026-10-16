@@ -118,7 +118,7 @@ MEMES_2020_2022 = [
         "title": "GigaChad",
         "url": "https://i.imgflip.com/35bdwf.jpg",
         "keywords": ["гигачад", "gigachad", "сигма", "база", "базированный", "сигмач", "мужик"],
-        "default_setup": "Да, я играю в Crossout на чистом Газгене и ховерах.",
+        "default_setup": "Да, я выспался и сделал все дела вовремя.",
         "default_punchline": "Как ты догадался?"
     },
     {
@@ -135,22 +135,22 @@ MEMES_2020_2022 = [
         "url": "https://i.imgflip.com/58bk20.jpg",
         "keywords": ["подумай", "think mark", "неуязвимый", "омнимен"],
         "default_setup": "ПОДУМАЙ, ЯРИК, ПОДУМАЙ!",
-        "default_punchline": "Зачем ставить Газген под кабину, если он детонирует от ветра?!"
+        "default_punchline": "Если не начать сейчас, когда ты собираешься это сделать?!"
     },
     {
         "name": "doge_vs_cheems",
         "title": "Buff Doge vs Cheems",
         "url": "https://i.imgflip.com/43a45p.png",
         "keywords": ["доге", "чимс", "раньше", "сейчас", "сравнение", "doge", "cheems"],
-        "default_setup": "Игроки в 2020 vs Игроки в 2022",
-        "default_punchline": "3 часа собирал броневик vs заплакал от дробовика"
+        "default_setup": "Я в 2018 году vs Я в 2026 году",
+        "default_punchline": "Гулял на улице до темноты vs устал пока вставал с дивана"
     },
     {
         "name": "always_has_been",
         "title": "Always Has Been",
         "url": "https://i.imgflip.com/46e43q.png",
         "keywords": ["всегда был", "космонавты", "always has been", "предательство"],
-        "default_setup": "Подожди, это всё был один сплошной рандом?",
+        "default_setup": "Подожди, это всё был один сплошной прикол?",
         "default_punchline": "Всегда так и было."
     },
     {
@@ -158,7 +158,7 @@ MEMES_2020_2022 = [
         "title": "Anakin Padme 4 Panel",
         "url": "https://i.imgflip.com/5c7lwq.png",
         "keywords": ["анакин", "падме", "ты же", "правда ведь"],
-        "default_setup": "Я настроил билд и иду в рандом. — Мы же победим, правда?",
+        "default_setup": "Я сделал всё за 5 минут. — Ты же проверил результат, правда?",
         "default_punchline": "Правда ведь?..."
     },
     {
@@ -166,16 +166,16 @@ MEMES_2020_2022 = [
         "title": "Bernie Mittens",
         "url": "https://i.imgflip.com/4v66v5.png",
         "keywords": ["берни", "варежки", "ожидание", "сижу"],
-        "default_setup": "Я снова жду, пока починят баланс и подбор в боях...",
-        "default_punchline": "Цикл 12-й, ничего не изменилось."
+        "default_setup": "Я снова сижу и жду, когда закончатся дела...",
+        "default_punchline": "Очередной час ожидания."
     },
     {
         "name": "mr_incredible_uncanny",
         "title": "Mr Incredible Becoming Uncanny",
         "url": "https://i.imgflip.com/6090bv.jpg",
         "keywords": ["мистер исключительный", "жуткий", "стадии боли", "mr incredible"],
-        "default_setup": "Стадии осознания, когда в убежище Rain World закончился кислород",
-        "default_punchline": "И до убежища осталось 3 экрана..."
+        "default_setup": "Стадии осознания, когда забыл сохранить документ перед закрытием",
+        "default_punchline": "И автосохранение было выключено..."
     },
     {
         "name": "mahoraga",
@@ -190,8 +190,8 @@ MEMES_2020_2022 = [
         "title": "Drake Hotline Bling",
         "url": "https://i.imgflip.com/30b1gx.jpg",
         "keywords": ["дрейк", "drake", "нет да", "выбор"],
-        "default_setup": "Сделать сбалансированный крафт с броней — НЕТ\nПоставить 4 Газгена и улететь в стратосферу — ДА",
-        "default_punchline": "Гений инженерной мысли."
+        "default_setup": "Лечь спать до полуночи — НЕТ\nЛистать мемы до 4 утра — ДА",
+        "default_punchline": "Классика каждого вечера."
     },
     {
         "name": "two_buttons",
@@ -199,15 +199,15 @@ MEMES_2020_2022 = [
         "url": "https://i.imgflip.com/1g8my4.jpg",
         "keywords": ["две кнопки", "сложный выбор", "кнопка", "пот"],
         "default_setup": "Сложный выбор в 3 часа ночи:",
-        "default_punchline": "Лечь спать вовремя ИЛИ Сыграть ещё один бой"
+        "default_punchline": "Лечь спать вовремя ИЛИ Посмотреть еще одно видео"
     },
     {
         "name": "distracted_boyfriend",
         "title": "Distracted Boyfriend",
         "url": "https://i.imgflip.com/1ur9b0.jpg",
         "keywords": ["парень обернулся", "измена", "отвлекся"],
-        "default_setup": "Когда у тебя есть проверенный надежный крафт...",
-        "default_punchline": "Но в ангаре появилась новая безумная идея."
+        "default_setup": "Когда у тебя есть куча срочных дел...",
+        "default_punchline": "Но в интернете появился новый мем."
     },
     {
         "name": "uganda_knuckles",
@@ -215,14 +215,14 @@ MEMES_2020_2022 = [
         "url": "https://i.imgflip.com/22bdq6.jpg",
         "keywords": ["2018", "уганда", "наклз", "knuckles", "do you know the way", "da way"],
         "default_setup": "КОГДА СПРАШИВАЮТ: «ТЫ ЗНАЕШЬ ПУТЬ?»",
-        "default_punchline": "Когда выкатил утюг с дробовиками в рандом 2018 года."
+        "default_punchline": "Когда случайно угадал правильный ответ на контрольной."
     },
     {
         "name": "change_my_mind",
         "title": "Change My Mind 2018",
         "url": "https://i.imgflip.com/24y43o.jpg",
         "keywords": ["2018", "change my mind", "измени мое мнение", "стол", "crowder"],
-        "default_setup": "Кроссаут 2018 года с утюгами и ховерами в космосе был легендарным.",
+        "default_setup": "2018 год был лучшим временем для интернет-мемов.",
         "default_punchline": "Попробуй изменить моё мнение."
     },
     {
@@ -230,24 +230,24 @@ MEMES_2020_2022 = [
         "title": "Is This A Pigeon 2018",
         "url": "https://i.imgflip.com/1o00in.jpg",
         "keywords": ["2018", "бабочка", "голубь", "is this a pigeon", "аниме"],
-        "default_setup": "Игрок 2018 года видит крафт на ховерах на высоте 500 метров над картой:",
-        "default_punchline": "«Это сбалансированная игра?»"
+        "default_setup": "Человек впервые видит странный баг:",
+        "default_punchline": "«Это новая крутая фича?»"
     },
     {
         "name": "grus_plan",
         "title": "Gru's Plan 2018",
         "url": "https://i.imgflip.com/26jxvz.jpg",
         "keywords": ["2018", "план грю", "грю", "доска", "презентация"],
-        "default_setup": "1. Собираешь утюг. 2. Летишь в лоб врагу. 3. Сам переворачиваешься и взрываешься.",
-        "default_punchline": "Сам переворачиваешься и взрываешься?!"
+        "default_setup": "1. Составил идеальный план на день. 2. Просидел в телефоне до вечера. 3. Просидел в телефоне до вечера?!",
+        "default_punchline": "Просидел в телефоне до вечера?!"
     },
     {
         "name": "roll_safe",
         "title": "Roll Safe Think About It",
         "url": "https://i.imgflip.com/1h7in3.jpg",
         "keywords": ["2018", "палец у виска", "умный парень", "roll safe", "подумай"],
-        "default_setup": "Враги не смогут оторвать тебе оружие...",
-        "default_punchline": "Если ты взорвешься на своем же Газгене в первую секунду!"
+        "default_setup": "Ты не сможешь ошибиться в решении...",
+        "default_punchline": "Если ты вообще ничего не делаешь!"
     }
 ]
 CURATED_TEMPLATES = MEMES_2020_2022
@@ -282,10 +282,10 @@ def normalize_search_query_en(query):
         return "rain world"
     if any(w in q for w in ["махораг", "адаптир", "дхарм"]):
         return "mahoraga jujutsu kaisen"
-    if any(w in q for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер", "птур", "вереск", "скорп", "мамонт", "жнец", "автосборк"]):
+    if any(w in q for w in ["кроссаут", "кросаут", "crossout"]):
         return "crossout game"
     if any(w in q for w in ["2018", "2019"]):
-        return "crossout"
+        return "2018 funny meme template"
     if any(w in q for w in ["гигачад", "сигма", "gigachad"]):
         return "gigachad"
     if any(w in q for w in ["доге", "чимс", "doge", "cheems"]):
@@ -293,7 +293,7 @@ def normalize_search_query_en(query):
     if any(w in q for w in ["учеб", "сесси", "школ", "экзамен"]):
         return "tired student meme"
     clean_en = re.sub(r"[^\x00-\x7F]+", " ", q).strip()
-    return clean_en if len(clean_en) > 3 else "gaming meme"
+    return clean_en if len(clean_en) > 3 else "funny meme"
 
 def search_internet_for_meme_image(query):
     """
@@ -302,7 +302,7 @@ def search_internet_for_meme_image(query):
     """
     clean_q = re.sub(r"(?:найди|скинь|мем|мэм|про|с|бот|сделай|покажи|изучи|года|года|год)\s*", "", query, flags=re.I).strip()
     if not clean_q:
-        clean_q = "funny gaming meme"
+        clean_q = "funny meme"
 
     cache_key = hashlib.md5(clean_q.encode()).hexdigest()[:10]
     cached_file = os.path.join(TEMPLATES_DIR, f"cached_{cache_key}.jpg")
@@ -313,9 +313,9 @@ def search_internet_for_meme_image(query):
 
     # 1. Check curated list
     q_lower = clean_q.lower()
-    # For Crossout memes, strictly use Crossout assets and clean templates. Never use scrapers that return Peter the Great or unrelated memes!
-    if any(w in q_lower for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер", "птур", "вереск", "скорп", "мамонт", "жнец", "автосборк"]):
-        xo_assets = ["ptur.png", "heather.png", "gasgen.png", "hover.png", "scorpion.png", "mammoth.png", "harvester.png"]
+    # For Crossout memes, strictly use Crossout assets and clean templates only when explicitly requested.
+    if any(w in q_lower for w in ["кроссаут", "кросаут", "crossout"]):
+        xo_assets = ["ptur.png", "heather.png", "hover.png", "scorpion.png", "mammoth.png", "harvester.png"]
         existing = [os.path.join(MEDIA_DIR, a) for a in xo_assets if os.path.exists(os.path.join(MEDIA_DIR, a))]
         if existing:
             return random.choice(existing)
@@ -782,9 +782,9 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
             img_path = cached_tpl
 
     if not img_path:
-        is_xo = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "утюг", "ховер", "крафт", "бочки", "рандом", "пустош", "вереск", "птур", "кларнет", "скорп", "мамонт", "жнец", "дробовик", "тошнитель", "реликт", "билды", "билд", "оружие", "автосборк"])
+        is_xo = any(w in theme_lower for w in ["кроссаут", "кросаут", "crossout"])
         if is_xo:
-            xo_assets = ["ptur.png", "heather.png", "gasgen.png", "hover.png", "scorpion.png", "mammoth.png", "harvester.png", "meme_autobuild.png", "buff_doge_vs_cheems.png"]
+            xo_assets = ["ptur.png", "heather.png", "hover.png", "scorpion.png", "mammoth.png", "harvester.png", "meme_autobuild.png", "buff_doge_vs_cheems.png"]
             existing = [os.path.join(MEDIA_DIR, a) for a in xo_assets if os.path.exists(os.path.join(MEDIA_DIR, a))]
             if existing:
                 img_path = random.choice(existing)
@@ -803,7 +803,7 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
         print(f"[MEME ENGINE] Could not open image {img_path}: {e}")
         # Крайний fallback на локальный ассет строго по теме
         if is_xo:
-            fallback_assets = ["buff_doge_vs_cheems.png", "gasgen.png", "ptur.png"]
+            fallback_assets = ["buff_doge_vs_cheems.png", "ptur.png"]
         elif is_rainworld:
             fallback_assets = ["scav_large.png", "artificer.png"]
         else:
@@ -812,8 +812,9 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
         base_img = Image.open(chosen_fa).convert("RGB") if chosen_fa else Image.new("RGB", (800, 800), (20, 24, 32))
 
     # 3. Генерация юмора и текста через AI или креативные шаблоны
+    xo_warning = " СТРОЖАЙШИЙ ЗАПРЕТ: НЕ приплетай игру Crossout, Газген, Пустоши, крафты и игровой сленг, если тема прямо не о Crossout!" if not is_xo else ""
     prompt_ai = (
-        f"Придумай угарный, жизненный интернет-мем на тему: «{clean_theme}».\n"
+        f"Придумай угарный, жизненный интернет-мем на тему: «{clean_theme}».{xo_warning}\n"
         "СТРОЖАЙШЕЕ ТРЕБОВАНИЕ: ВСЕ ТЕКСТЫ ДОЛЖНЫ БЫТЬ СТРОГО НА РУССКОМ ЯЗЫКЕ! НИКАКОГО АНГЛИЙСКОГО!\n"
         "Ответь строго в JSON без разметки markdown:\n"
         "{\n"
@@ -940,11 +941,7 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
             joke_data = random.choice(jokes_rw)
         else:
             is_heather_ptur = ("вереск" in theme_lower) and ("птур" in theme_lower or "ракета" in theme_lower or "кларнет" in theme_lower)
-            is_xo_topic = is_heather_ptur or any(w in theme_lower for w in [
-                "кросс", "крос", "crossout", "газген", "утюг", "ховер", "крафт",
-                "бочки", "рандом", "пустош", "вереск", "птур", "кларнет",
-                "скорп", "мамонт", "жнец", "дробовик", "тошнитель", "реликт"
-            ])
+            is_xo_topic = is_heather_ptur or any(w in theme_lower for w in ["кроссаут", "кросаут", "crossout"])
             if is_heather_ptur:
                 jokes_target = [
                     {
@@ -976,38 +973,38 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
                 jokes_target = [
                     {
                         "style": "caption",
-                        "title": "Мой билд в гараже после 3 часов настройки углов стрельбы:",
-                        "subtitle": "В первом же бою Газген сдетонировал от случайной пульки бота",
+                        "title": "Мой крафт в ангаре после 3 часов настройки:",
+                        "subtitle": "В первом же бою отвалились все колеса от первой кочки 💀",
                         "sound_or_extra": None
                     },
                     {
                         "style": "demotivator",
-                        "title": "БАЛАНС В ПУСТОШАХ",
+                        "title": "БАЛАНС В ИГРЕ",
                         "subtitle": "Существует ровно до тех пор, пока ты не нажал кнопку «В бой»",
                         "sound_or_extra": None
                     },
                     {
                         "style": "impact",
-                        "title": "СОБРАЛ КРАФТ ПО СОВЕТАМ ИЗ ЧАТА",
-                        "subtitle": "ПЕРВЫЙ ЖЕ БОТ С ДРОБОВИКАМИ РАЗОБРАЛ ЕГО НА ВИНТИКИ",
+                        "title": "СОБРАЛ БРОНЕВИК ПО СОВЕТАМ ИЗ ЧАТА",
+                        "subtitle": "ПЕРВЫЙ ЖЕ ВРАГ РАЗОБРАЛ ЕГО НА ВИНТИКИ ЗА ДВЕ СЕКУНДЫ",
                         "sound_or_extra": None
                     },
                     {
                         "style": "caption",
-                        "title": "Когда тиммейт уверенно кричит в войс: «Я прикрою!»:",
-                        "subtitle": "И через 3 секунды ты наблюдаешь только его горящую кабину",
+                        "title": "Когда тиммейт уверенно говорит: «Я прикрою!»:",
+                        "subtitle": "И через 3 секунды героически испаряется на мине",
                         "sound_or_extra": None
                     },
                     {
                         "style": "demotivator",
-                        "title": "ГЕНЕРАТОР ГАЗГЕН",
-                        "subtitle": "Самое надежное средство быстрой телепортации в ангар",
+                        "title": "ТАКТИКА И РАСЧЕТ",
+                        "subtitle": "Разбиваются о стену в первые пять секунд раунда",
                         "sound_or_extra": None
                     },
                     {
                         "style": "pov",
-                        "title": "ЖИЗА: Выехал в бой на красивом неповоротливом крафте",
-                        "subtitle": "А навстречу несутся 4 утюга со скоростью 120 км/ч",
+                        "title": "ЖИЗА: Выехал в бой на тяжелом броневике",
+                        "subtitle": "А враги носятся вокруг со скоростью света",
                         "sound_or_extra": None
                     }
                 ]
@@ -1064,7 +1061,8 @@ def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     elif style == "breaking_news":
         result_img = render_breaking_news(base_img, t_top, t_bot)
     elif style == "tweet":
-        result_img = render_tweet_post(base_img, "Ярик Пустоши", f"{t_top}\n{t_bot}")
+        author_name = "Ярик" if recipient == "yarik" else "Миша"
+        result_img = render_tweet_post(base_img, author_name, f"{t_top}\n{t_bot}")
     elif style == "pov":
         result_img = render_pov_meme(base_img, f"{t_top} {t_bot}")
     else: # caption

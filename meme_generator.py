@@ -654,18 +654,19 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
             print(f"[MEME] Repeat allowed and requested. Returning last meme: {last['file_path']}")
             return last["file_path"]
 
-    is_crossout_topic = any(w in theme_lower for w in ["кросс", "крос", "crossout", "газген", "ховер", "автосборк", "птур", "скорп", "мамонт", "жнец", "вереск", "кларнет"])
+    is_crossout_topic = any(w in theme_lower for w in ["кроссаут", "кросаут", "crossout"])
     is_rw_topic = any(w in theme_lower for w in ["рэин", "рейн", "rain", "слизн", "скэв", "scav", "искусник", "артифисер", "карм", "пебблс", "галек", "ящер", "ворлд", "rw"])
     is_crossover_topic = is_crossout_topic and is_rw_topic
-    is_ptur_vs = any(w in theme_lower for w in ["птур", "ракета"]) and any(w in theme_lower for w in ["вражеск", "союзн", "враг", "vs", "сравнен", "тиммейт", "свой", "чужой"])
-    is_heather_topic = ("вереск" in theme_lower) or (("птур" in theme_lower or "ракета" in theme_lower) and any(w in theme_lower for w in ["сравнен", "vs", "геймплей"]))
+    is_ptur_vs = is_crossout_topic and any(w in theme_lower for w in ["птур", "ракета"]) and any(w in theme_lower for w in ["вражеск", "союзн", "враг", "vs", "сравнен", "тиммейт", "свой", "чужой"])
+    is_heather_topic = is_crossout_topic and (("вереск" in theme_lower) or (("птур" in theme_lower or "ракета" in theme_lower) and any(w in theme_lower for w in ["сравнен", "vs", "геймплей"])))
 
     has_targeted = (
         is_crossover_topic
-        or is_rw_topic
+        or (is_rw_topic and not is_crossout_topic)
         or is_ptur_vs
         or is_heather_topic
-        or any(w in theme_lower for w in ["автосборк", "газген", "взрыв", "птур", "ракета", "скорп", "мамонт", "жнец", "ховер", "клоун", "доге"])
+        or (is_crossout_topic and any(w in theme_lower for w in ["автосборк", "газген", "птур", "скорп", "мамонт", "жнец", "ховер"]))
+        or any(w in theme_lower for w in ["клоун", "доге"])
     )
 
     candidates = []
@@ -681,28 +682,30 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
         candidates = [gen_enemy_ptur_vs_ally_ptur]
     elif is_heather_topic:
         candidates = [gen_heather_vs_ptur]
-    elif "автосборк" in theme_lower:
+    elif is_crossout_topic and "автосборк" in theme_lower:
         candidates = [gen_autobuild]
-    elif any(w in theme_lower for w in ["газген", "взрыв", "детонац"]):
+    elif is_crossout_topic and "газген" in theme_lower:
         candidates = [gen_gasgen_blast]
-    elif any(w in theme_lower for w in ["птур", "ракета"]):
+    elif is_crossout_topic and any(w in theme_lower for w in ["птур", "ракета"]):
         candidates = [gen_ptur_sniper]
-    elif any(w in theme_lower for w in ["скорп", "реликт"]):
+    elif is_crossout_topic and any(w in theme_lower for w in ["скорп", "реликт"]):
         candidates = [gen_scorpion_relic]
-    elif any(w in theme_lower for w in ["мамонт", "чугун", "тяж"]):
+    elif is_crossout_topic and any(w in theme_lower for w in ["мамонт", "чугун", "тяж"]):
         candidates = [gen_mammoth_tank]
-    elif any(w in theme_lower for w in ["жнец", "пилы", "комбайн", "инвиз"]):
+    elif is_crossout_topic and any(w in theme_lower for w in ["жнец", "пилы", "комбайн", "инвиз"]):
         candidates = [gen_harvester_ambush]
-    elif any(w in theme_lower for w in ["ховер", "полет"]):
+    elif is_crossout_topic and any(w in theme_lower for w in ["ховер", "полет"]):
         candidates = [gen_hover_physics]
     elif any(w in theme_lower for w in ["клоун", "стадии"]):
         candidates = [gen_clown_progression]
     elif any(w in theme_lower for w in ["доге", "дог", "сравнен"]):
         candidates = [gen_doge_comparison]
-    else:
+    elif is_crossout_topic:
         cands = [func for _, func in CROSSOUT_GENERATORS]
         random.shuffle(cands)
         candidates = cands
+    else:
+        candidates = [gen_doge_comparison, gen_clown_progression]
 
     # 1. Если тема точно соответствует целевому генератору (Вереск vs ПТУР, Газген, Скорпион и т.д.) — генерируем точный тематический мем!
     if has_targeted:
@@ -764,7 +767,7 @@ def generate_crossout_meme(theme="", allow_repeat=False, recipient="yarik"):
             continue
 
     from meme_engine import generate_universal_meme
-    out_path, headline = generate_universal_meme(theme=theme or "Crossout Пустоши", allow_repeat=True, recipient=recipient)
+    out_path, headline = generate_universal_meme(theme=theme or "жизненный мем", allow_repeat=True, recipient=recipient)
     return out_path
 
 # Alias for universal meme generation
