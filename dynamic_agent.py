@@ -151,9 +151,9 @@ def calculate_skill_match_score(query_text, skill_name, triggers):
                 score += 7
                 continue
 
-        # Одиночные слова дают высокий балл ТОЛЬКО если запрос короткий (команда) и не стоп-слово
+        # Одиночные слова дают высокий балл ТОЛЬКО если запрос короткий (команда) или первое слово императив
         if tr_clean in words or re.search(r"\b" + re.escape(tr_clean) + r"\b", t):
-            if len(words) <= 3 and len(tr_clean) >= 4:
+            if (len(words) <= 3 and len(tr_clean) >= 4) or (words and words[0] == tr_clean) or tr_clean in ["погугли", "загугли", "нагугли"]:
                 score += 8
             else:
                 score += 2
@@ -171,7 +171,11 @@ def is_one_off_creative_task(task_text):
     if not task_text:
         return False
     t = task_text.lower().strip()
-    if any(k in t for k in ["добавь команду", "добавь функцию", "добавь навык", "добавь модуль", "научись", "создай команду", "создай плагин", "создай модуль"]):
+    if any(k in t for k in [
+        "добавь команду", "добавь функцию", "добавь навык", "добавь модуль", "научись",
+        "создай команду", "создай плагин", "создай модуль", "создай скилл", "создай себе скилл",
+        "сделай скилл", "добавь скилл", "напиши скилл", "создай навык", "создай себе навык"
+    ]):
         return False
     creative_markers = [
         "мем", "мэм", "мемасик", "мемчик", "картинк", "пикч", "нарисуй",
@@ -305,9 +309,14 @@ def is_autonomous_task(text, has_media=False):
         "добавь себе команду", "добавь команду", "создай модуль для бота", "напиши плагин",
         "добавь функцию бота", "запрограммируй новую функцию", "напиши скрипт парсера",
         "добавь дополнение к боту", "напиши python код", "создай python модуль",
-        "научи бота новой команде", "добавь новый навык", "зарегистрируй команду"
+        "научи бота новой команде", "добавь новый навык", "зарегистрируй команду",
+        "создай скилл", "создай себе скилл", "сделай скилл", "добавь скилл", "напиши скилл",
+        "создай навык", "создай себе навык", "сделай навык", "добавь навык", "напиши навык"
     ]
-    return any(p in t for p in explicit_coding_phrases)
+    action_verbs = ["создай", "сделай", "напиши", "добавь", "запрограммируй", "запили", "разработай", "научи", "научись"]
+    skill_nouns = ["скилл", "скил", "навык", "модул", "плагин", "дополнени", "скрипт", "функци", "команд"]
+    has_skill_action = any(v in t for v in action_verbs) and any(s in t for s in skill_nouns)
+    return any(p in t for p in explicit_coding_phrases) or has_skill_action
 
 def check_or_classify_autonomous_task(text, has_media=False, ask_ai_fn=None):
     """
@@ -681,6 +690,20 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
     # 1. Проверяем, есть ли уже готовое дополнение для этой задачи (не требует AI!)
     existing_script, ext_info = find_existing_extension(task_text)
     if existing_script:
+        t_low = (task_text or "").lower()
+        if any(w in t_low for w in ["создай скилл", "создай себе скилл", "сделай скилл", "добавь скилл", "напиши скилл", "создай навык", "создай себе навык", "добавь навык"]):
+            s_name = ext_info.get("skill_name") or os.path.basename(existing_script)
+            desc = ext_info.get("description", "Автономный навык бота")
+            triggers = ext_info.get("triggers", [])
+            trig_example = f"«!бот {triggers[0]} ...»" if triggers else f"«!бот {s_name}»"
+            report = (
+                f"⚡ **Навык готов и активен:** `{os.path.basename(existing_script)}`\n"
+                f"_{desc}_\n\n"
+                f"{sender_name}, этот навык уже успешно создан и зарегистрирован в системе! 🔥\n"
+                f"Ты можешь прямо сейчас использовать его, например: {trig_example}"
+            )
+            return report, None
+
         ext_produces_media = ext_info.get("produces_media", True)
         before_files = get_all_media_snapshot() if ext_produces_media else set()
         start_time = time.time()
@@ -708,7 +731,7 @@ def execute_autonomous_task(task_text, sender_name, photo_path=None, ask_ai_fn=N
                     natural_caption = f"Готово, {sender_name}! Лови результат 🔥"
                 return natural_caption, new_media
 
-            if any(marker in stdout for marker in ["📍", "🌡️", "📊", "☀️", "🌤️", "☁️"]):
+            if any(marker in stdout for marker in ["📍", "🌡️", "📊", "☀️", "🌤️", "☁️", "🔍", "📖", "🌐"]):
                 report = stdout
             else:
                 report = (

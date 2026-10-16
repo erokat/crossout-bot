@@ -20,22 +20,7 @@ from meme_generator import generate_dynamic_meme_via_ai, generate_crossout_meme,
 class TestEchoLoopPrevention(unittest.TestCase):
     @patch("keep_alive.spawn_meme_creator_subagent")
     @patch("keep_alive.ask_ai")
-    @patch("subprocess.run")
-    def test_handle_yarik_message_ignores_outgoing(self, mock_subproc, mock_ask, mock_spawn):
-        msg = {
-            "id": 77701,
-            "sender_id": 6271387044,
-            "text": "!бот сделай мем",
-            "out": True
-        }
-        handle_yarik_message(msg)
-        mock_spawn.assert_not_called()
-        mock_ask.assert_not_called()
-        mock_subproc.assert_not_called()
-
-    @patch("keep_alive.spawn_meme_creator_subagent")
-    @patch("keep_alive.ask_ai")
-    @patch("subprocess.run")
+    @patch("keep_alive.subprocess.run")
     def test_handle_yarik_message_ignores_bot_sent_ids(self, mock_subproc, mock_ask, mock_spawn):
         with patch("keep_alive.get_bot_sent_ids", return_value={77702}):
             msg = {
@@ -51,19 +36,34 @@ class TestEchoLoopPrevention(unittest.TestCase):
 
     @patch("keep_alive.spawn_meme_creator_subagent")
     @patch("keep_alive.ask_ai")
-    @patch("subprocess.run")
-    def test_handle_yarik_message_ignores_self_user_id(self, mock_subproc, mock_ask, mock_spawn):
-        set_kv("my_user_id", "5067025016")
-        msg = {
-            "id": 77703,
-            "sender_id": 5067025016,
-            "text": "!бот ответь",
-            "out": False
-        }
-        handle_yarik_message(msg)
-        mock_spawn.assert_not_called()
-        mock_ask.assert_not_called()
-        mock_subproc.assert_not_called()
+    @patch("keep_alive.subprocess.run")
+    def test_handle_yarik_message_ignores_bot_sent_outgoing(self, mock_subproc, mock_ask, mock_spawn):
+        with patch("keep_alive.get_bot_sent_ids", return_value={77701}):
+            msg = {
+                "id": 77701,
+                "sender_id": 5067025016,
+                "text": "Ярик, лови мем!",
+                "out": True
+            }
+            handle_yarik_message(msg)
+            mock_spawn.assert_not_called()
+            mock_ask.assert_not_called()
+            mock_subproc.assert_not_called()
+
+    @patch("keep_alive.spawn_meme_creator_subagent")
+    @patch("keep_alive.ask_ai")
+    @patch("keep_alive.subprocess.run")
+    def test_handle_yarik_message_processes_owner_outgoing_command(self, mock_subproc, mock_ask, mock_spawn):
+        with patch("keep_alive.get_bot_sent_ids", return_value=set()):
+            msg = {
+                "id": 77704,
+                "sender_id": 5067025016,
+                "text": "!бот сделай 2 мема",
+                "out": True
+            }
+            handle_yarik_message(msg)
+            self.assertEqual(mock_spawn.call_count, 2)
+            mock_subproc.assert_not_called()
 
 
 class TestPipInvalidRequirementsFix(unittest.TestCase):
