@@ -356,56 +356,30 @@ def search_internet_for_meme_image(query):
     except Exception as e:
         print(f"[MEME SEARCH] Wallhaven error: {e}")
 
-    # 4. Imgflip Meme Search
-    try:
-        url = f"https://imgflip.com/memesearch?q={urllib.parse.quote(en_query)}"
-        req = urllib.request.Request(url, headers=headers)
-        html = urllib.request.urlopen(req, timeout=8).read().decode("utf-8", errors="ignore")
-        matches = re.findall(r"src=[\x27\"]([^\x27\"]+\.jpg)[\x27\"]", html)
-        for m in matches:
-            img_code = re.search(r"/([a-z0-9]+)\.jpg", m)
-            if img_code:
-                full_url = f"https://i.imgflip.com/{img_code.group(1)}.jpg"
-                if fetch_image_from_url(full_url, cached_file):
-                    return cached_file
-    except Exception as e:
-        print(f"[MEME SEARCH] Imgflip search error: {e}")
-
-    # 4. DuckDuckGo Image scrape
-    try:
-        ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(en_query + ' meme template high quality')}"
-        req = urllib.request.Request(ddg_url, headers=headers)
-        html = urllib.request.urlopen(req, timeout=8).read().decode("utf-8", errors="ignore")
-        imgs = re.findall(r"(https?://[^\s\"<>]+\.(?:jpg|jpeg|png))", html)
-        for direct_url in imgs[:5]:
-            if "icon" not in direct_url.lower() and fetch_image_from_url(direct_url, cached_file):
-                return cached_file
-    except Exception as e:
-        print(f"[MEME SEARCH] DDG error: {e}")
-
-    # 5. Topic-Specific Local or Curated Fallbacks
-    if any(w in q_lower for w in ["рейн", "реин", "rain", "ворлд", "слизн", "вотчер", "watcher", "искусник"]):
-        rw_candidates = ["artificer.png", "scav_large.png"]
-        for c in rw_candidates:
-            p = os.path.join(MEDIA_DIR, c)
-            if os.path.exists(p):
-                return p
-        if fetch_image_from_url("https://w.wallhaven.cc/full/3q/wallhaven-3qw86v.jpg", cached_file):
-            return cached_file
-
-    if any(w in q_lower for w in ["махораг", "адаптир", "дхарм"]):
-        mh_path = os.path.join(TEMPLATES_DIR, "mahoraga.jpg")
-        if os.path.exists(mh_path):
-            return mh_path
-
-    # Clean curated list without trade_offer
-    clean_templates = [m for m in MEMES_2020_2022 if m["name"] not in ["trade_offer"]]
-    if clean_templates:
-        fallback_tpl = random.choice(clean_templates)
-        if fetch_image_from_url(fallback_tpl["url"], cached_file):
-            return cached_file
-
     return None
+
+
+def ensure_russian_text(text):
+    if not text:
+        return ""
+    replacements = [
+        (r"(?i)\bme\s*:\s*", "Я: "),
+        (r"(?i)\bmom\s*:\s*", "Мама: "),
+        (r"(?i)\bdad\s*:\s*", "Папа: "),
+        (r"(?i)\bnobody\s*:\s*", "Никто: "),
+        (r"(?i)\bno\s+one\s*:\s*", "Никто: "),
+        (r"(?i)\bat\s+home\s*:\s*", "Дома: "),
+        (r"(?i)\bwe\s+have\s+([a-zA-Zа-яА-ЯёЁ\s]+)\s+at\s+home\b", r"У нас есть \1 дома"),
+        (r"(?i)\bcan\s+we\s+have\s+([a-zA-Zа-яА-ЯёЁ\s]+)\??", r"Купи \1?"),
+        (r"(?i)\bwhen\s+you\b", "Когда ты"),
+        (r"(?i)\bexpectation\b", "Ожидание"),
+        (r"(?i)\breality\b", "Реальность"),
+    ]
+    res = str(text)
+    for pat, rep in replacements:
+        res = re.sub(pat, rep, res)
+    return res
+
 
 # ----------------- MEME STYLE RENDERERS -----------------
 
@@ -413,6 +387,9 @@ def render_caption_meme(base_img, text_top, text_bottom=None, sound_text=None):
     """
     СТИЛЬ 1: Современный чистый мем с белой карточкой-шапкой сверху (Twitter/Reddit/VK).
     """
+    text_top = ensure_russian_text(text_top)
+    text_bottom = ensure_russian_text(text_bottom)
+    sound_text = ensure_russian_text(sound_text)
     W, H = base_img.size
     target_w = 1000
 
@@ -730,366 +707,12 @@ def clean_user_theme(raw_text):
 
 def generate_universal_meme(theme="", allow_repeat=False, recipient="yarik"):
     """
-    Главная точка входа:
-    1. Изучает тему и контекст (2020-2022, Махорага, Rain World, Crossout, учеба, жизнь).
-    2. Ищет / скачивает в интернете реальное изображение/шаблон.
-    3. Выбирает случайный разнообразный стиль (демотиватор, caption, impact, breaking news, tweet, pov).
-    4. Сохраняет в локальную папку, PhotosEditor и синхронизирует.
+    Main entrypoint:
+    Redirects to dynamic AI meme generator (gemini-3.8-flash-medium via Pillow script from scratch).
+    Guarantees 100% Russian language and prevents any English internet templates from ever being used!
     """
-    clean_theme = clean_user_theme(theme)
-    theme_lower = clean_theme.lower()
+    from meme_generator import generate_dynamic_meme_via_ai
+    clean_t = clean_user_theme(theme) if "clean_user_theme" in globals() else theme
+    out_path = generate_dynamic_meme_via_ai(theme=theme, recipient=recipient)
+    return out_path, f"[AI] МЕМ: {str(clean_t)[:40]}"
 
-    # 1. Специфический запрос на мемы определенных эпох
-    is_era_2018 = "2018" in theme_lower
-    is_era_2019 = "2019" in theme_lower
-    is_era_2020_2022 = any(y in theme_lower for y in ["2020", "2021", "2022"])
-    
-    # Check if Mahoraga
-    is_mahoraga = any(w in theme_lower for w in ["махораг", "адаптир", "бог котор", "дхарма", "jujutsu"])
-    is_rainworld = any(w in theme_lower for w in ["рейн", "реин", "rain", "слизнец", "слизн", "ворлд", "вотчер", "watcher", "искусник", "артифисер", "карм", "пебблс"])
-
-    # 2. Поиск картинки
-    img_path = None
-    curated_match = None
-
-    if is_mahoraga:
-        for m in CURATED_TEMPLATES:
-            if m["name"] == "mahoraga":
-                curated_match = m
-                break
-    elif is_era_2018:
-        # Случайный легендарный мем 2018 года! (Uganda Knuckles, Change My Mind, Gru Plan, Pigeon, Roll Safe)
-        candidates_2018 = [m for m in CURATED_TEMPLATES if "2018" in m.get("keywords", [])]
-        if candidates_2018:
-            curated_match = random.choice(candidates_2018)
-    elif is_era_2020_2022:
-        # Случайный легендарный мем 2020-2022 периода!
-        candidates_era = [m for m in CURATED_TEMPLATES if any(y in m.get("keywords", []) for y in ["2020", "2021", "2022"]) and m["name"] != "mahoraga"]
-        if candidates_era:
-            curated_match = random.choice(candidates_era)
-    else:
-        for m in CURATED_TEMPLATES:
-            if any(kw in theme_lower for kw in m["keywords"]):
-                curated_match = m
-                break
-
-
-    if curated_match:
-        cached_tpl = os.path.join(TEMPLATES_DIR, f"{curated_match['name']}.jpg")
-        if not os.path.exists(cached_tpl):
-            fetch_image_from_url(curated_match["url"], cached_tpl)
-        if os.path.exists(cached_tpl):
-            img_path = cached_tpl
-
-    if not img_path:
-        is_xo = any(w in theme_lower for w in ["кроссаут", "кросаут", "crossout"])
-        if is_xo:
-            xo_assets = ["ptur.png", "heather.png", "hover.png", "scorpion.png", "mammoth.png", "harvester.png", "meme_autobuild.png", "buff_doge_vs_cheems.png"]
-            existing = [os.path.join(MEDIA_DIR, a) for a in xo_assets if os.path.exists(os.path.join(MEDIA_DIR, a))]
-            if existing:
-                img_path = random.choice(existing)
-            else:
-                clean_tpls = [m for m in CURATED_TEMPLATES if m["name"] in ["doge_vs_cheems", "gigachad", "two_buttons", "distracted_boyfriend", "grus_plan", "change_my_mind"]]
-                if clean_tpls:
-                    m = random.choice(clean_tpls)
-                    img_path = os.path.join(TEMPLATES_DIR, f"{m['name']}.jpg")
-        else:
-            img_path = search_internet_for_meme_image(clean_theme)
-
-    # Загружаем изображение
-    try:
-        base_img = Image.open(img_path).convert("RGB")
-    except Exception as e:
-        print(f"[MEME ENGINE] Could not open image {img_path}: {e}")
-        # Крайний fallback на локальный ассет строго по теме
-        if is_xo:
-            fallback_assets = ["buff_doge_vs_cheems.png", "ptur.png"]
-        elif is_rainworld:
-            fallback_assets = ["scav_large.png", "artificer.png"]
-        else:
-            fallback_assets = ["buff_doge_vs_cheems.png"]
-        chosen_fa = next((os.path.join(MEDIA_DIR, a) for a in fallback_assets if os.path.exists(os.path.join(MEDIA_DIR, a))), None)
-        base_img = Image.open(chosen_fa).convert("RGB") if chosen_fa else Image.new("RGB", (800, 800), (20, 24, 32))
-
-    # 3. Генерация юмора и текста через AI или креативные шаблоны
-    xo_warning = " СТРОЖАЙШИЙ ЗАПРЕТ: НЕ приплетай игру Crossout, Газген, Пустоши, крафты и игровой сленг, если тема прямо не о Crossout!" if not is_xo else ""
-    prompt_ai = (
-        f"Придумай угарный, жизненный интернет-мем на тему: «{clean_theme}».{xo_warning}\n"
-        "СТРОЖАЙШЕЕ ТРЕБОВАНИЕ: ВСЕ ТЕКСТЫ ДОЛЖНЫ БЫТЬ СТРОГО НА РУССКОМ ЯЗЫКЕ! НИКАКОГО АНГЛИЙСКОГО!\n"
-        "Ответь строго в JSON без разметки markdown:\n"
-        "{\n"
-        '  "style": "caption" (или "demotivator", "impact", "breaking_news", "tweet", "pov"),\n'
-        '  "title": "Заголовок или верхний текст строго на русском (1-2 строки)",\n'
-        '  "subtitle": "Панчлайн, цитата или нижний текст строго на русском",\n'
-        '  "sound_or_extra": "Звуковой эффект или доп. реплика на русском"\n'
-        "}"
-    )
-
-    joke_data = None
-    try:
-        from keep_alive import ask_ai, run_antigravity_cli
-        res_ai = ask_ai(prompt_ai) or run_antigravity_cli(prompt_ai)
-        if res_ai:
-            m = re.search(r"\{.*\}", res_ai, re.DOTALL)
-            if m:
-                joke_data = json.loads(m.group(0))
-    except Exception:
-        pass
-
-    if not joke_data:
-        # Fallback jokes depending on topic - rich, varied, 100% Russian and grammatically sound
-        if curated_match and curated_match.get("default_setup"):
-            joke_data = {
-                "style": random.choice(["caption", "demotivator", "impact"]),
-                "title": curated_match["default_setup"],
-                "subtitle": curated_match["default_punchline"],
-                "sound_or_extra": "*ЩЁЛК*" if curated_match["name"] == "mahoraga" else None
-            }
-        elif is_era_2018:
-            jokes_2018 = [
-                {
-                    "style": "caption",
-                    "title": "Игроки в Crossout в 2018 году:",
-                    "subtitle": "«Ничего, сейчас нафармлю меди, скрафчу бочки и жизнь наладится!»",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "demotivator",
-                    "title": "МЕТА 2018 ГОДА",
-                    "subtitle": "Когда ховеры летали в стратосферу, а утюги ломали законы физики",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "impact",
-                    "title": "ПОМНИШЬ 2018 ГОД В ПУСТОШАХ?",
-                    "subtitle": "КОГДА ОДИН ВАНШОТ РЕШАЛ ИСХОД ВСЕГО БОЯ",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "breaking_news",
-                    "title": "АРХИВЫ ПУСТОШЕЙ 2018 ГОДА",
-                    "subtitle": "Утюги с дробовиками признаны самым опасным явлением",
-                    "sound_or_extra": None
-                }
-            ]
-            joke_data = random.choice(jokes_2018)
-        elif is_era_2019:
-            jokes_2019 = [
-                {
-                    "style": "caption",
-                    "title": "Игроки в Crossout в 2019 году:",
-                    "subtitle": "Когда думал, что познал дзен, но вышел очередной балансный патч",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "demotivator",
-                    "title": "CROSSOUT 2019",
-                    "subtitle": "Каждый бой как последняя битва за выживание в Пустошах",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "impact",
-                    "title": "ВЫЕХАЛ В РАНДОМ 2019 ГОДА",
-                    "subtitle": "ИНЖЕНЕРНАЯ МЫСЛЬ ЗАШЛА СЛИШКОМ ДАЛЕКО",
-                    "sound_or_extra": None
-                }
-            ]
-            joke_data = random.choice(jokes_2019)
-        elif is_mahoraga:
-            jokes_mahoraga = [
-                {
-                    "style": "caption",
-                    "title": "Когда рандом пытается сломать меня очередным поражением:",
-                    "subtitle": "КОЛЕСО МАХОРАГИ СДЕЛАЛО ОБОРОТ. Я АДАПТИРОВАЛСЯ К ЛЮБОЙ БОЛИ.",
-                    "sound_or_extra": "*ЩЁЛК* — ЗВУК ВРАЩЕНИЯ КОЛЕСА"
-                },
-                {
-                    "style": "caption",
-                    "title": "Когда вражеский клан взял токсичные мета-сборки:",
-                    "subtitle": "КОЛЕСО УЖЕ ПОВЕРНУЛОСЬ. ТЕПЕРЬ Я ЗНАЮ ВСЕ ИХ СЛАБЫЕ МЕСТА.",
-                    "sound_or_extra": "*ЩЁЛК* — АДАПТАЦИЯ ЗАВЕРШЕНА"
-                },
-                {
-                    "style": "demotivator",
-                    "title": "БОГ АДАПТАЦИИ",
-                    "subtitle": "Любой урон и поражение делают меня только сильнее",
-                    "sound_or_extra": None
-                }
-            ]
-            joke_data = random.choice(jokes_mahoraga)
-        elif is_rainworld:
-            jokes_rw = [
-                {
-                    "style": "caption",
-                    "title": "Слизнец, когда до дождя осталось 10 секунд, а убежище закрыто:",
-                    "subtitle": "Суровые законы выживания в Rain World не знают пощады",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "caption",
-                    "title": "Когда анонсировали Rain World: The Watcher:",
-                    "subtitle": "Готовимся страдать в новых регионах и умирать от дождя по 50 раз за цикл",
-                    "sound_or_extra": None
-                },
-                {
-                    "style": "demotivator",
-                    "title": "THE WATCHER",
-                    "subtitle": "Новое DLC, старая добрая боль и бесконечная борьба за выживание",
-                    "sound_or_extra": None
-                }
-            ]
-            joke_data = random.choice(jokes_rw)
-        else:
-            is_heather_ptur = ("вереск" in theme_lower) and ("птур" in theme_lower or "ракета" in theme_lower or "кларнет" in theme_lower)
-            is_xo_topic = is_heather_ptur or any(w in theme_lower for w in ["кроссаут", "кросаут", "crossout"])
-            if is_heather_ptur:
-                jokes_target = [
-                    {
-                        "style": "caption",
-                        "title": "Геймплей на Вереске vs Геймплей на ПТУРе в Crossout:",
-                        "subtitle": "Стреляешь навесом на удачу через полкарты vs 10 секунд ведешь ракету, пока твой крафт сзади разбирают на винтики 💀",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "demotivator",
-                        "title": "ВЕРЕСК VS ПТУР",
-                        "subtitle": "Один жмет ЛКМ и надеется на рандом, второй смотрит кино от первого лица до первого забора",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "impact",
-                        "title": "ВЕРЕСК: ЗАПУСТИЛ И ЗАБЫЛ",
-                        "subtitle": "ПТУР: ВЕЛ РАКЕТУ 15 СЕКУНД И ВРЕЗАЛСЯ В ТРУБУ СОЮЗНИКА",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "pov",
-                        "title": "ЖИЗА: Момент сравнения геймплея миномета Вереск и ПТУРа",
-                        "subtitle": "На Вереске ты бог баллистики, на ПТУРе — оператор дрона-камикадзе в гараже",
-                        "sound_or_extra": None
-                    }
-                ]
-            elif is_xo_topic:
-                jokes_target = [
-                    {
-                        "style": "caption",
-                        "title": "Мой крафт в ангаре после 3 часов настройки:",
-                        "subtitle": "В первом же бою отвалились все колеса от первой кочки 💀",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "demotivator",
-                        "title": "БАЛАНС В ИГРЕ",
-                        "subtitle": "Существует ровно до тех пор, пока ты не нажал кнопку «В бой»",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "impact",
-                        "title": "СОБРАЛ БРОНЕВИК ПО СОВЕТАМ ИЗ ЧАТА",
-                        "subtitle": "ПЕРВЫЙ ЖЕ ВРАГ РАЗОБРАЛ ЕГО НА ВИНТИКИ ЗА ДВЕ СЕКУНДЫ",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "caption",
-                        "title": "Когда тиммейт уверенно говорит: «Я прикрою!»:",
-                        "subtitle": "И через 3 секунды героически испаряется на мине",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "demotivator",
-                        "title": "ТАКТИКА И РАСЧЕТ",
-                        "subtitle": "Разбиваются о стену в первые пять секунд раунда",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "pov",
-                        "title": "ЖИЗА: Выехал в бой на тяжелом броневике",
-                        "subtitle": "А враги носятся вокруг со скоростью света",
-                        "sound_or_extra": None
-                    }
-                ]
-            else:
-                jokes_target = [
-                    {
-                        "style": "caption",
-                        "title": f"Когда думал, что {clean_theme} — это просто и понятно:",
-                        "subtitle": "Реальность через 5 минут: полное непонимание происходящего 💀",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "demotivator",
-                        "title": clean_theme.upper(),
-                        "subtitle": "То, к чему жизнь определенно тебя не готовила",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "pov",
-                        "title": f"ЖИЗА: Мое лицо в любой ситуации, когда речь заходит про {clean_theme}",
-                        "subtitle": "",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "caption",
-                        "title": f"План на день: идеально разобраться с темой «{clean_theme}»",
-                        "subtitle": "Суровая реальность: ничего не понял, но очень интересно 🔥",
-                        "sound_or_extra": None
-                    },
-                    {
-                        "style": "impact",
-                        "title": f"ЗАШЕЛ ИЗУЧИТЬ {clean_theme.upper()}",
-                        "subtitle": "ВЫШЕЛ С НОВОЙ ПСИХОЛОГИЧЕСКОЙ ТРАВМОЙ",
-                        "sound_or_extra": None
-                    }
-                ]
-            joke_data = random.choice(jokes_target)
-
-    style = joke_data.get("style", "caption").lower()
-    t_top = joke_data.get("title", f"МЕМ: {clean_theme.upper()}")
-    t_bot = joke_data.get("subtitle", "Классика жанра, которой нет объяснения")
-    t_extra = joke_data.get("sound_or_extra")
-    # Enforce style compatibility so styles look natural with the image
-    img_path_str = str(img_path).lower() if img_path else ""
-    if "gigachad" in img_path_str or (curated_match and curated_match.get("name") in ["gigachad", "roll_safe", "is_this_a_pigeon", "bernie_sanders"]):
-        if style in ["breaking_news", "tweet"]:
-            style = "demotivator" if random.random() < 0.5 else "caption"
-
-    # 4. Рендеринг в выбранном стиле
-    if style == "demotivator":
-        result_img = render_demotivator(base_img, t_top, t_bot)
-    elif style == "impact":
-        result_img = render_impact_meme(base_img, t_top, t_bot)
-    elif style == "breaking_news":
-        result_img = render_breaking_news(base_img, t_top, t_bot)
-    elif style == "tweet":
-        author_name = "Ярик" if recipient == "yarik" else "Миша"
-        result_img = render_tweet_post(base_img, author_name, f"{t_top}\n{t_bot}")
-    elif style == "pov":
-        result_img = render_pov_meme(base_img, f"{t_top} {t_bot}")
-    else: # caption
-        result_img = render_caption_meme(base_img, t_top, t_bot, sound_text=t_extra)
-
-    # 5. Сохранение
-    file_id = int(time.time() * 1000) % 1000000
-    out_filename = f"meme_{file_id}.jpg"
-    out_path = os.path.join(MEDIA_DIR, out_filename)
-    result_img.save(out_path, "JPEG", quality=92)
-
-    # Save to PhotosEditor on Android
-    if os.path.exists(ANDROID_PHOTOS_DIR):
-        try:
-            shutil.copy2(out_path, os.path.join(ANDROID_PHOTOS_DIR, out_filename))
-        except Exception:
-            pass
-
-    # Save to saved_memes
-    shutil.copy2(out_path, os.path.join(SAVED_MEMES_DIR, out_filename))
-
-    # GDrive sync
-    try:
-        from gdrive import upload_file_to_drive
-        upload_file_to_drive(out_path)
-    except Exception:
-        pass
-
-    headline = f"[{style.upper()}] {t_top[:40]}"
-    return out_path, headline

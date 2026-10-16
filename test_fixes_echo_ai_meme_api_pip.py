@@ -187,10 +187,52 @@ class TestDynamicMemeCreationViaAI(unittest.TestCase):
         self.assertTrue(os.path.exists(out_path))
         self.assertGreater(os.path.getsize(out_path), 1000)
 
-        # Cleanup
-        if os.path.exists(out_path):
-            os.remove(out_path)
+    def test_sanitize_meme_code_russian_replaces_english_cliches(self):
+        from meme_generator import sanitize_meme_code_russian
+        code = (
+            'draw.text((10, 10), "Me: mom can we have pizza at home?", font=f)\n'
+            'draw.text((10, 50), "Mom: no, we have pizza at home", font=f)\n'
+            'draw.text((10, 90), "Nobody: absolutely no one:", font=f)\n'
+        )
+        cleaned = sanitize_meme_code_russian(code)
+        self.assertNotIn("Me:", cleaned)
+        self.assertNotIn("Mom:", cleaned)
+        self.assertNotIn("Nobody:", cleaned)
+        self.assertIn("Я:", cleaned)
+        self.assertIn("Мама:", cleaned)
+        self.assertIn("Никто:", cleaned)
+
+    @patch("dynamic_agent.generate_code_via_antigravity")
+    def test_generate_dynamic_meme_via_ai_prompt_enforces_100_percent_russian(self, mock_agy):
+        mock_agy.return_value = (
+            "```python\n"
+            "import os, sys\n"
+            "from PIL import Image\n"
+            "media_dir = os.path.abspath('media')\n"
+            "out_path = os.path.join(media_dir, 'test_ru_ai_meme.png')\n"
+            "img = Image.new('RGB', (800, 800), (25, 30, 45))\n"
+            "img.save(out_path)\n"
+            "print(out_path)\n"
+            "```"
+        )
+        out = generate_dynamic_meme_via_ai("мем про кота")
+        self.assertIsNotNone(out)
+        prompt_called = mock_agy.call_args[0][0]
+        self.assertIn("СТРОЖАЙШЕ 100% РУССКИЙ ЯЗЫК", prompt_called)
+        self.assertIn("КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать что-либо на английском языке", prompt_called)
+        if os.path.exists(out):
+            os.remove(out)
+
+    def test_ensure_russian_text_in_meme_engine(self):
+        from meme_engine import ensure_russian_text
+        text = "Me: please buy game. Mom: no, we have games at home"
+        res = ensure_russian_text(text)
+        self.assertNotIn("Me:", res)
+        self.assertNotIn("Mom:", res)
+        self.assertIn("Я:", res)
+        self.assertIn("Мама:", res)
 
 
 if __name__ == "__main__":
     unittest.main()
+

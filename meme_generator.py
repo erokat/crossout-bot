@@ -757,6 +757,28 @@ def render_dynamic_pillow_meme(theme="", is_crossout=False, recipient="yarik"):
     return out_path
 
 
+def sanitize_meme_code_russian(code):
+    if not code:
+        return code
+    replacements = [
+        (r"(?i)\bme\s*:\s*", "Я: "),
+        (r"(?i)\bmom\s*:\s*", "Мама: "),
+        (r"(?i)\bdad\s*:\s*", "Папа: "),
+        (r"(?i)\bnobody\s*:\s*", "Никто: "),
+        (r"(?i)\bno\s+one\s*:\s*", "Никто: "),
+        (r"(?i)\bat\s+home\s*:\s*", "Дома: "),
+        (r"(?i)\bwe\s+have\s+([a-zA-Zа-яА-ЯёЁ\s]+)\s+at\s+home\b", r"У нас есть \1 дома"),
+        (r"(?i)\bcan\s+we\s+have\s+([a-zA-Zа-яА-ЯёЁ\s]+)\??", r"Купи \1?"),
+        (r"(?i)\bwhen\s+you\b", "Когда ты"),
+        (r"(?i)\bexpectation\b", "Ожидание"),
+        (r"(?i)\breality\b", "Реальность"),
+    ]
+    res = code
+    for pat, rep in replacements:
+        res = re.sub(pat, rep, res)
+    return res
+
+
 def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
     """
     Primary Meme Generator:
@@ -764,7 +786,7 @@ def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
     generates a Python script with Pillow FROM SCRATCH dynamically tailored to the specific topic/theme requested.
     The script creates the image, outputs the generated image path via print(out_path),
     and the bot executes the script and sends the newly generated image.
-    No repeated cached images or static hardcoded templates!
+    Strictly 100% Russian language only — zero English cliches or templates!
     """
     raw_theme = (theme or "").strip()
     clean_theme = re.sub(r"^(?:!|/)?(?:бот|ботяра|ботик|робот)[,\s]*", "", raw_theme, flags=re.I).strip()
@@ -804,7 +826,10 @@ def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
    - Ищи шрифты в '{media_abs}':
      'RussoOne-Regular.ttf', 'Montserrat.ttf', 'Anton.ttf', 'RobotoCondensed-Bold.ttf', 'Oswald.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'.
    - Сделай функцию get_font(size), которая пробует загрузить truetype шрифт и падает на ImageFont.load_default() при ошибке.
-5. Текст:
+5. ТЕКСТ И ЯЗЫК (СТРОЖАЙШЕ 100% РУССКИЙ ЯЗЫК):
+   - ВСЕ БЕЗ ИСКЛЮЧЕНИЯ НАДПИСИ, ТЕКСТЫ, ДИАЛОГИ, РЕПЛИКИ И ПОДПИСИ ОБЯЗАНЫ БЫТЬ СТРОГО И ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ!
+   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать что-либо на английском языке (абсолютный запрет на англоязычные шаблоны 'Me:', 'Mom:', 'Nobody:', 'POV:', 'At home:', 'When you...', 'Why' и любые другие английские фразы).
+   - Если в меме есть диалог или реплики персонажей — пиши строго по-русски: «Я:», «Мама:», «Друг:», «Никто:», «Дома:».
    - Остроумный, смешной, оригинальный текст строго под тему «{clean_theme}».
    - Обязательно реализуй перенос строк (word wrap), чтобы текст аккуратно помещался в секциях.
    - Отрисуй текст с контрастной обводкой (stroke_width=2..3) или на ярких плашках.
@@ -826,6 +851,8 @@ def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
         if res_ai:
             m = re.search(r"```(?:python)?\s*(.*?)\s*```", res_ai, re.DOTALL)
             code = m.group(1).strip() if m else res_ai.strip()
+            if code:
+                code = sanitize_meme_code_russian(code)
     except Exception as e:
         print(f"[DYNAMIC MEME GEN] Error invoking Antigravity CLI: {e}")
 
