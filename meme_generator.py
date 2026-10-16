@@ -832,9 +832,9 @@ def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
    - Фон: стильный темный цвет или градиент (например (20, 24, 34) или (16, 20, 30)), либо сгенерированный ИИ-арт.
    - Структура: контрастные панели, рамки, разделители (например: две секции 'ОЖИДАНИЕ' vs 'РЕАЛЬНОСТЬ', или диалоговые блоки, или карточка с ярким заголовком, пунктами и цитатой).
 4. Шрифты:
-   - Ищи шрифты в '{media_abs}':
-     'RussoOne-Regular.ttf', 'Montserrat.ttf', 'Anton.ttf', 'RobotoCondensed-Bold.ttf', 'Oswald.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'.
-   - Сделай функцию get_font(size), которая пробует загрузить truetype шрифт и падает на ImageFont.load_default() при ошибке.
+   - Ищи шрифты в папке 'media' (например, проверяя пути `[os.path.join('media', f), f'/app/media/{{f}}', f'{media_abs}/{{f}}', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf']`):
+     'RussoOne-Regular.ttf', 'Montserrat.ttf', 'Anton.ttf', 'RobotoCondensed-Bold.ttf', 'Oswald.ttf'.
+   - Сделай функцию get_font(size), которая пробует загрузить truetype шрифт по существующим путям и падает на ImageFont.load_default() при ошибке.
 5. ТЕКСТ И ЯЗЫК (СТРОЖАЙШЕ 100% РУССКИЙ ЯЗЫК):
    - ВСЕ БЕЗ ИСКЛЮЧЕНИЯ НАДПИСИ, ТЕКСТЫ, ДИАЛОГИ, РЕПЛИКИ И ПОДПИСИ ОБЯЗАНЫ БЫТЬ СТРОГО И ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ!
    - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать что-либо на английском языке (абсолютный запрет на англоязычные шаблоны 'Me:', 'Mom:', 'Nobody:', 'POV:', 'At home:', 'When you...', 'Why' и любые другие английские фразы).
@@ -844,8 +844,10 @@ def generate_dynamic_meme_via_ai(theme="", recipient="yarik"):
    - Отрисуй текст с контрастной обводкой (stroke_width=2..3) или на ярких плашках.
 6. {theme_guideline}
 7. Сохранение файла и вывод:
-   - Скрипт должен сохранить итоговую картинку в '{media_abs}' с уникальным именем:
-     `out_path = os.path.join('{media_abs}', f'meme_{{int(time.time())}}_{{random.randint(1000, 9999)}}.png')`
+   - Скрипт должен сохранить итоговую картинку в директорию медиа:
+     `media_target = 'media' if os.path.exists('media') else (f'{media_abs}' if os.path.exists(f'{media_abs}') else '/app/media')`
+     `os.makedirs(media_target, exist_ok=True)`
+     `out_path = os.path.join(media_target, f'meme_{{int(time.time())}}_{{random.randint(1000, 9999)}}.png')`
      `img.save(out_path, 'PNG')`
    - В САМОЙ ПОСЛЕДНЕЙ СТРОКЕ скрипт ОБЯЗАТЕЛЬНО должен вывести путь к файлу в stdout:
      `print(out_path)`
