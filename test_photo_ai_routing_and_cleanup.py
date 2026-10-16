@@ -74,7 +74,7 @@ class TestPhotoAIRoutingAndCleanup(unittest.TestCase):
                 pass
 
     @patch("keep_alive.safe_run_autonomous_task_async")
-    @patch("subprocess.run")
+    @patch("keep_alive.subprocess.run")
     def test_owner_photo_edit_routed_to_ai(self, mock_subproc, mock_safe_run):
         mock_subproc.return_value = MagicMock(returncode=0, stdout="Sent msg 1001")
         msg_data = {
@@ -92,7 +92,7 @@ class TestPhotoAIRoutingAndCleanup(unittest.TestCase):
         self.assertEqual(kwargs.get("photo_path"), "/tmp/test_input_photo.jpg")
 
     @patch("keep_alive.safe_run_autonomous_task_async")
-    @patch("subprocess.run")
+    @patch("keep_alive.subprocess.run")
     def test_owner_visual_gen_routed_to_ai(self, mock_subproc, mock_safe_run):
         mock_subproc.return_value = MagicMock(returncode=0, stdout="Sent msg 1002")
         msg_data = {

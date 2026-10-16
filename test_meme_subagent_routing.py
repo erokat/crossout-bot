@@ -35,7 +35,11 @@ class TestMemeSubagentRouting(unittest.TestCase):
         self.assertTrue(mock_subproc.called)
 
     @patch("keep_alive.spawn_meme_creator_subagent")
-    def test_handle_yarik_message_meme_routing(self, mock_spawn):
+    @patch("keep_alive.subprocess.run")
+    @patch("keep_alive.ask_ai")
+    def test_handle_yarik_message_meme_routing(self, mock_ask, mock_subproc, mock_spawn):
+        mock_subproc.return_value = MagicMock(returncode=0)
+        mock_ask.return_value = "Тестовый ответ"
         msg = {
             "id": 99999,
             "sender_id": 6271387044,
@@ -45,6 +49,7 @@ class TestMemeSubagentRouting(unittest.TestCase):
         }
         handle_yarik_message(msg)
         self.assertEqual(mock_spawn.call_count, 3, "Should spawn exactly 3 subagents for 3 memes")
+        mock_subproc.assert_not_called()
 
     @patch("keep_alive.spawn_meme_creator_subagent")
     def test_handle_yarik_message_non_meme_does_not_spawn_meme_subagents(self, mock_spawn):
@@ -62,7 +67,10 @@ class TestMemeSubagentRouting(unittest.TestCase):
 
     @patch("keep_alive.spawn_meme_creator_subagent")
     @patch("keep_alive.subprocess.run")
-    def test_handle_owner_message_meme_routing(self, mock_subproc, mock_spawn):
+    @patch("keep_alive.ask_ai")
+    def test_handle_owner_message_meme_routing(self, mock_ask, mock_subproc, mock_spawn):
+        mock_subproc.return_value = MagicMock(returncode=0)
+        mock_ask.return_value = "Тестовый ответ"
         msg = {
             "id": 88888,
             "text": "скинь ярику 2 мема про птур",
