@@ -11,46 +11,88 @@ if BASE_DIR not in sys.path:
 import media_finder
 
 class TestMusicCascade(unittest.TestCase):
-    def test_generate_search_variations_with_author(self):
-        query = "DELTARUNE - It's TV Time! от InstrumentManiac"
-        clean_q = media_finder.clean_query(query, "music")
-        vars = media_finder.generate_search_variations(clean_q)
-        self.assertIn("DELTARUNE - It's TV Time! InstrumentManiac", vars)
-        self.assertIn("DELTARUNE - It's TV Time!", vars)
-        self.assertIn("InstrumentManiac DELTARUNE - It's TV Time!", vars)
+    def test_parse_music_query(self):
+        title, author = media_finder.parse_music_query("DELTARUNE - It's TV Time! от InstrumentManiac")
+        self.assertEqual(title, "DELTARUNE - It's TV Time!")
+        self.assertEqual(author, "InstrumentManiac")
 
-    def test_generate_search_variations_with_dash(self):
-        query = "Toby Fox - Megalovania"
-        clean_q = media_finder.clean_query(query, "music")
-        vars = media_finder.generate_search_variations(clean_q)
-        self.assertIn("Toby Fox Megalovania", vars)
+        title2, author2 = media_finder.parse_music_query("Megalovania by Toby Fox")
+        self.assertEqual(title2, "Megalovania")
+        self.assertEqual(author2, "Toby Fox")
 
+        title3, author3 = media_finder.parse_music_query("DELTARUNE - It's TV Time!")
+        self.assertEqual(title3, "DELTARUNE - It's TV Time!")
+        self.assertIsNone(author3)
+
+    def test_score_music_candidate_penalizes_covers(self):
+        cover_cand = {
+            "title": "It's TV Time! WITH LYRICS - Deltarune Cover Juno Songs",
+            "uploader": "NoFace42804",
+            "duration": 338
+        }
+        score = media_finder.score_music_candidate(cover_cand, "DELTARUNE - It's TV Time!")
+        # Should be heavily penalized (below 0)
+        self.assertLess(score, 0)
+
+    def test_score_music_candidate_rewards_author_and_ost(self):
+        ost_cand = {
+            "title": "27. It's TV Time! (DELTARUNE Chapter 3+4 Soundtrack)",
+            "uploader": "Toby Fox - Topic",
+            "duration": 171
+        }
+        score = media_finder.score_music_candidate(ost_cand, "DELTARUNE - It's TV Time!")
+        # Should be awarded for OST and - Topic
+        self.assertGreater(score, 150)
+
+        im_cand = {
+            "title": "DELTARUNE - It's TV Time!",
+            "uploader": "InstrumentManiac",
+            "duration": 171
+        }
+        im_score = media_finder.score_music_candidate(im_cand, "DELTARUNE - It's TV Time!", target_artist="InstrumentManiac")
+        self.assertGreater(im_score, 200)
+
+    @patch("media_finder.fetch_candidates")
     @patch("media_finder.download_via_ytdlp")
-    def test_find_and_download_music_soundcloud_tier1(self, mock_ytdlp):
-        # Simulate SoundCloud succeeding on first variation
-        mock_ytdlp.return_value = ("/fake/music/track.mp3", "Deltarune TV Time - Juno Songs")
-        
+    def test_find_and_download_music_picks_winner(self, mock_ytdlp, mock_fetch):
+        # Candidates from YouTube and SoundCloud
+        mock_fetch.side_effect = [
+            # YouTube candidates
+            [
+                {"source": "youtube", "id": "vid123", "url": "https://youtube.com/watch?v=vid123", "title": "DELTARUNE - It's TV Time!", "uploader": "InstrumentManiac", "duration": 170}
+            ],
+            # SoundCloud candidates (covers)
+            [
+                {"source": "soundcloud", "id": "sc1", "url": "https://soundcloud.com/noface/juno-cover", "title": "It's TV Time! WITH LYRICS Cover", "uploader": "NoFace42804", "duration": 300}
+            ]
+        ]
+        mock_ytdlp.return_value = ("/fake/music/track.mp3", "DELTARUNE - It's TV Time! - InstrumentManiac")
+
         with patch("os.path.exists", return_value=False):
             track, title = media_finder.find_and_download_music("DELTARUNE - It's TV Time! от InstrumentManiac")
             self.assertEqual(track, "/fake/music/track.mp3")
-            self.assertIn("Deltarune TV Time", title)
-            mock_ytdlp.assert_called()
-            # First call should be scsearch1
-            first_call_prefix = mock_ytdlp.call_args_list[0][0][0]
-            self.assertEqual(first_call_prefix, "scsearch1")
+            self.assertIn("InstrumentManiac", title)
+            # Ensure it chose YouTube direct URL rather than the SoundCloud cover!
+            called_url = mock_ytdlp.call_args[0][1]
+            self.assertEqual(called_url, "https://youtube.com/watch?v=vid123")
 
-    @patch("media_finder.search_invidious_audio")
+    @patch("media_finder.fetch_candidates")
     @patch("media_finder.download_via_ytdlp")
-    def test_find_and_download_music_invidious_tier2_fallback(self, mock_ytdlp, mock_invidious):
-        # Simulate SoundCloud failing, Invidious succeeding
+    @patch("media_finder.stream_invidious_video_id")
+    def test_find_and_download_music_invidious_fallback_on_403(self, mock_stream, mock_ytdlp, mock_fetch):
+        # YouTube returns winner, but yt-dlp fails (e.g. 403)
+        mock_fetch.side_effect = [
+            [{"source": "youtube", "id": "vid123", "url": "https://youtube.com/watch?v=vid123", "title": "DELTARUNE - It's TV Time!", "uploader": "InstrumentManiac", "duration": 170}],
+            []
+        ]
         mock_ytdlp.return_value = (None, "")
-        mock_invidious.return_value = ("/fake/music/invidious.mp3", "Deltarune TV Time - Toby Fox")
+        mock_stream.return_value = ("/fake/music/invidious.mp3", "DELTARUNE - It's TV Time! - InstrumentManiac")
 
         with patch("os.path.exists", return_value=False):
-            track, title = media_finder.find_and_download_music("DELTARUNE - It's TV Time!")
+            track, title = media_finder.find_and_download_music("DELTARUNE - It's TV Time! от InstrumentManiac")
             self.assertEqual(track, "/fake/music/invidious.mp3")
-            self.assertEqual(title, "Deltarune TV Time - Toby Fox")
-            mock_invidious.assert_called()
+            self.assertIn("InstrumentManiac", title)
+            mock_stream.assert_called_with("vid123", "DELTARUNE - It's TV Time!", "InstrumentManiac", unittest.mock.ANY, timeout=20)
 
 if __name__ == "__main__":
     unittest.main()

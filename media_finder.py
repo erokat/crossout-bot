@@ -220,11 +220,105 @@ def synthesize_classical_symphony(clean_q, dest_path, duration=22.0):
             except Exception: pass
 
 INVIDIOUS_INSTANCES = [
-    "https://inv.tux.pizza",
-    "https://invidious.jing.rocks",
+    "https://yewtu.be",
+    "https://invidious.projectsegfau.lt",
     "https://invidious.nerdvpn.de",
-    "https://vid.puffyan.us"
+    "https://inv.tux.pizza"
 ]
+
+def parse_music_query(clean_q):
+    """
+    Разделяет 'DELTARUNE - It's TV Time! от InstrumentManiac'
+    на title: 'DELTARUNE - It's TV Time!' и artist: 'InstrumentManiac'.
+    """
+    if not clean_q:
+        return "", None
+    m = re.search(r"(?i)\s+(?:от|by|автора?|исполнителя?|канал(?:а)?)\s+([^,;!?]+)$", clean_q)
+    if m:
+        author = m.group(1).strip()
+        title = clean_q[:m.start()].strip()
+        return title, author
+    return clean_q.strip(), None
+
+UNWANTED_MODIFIERS = [
+    ("cover", -120),
+    ("кавер", -120),
+    ("metal cover", -130),
+    ("guitar cover", -130),
+    ("piano cover", -130),
+    ("vocal cover", -130),
+    ("with lyrics", -100),
+    ("lyrics", -80),
+    ("с текстом", -80),
+    ("karaoke", -100),
+    ("караоке", -100),
+    ("remix", -80),
+    ("ремикс", -80),
+    ("rmx", -80),
+    ("mashup", -90),
+    ("мэшап", -90),
+    ("nightcore", -100),
+    ("speed up", -100),
+    ("sped up", -100),
+    ("slowed", -90),
+    ("reverb", -90),
+    ("bass boosted", -90),
+    ("not mine", -90),
+    ("arrangement", -60),
+    ("аранжировка", -60),
+    ("parody", -110),
+    ("пародия", -110),
+    ("ai cover", -120),
+    ("fan made", -100),
+    ("fan-made", -100),
+    ("juno songs", -120),
+]
+
+def score_music_candidate(cand, user_title, target_artist=None):
+    """
+    Оценка соответствия кандидата:
+    - Штраф за каверы/lyrics/ремиксы (если их нет в запросе)
+    - Бонус за точное совпадение автора
+    - Бонус за Official / OST / Topic-каналы
+    """
+    title = (cand.get("title") or "").lower()
+    uploader = (cand.get("uploader") or cand.get("channel") or "").lower()
+    duration = cand.get("duration") or 0
+    score = 100.0
+
+    u_title_low = (user_title or "").lower()
+
+    for mod, pen in UNWANTED_MODIFIERS:
+        if mod in title and mod not in u_title_low:
+            score += pen
+
+    if any(w in title for w in ["official audio", "official track", "original mix", "original soundtrack", "ost"]):
+        score += 50.0
+    if "- topic" in uploader:
+        score += 60.0
+
+    if target_artist:
+        a_low = target_artist.lower().strip()
+        if a_low in uploader:
+            score += 150.0
+        elif a_low in title:
+            score += 80.0
+        else:
+            score -= 70.0
+
+    user_tokens = set(re.findall(r"\w+", u_title_low))
+    title_tokens = set(re.findall(r"\w+", title))
+    if user_tokens:
+        overlap = len(user_tokens.intersection(title_tokens)) / len(user_tokens)
+        score += overlap * 40.0
+
+    if duration:
+        if 60 <= duration <= 420:
+            score += 20.0
+        elif duration < 40 or duration > 900:
+            score -= 50.0
+
+    return score
 
 def generate_search_variations(clean_q):
     """
@@ -236,13 +330,11 @@ def generate_search_variations(clean_q):
     5. Исходный очищенный запрос
     """
     variations = []
-    # 1. Заменяем связки авторов на пробел
     q_norm = re.sub(r"(?i)\b(?:от|by|автора?|исполнителя?|группы)\b", " ", clean_q).strip()
     q_norm = re.sub(r"\s+", " ", q_norm)
     if q_norm:
         variations.append(q_norm)
 
-    # 2. Если был предлог 'от' / 'by', пробуем выделить название трека отдельно и инвертировать
     m_author = re.split(r"(?i)\s+(?:от|by)\s+", clean_q, maxsplit=1)
     if len(m_author) == 2:
         title_only = m_author[0].strip()
@@ -253,7 +345,6 @@ def generate_search_variations(clean_q):
         if rev not in variations:
             variations.append(rev)
 
-    # 3. Дефис (Artist - Title или Game - Title)
     if " - " in clean_q:
         parts = clean_q.split(" - ", 1)
         no_dash = f"{parts[0].strip()} {parts[1].strip()}".strip()
@@ -263,7 +354,6 @@ def generate_search_variations(clean_q):
     if clean_q not in variations:
         variations.append(clean_q)
 
-    # Дедупликация с сохранением порядка
     seen = set()
     unique_vars = []
     for v in variations:
@@ -273,11 +363,59 @@ def generate_search_variations(clean_q):
             unique_vars.append(v)
     return unique_vars or [clean_q]
 
+def fetch_candidates(source_prefix, query_str, limit=5, timeout=12):
+    """
+    Быстрый опрос метаданных топ-N кандидатов без скачивания аудио.
+    """
+    cmd = [
+        "yt-dlp",
+        "--dump-single-json",
+        "--flat-playlist",
+        "--socket-timeout", "6",
+        "--retries", "0",
+        "--no-warnings"
+    ]
+    if "ytsearch" in source_prefix:
+        cmd.extend([
+            "--extractor-args", "youtube:player_client=android,ios,mweb",
+            "--extractor-args", "youtube:player_skip=configs,webpage",
+            "--geo-bypass"
+        ])
+    elif "scsearch" in source_prefix:
+        cmd.extend([
+            "--extractor-args", "soundcloud:format=http"
+        ])
 
-def download_via_ytdlp(source_prefix, query_str, out_file, safe_name, max_filesize="30M", timeout=30):
+    cmd.append(f"{source_prefix}{limit}:{query_str}")
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if res.returncode == 0 and res.stdout:
+            data = json.loads(res.stdout)
+            entries = data.get("entries", [])
+            items = []
+            for e in entries:
+                if not e:
+                    continue
+                vid_id = e.get("id")
+                direct_url = e.get("url") or (f"https://www.youtube.com/watch?v={vid_id}" if "ytsearch" in source_prefix else None)
+                items.append({
+                    "source": "youtube" if "ytsearch" in source_prefix else "soundcloud",
+                    "id": vid_id,
+                    "url": direct_url,
+                    "title": e.get("title") or "",
+                    "uploader": e.get("uploader") or e.get("channel") or "",
+                    "duration": e.get("duration") or 0
+                })
+            return items
+    except Exception as ex:
+        sys.stderr.write(f"[MEDIA FINDER] fetch_candidates error ({source_prefix}:{query_str}): {ex}\n")
+    return []
+
+def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_filesize="30M", timeout=30):
     """
     Унифицированный скачиватель через yt-dlp с жестким тайм-аутом, сокет-таймаутом,
     фильтрацией длительности и гарантированной конвертацией в MP3.
+    Поддерживает как поисковый префикс, так и прямой URL.
     """
     out_tmpl = os.path.join(MUSIC_DIR, f"{safe_name}.%(ext)s")
     cmd = [
@@ -296,18 +434,22 @@ def download_via_ytdlp(source_prefix, query_str, out_file, safe_name, max_filesi
         "-o", out_tmpl
     ]
 
-    if "scsearch" in source_prefix:
+    target_arg = query_or_url
+    if source_prefix and not query_or_url.startswith("http"):
+        target_arg = f"{source_prefix}:{query_or_url}"
+
+    if "soundcloud" in target_arg.lower() or (source_prefix and "scsearch" in source_prefix):
         cmd.extend([
             "--extractor-args", "soundcloud:format=http"
         ])
-    elif "ytsearch" in source_prefix:
+    elif "youtube" in target_arg.lower() or "youtu.be" in target_arg.lower() or (source_prefix and "ytsearch" in source_prefix):
         cmd.extend([
             "--extractor-args", "youtube:player_client=android,ios,mweb",
             "--extractor-args", "youtube:player_skip=configs,webpage",
             "--geo-bypass"
         ])
 
-    cmd.append(f"{source_prefix}:{query_str}")
+    cmd.append(target_arg)
 
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -336,11 +478,10 @@ def download_via_ytdlp(source_prefix, query_str, out_file, safe_name, max_filesi
                 elif f.endswith(".mp3") and os.path.getsize(fpath) > 50000:
                     return fpath, extracted_title
     except subprocess.TimeoutExpired:
-        sys.stderr.write(f"[MEDIA FINDER] yt-dlp timeout ({timeout}s) for {source_prefix}:{query_str}\n")
+        sys.stderr.write(f"[MEDIA FINDER] yt-dlp timeout ({timeout}s) for {target_arg}\n")
     except Exception as e:
-        sys.stderr.write(f"[MEDIA FINDER] yt-dlp error for {source_prefix}:{query_str}: {e}\n")
+        sys.stderr.write(f"[MEDIA FINDER] yt-dlp error for {target_arg}: {e}\n")
     finally:
-        # Очистка мусора
         for f in os.listdir(MUSIC_DIR):
             if f.startswith(safe_name) and f.endswith((".part", ".ytdl", ".temp")):
                 try: os.remove(os.path.join(MUSIC_DIR, f))
@@ -348,6 +489,28 @@ def download_via_ytdlp(source_prefix, query_str, out_file, safe_name, max_filesi
 
     return None, ""
 
+def stream_invidious_video_id(video_id, title, author, out_file, timeout=20):
+    """
+    Прямой стриминг аудиопотока YouTube видео по ID через Invidious API (обход 403 блокировки).
+    """
+    for base_url in INVIDIOUS_INSTANCES:
+        try:
+            stream_url = f"{base_url}/latest_version?id={video_id}&itag=140"
+            ffmpeg_cmd = [
+                "ffmpeg", "-y", "-i", stream_url,
+                "-vn", "-c:a", "libmp3lame", "-q:a", "2",
+                "-id3v2_version", "3",
+                "-metadata", f"title={title}",
+                "-metadata", f"artist={author}",
+                out_file
+            ]
+            f_res = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=timeout)
+            if f_res.returncode == 0 and os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
+                full_title = f"{title} - {author}" if author else title
+                return out_file, full_title
+        except Exception:
+            continue
+    return None, ""
 
 def search_invidious_audio(query_str, out_file, timeout=15):
     """
@@ -370,24 +533,12 @@ def search_invidious_audio(query_str, out_file, timeout=15):
             if not video_id:
                 continue
 
-            # Прямая ссылка на аудио-поток (itag 140: 128k m4a)
-            stream_url = f"{base_url}/latest_version?id={video_id}&itag=140"
-            ffmpeg_cmd = [
-                "ffmpeg", "-y", "-i", stream_url,
-                "-vn", "-c:a", "libmp3lame", "-q:a", "2",
-                "-id3v2_version", "3",
-                "-metadata", f"title={title}",
-                "-metadata", f"artist={author}",
-                out_file
-            ]
-            f_res = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=timeout)
-            if f_res.returncode == 0 and os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
-                full_title = f"{title} - {author}" if author else title
-                return out_file, full_title
+            res_file, full_title = stream_invidious_video_id(video_id, title, author, out_file, timeout=timeout)
+            if res_file:
+                return res_file, full_title
         except Exception:
             continue
     return None, ""
-
 
 def find_and_download_music(query, max_filesize="30M"):
     clean_q = clean_query(query, "music")
@@ -410,33 +561,63 @@ def find_and_download_music(query, max_filesize="30M"):
                 if download_file_direct(item["url"], out_file):
                     return out_file, item["title"]
 
+    title_q, target_artist = parse_music_query(clean_q)
+    search_q = f"{title_q} {target_artist}".strip() if target_artist else clean_q
+
+    # 1. ГИБРИДНЫЙ ПУЛ: параллельный сбор кандидатов из YouTube (Android/iOS) и SoundCloud
+    yt_candidates = fetch_candidates("ytsearch", search_q, limit=5, timeout=12)
+    sc_candidates = fetch_candidates("scsearch", search_q, limit=6, timeout=10)
+
+    # 2. Интеллектуальный скоринг кандидатов
+    scored_candidates = []
+    for cand in yt_candidates + sc_candidates:
+        cand["score"] = score_music_candidate(cand, title_q, target_artist)
+        scored_candidates.append(cand)
+
+    scored_candidates.sort(key=lambda x: x["score"], reverse=True)
+
+    # Логируем результаты топ-3 скоринга для мониторинга
+    if scored_candidates:
+        top_logs = [f"[{c['source']}:{c['score']:.0f}] {c['title'][:30]} ({c['uploader'][:15]})" for c in scored_candidates[:3]]
+        sys.stderr.write(f"[MUSIC SCORE] Top candidates for '{clean_q}': {' | '.join(top_logs)}\n")
+
+    # 3. Скачивание лучшего кандидата с положительным скором (порог >= 50)
+    for cand in scored_candidates:
+        if cand["score"] < 50:
+            break
+        cand_url = cand.get("url")
+        cand_title = cand.get("title", clean_q)
+        cand_author = cand.get("uploader", "")
+        cand_id = cand.get("id")
+
+        if cand["source"] == "youtube":
+            # 1) Сначала пробуем скачать YouTube через yt-dlp с android/ios клиентом
+            track, title = download_via_ytdlp(None, cand_url, out_file, safe_name, max_filesize=max_filesize, timeout=25)
+            if track:
+                return track, title or f"{cand_title} - {cand_author}"
+            # 2) Если на Render прилетел 403 — скачиваем аудиопоток точного videoId через Invidious
+            if cand_id:
+                track, title = stream_invidious_video_id(cand_id, cand_title, cand_author, out_file, timeout=20)
+                if track:
+                    return track, title or f"{cand_title} - {cand_author}"
+        elif cand["source"] == "soundcloud" and cand_url:
+            track, title = download_via_ytdlp(None, cand_url, out_file, safe_name, max_filesize=max_filesize, timeout=25)
+            if track:
+                return track, title or f"{cand_title} - {cand_author}"
+
+    # 4. Резервные уровни (Bandcamp и Invidious Text Search)
     variations = generate_search_variations(clean_q)
-
-    # 1. УРОВЕНЬ 1: SoundCloud (Локомотив, без 403 блокировок на Render)
-    for var in variations:
-        track, title = download_via_ytdlp("scsearch1", var, out_file, safe_name, max_filesize=max_filesize, timeout=30)
-        if track:
-            return track, title or clean_q
-
-    # 2. УРОВЕНЬ 2: Invidious Audio API (YouTube проксирование вне дата-центров)
     for var in variations[:2]:
-        track, title = search_invidious_audio(var, out_file, timeout=20)
+        track, title = search_invidious_audio(var, out_file, timeout=18)
         if track:
             return track, title or clean_q
 
-    # 3. УРОВЕНЬ 3: Bandcamp (Открыт для дата-центров, саундтреки инди-игр и OST)
     for var in variations[:2]:
         track, title = download_via_ytdlp("bcsearch1", var, out_file, safe_name, max_filesize=max_filesize, timeout=25)
         if track:
             return track, title or clean_q
 
-    # 4. УРОВЕНЬ 4: YouTube Direct (с эмуляцией мобильных клиентов)
-    for var in variations[:2]:
-        track, title = download_via_ytdlp("ytsearch1", var, out_file, safe_name, max_filesize=max_filesize, timeout=15)
-        if track:
-            return track, title or clean_q
-
-    # 5. УРОВЕНЬ 5: Internet Archive & Синтезатор (СТРОГО ДЛЯ КЛАССИКИ / РЕТРО)
+    # 5. Классика: синтезатор и архив
     if is_classical_query:
         synth_file, synth_title = synthesize_classical_symphony(clean_q, out_file)
         if synth_file:
@@ -448,7 +629,6 @@ def find_and_download_music(query, max_filesize="30M"):
         if download_file_direct(fallback_classical["url"], out_file):
             return out_file, fallback_classical["title"]
 
-    # Для обычных современных песен (не классика) — НИКОГДА не подсовывать Бетховена!
     return None, clean_q
 
 find_and_download_audio = find_and_download_music
