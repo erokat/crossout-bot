@@ -510,6 +510,7 @@ def run_periodic_media_cleaner():
                         fpath = os.path.join(root, f)
                         if not os.path.isfile(fpath):
                             continue
+                        ext = os.path.splitext(f)[1].lower()
                         is_temp_file = (
                             ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".ts"] or
                             f.startswith(("tmp_", "img_", "test_")) or
