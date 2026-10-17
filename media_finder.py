@@ -220,10 +220,12 @@ def synthesize_classical_symphony(clean_q, dest_path, duration=22.0):
             except Exception: pass
 
 INVIDIOUS_INSTANCES = [
-    "https://yewtu.be",
-    "https://invidious.projectsegfau.lt",
+    "https://invidious.f5.si",
+    "https://inv.tux.pizza",
     "https://invidious.nerdvpn.de",
-    "https://inv.tux.pizza"
+    "https://yewtu.be",
+    "https://inv.nadeko.net",
+    "https://invidious.flokinet.to"
 ]
 
 def parse_music_query(clean_q):
@@ -240,38 +242,39 @@ def parse_music_query(clean_q):
         return title, author
     return clean_q.strip(), None
 
+# Жесткий мусор/искажения (отсекаются при аварийном SoundCloud fallback, если не запрошены пользователем)
+HARD_TRASH_MODIFIERS = [
+    "parody", "пародия",
+    "ai cover", "ai version",
+    "chipmunk", "nightcore", "sped up", "speed up", "slowed",
+    "earrape", "bass boosted",
+    "karaoke", "караоке",
+    "1 hour", "10 hours", "loop", "reaction"
+]
+
+# Мягкие модификаторы для ранжирования (НЕ приводят к жесткому удалению трека)
 UNWANTED_MODIFIERS = [
-    ("cover", -120),
-    ("кавер", -120),
-    ("metal cover", -130),
-    ("guitar cover", -130),
-    ("piano cover", -130),
-    ("vocal cover", -130),
-    ("with lyrics", -100),
-    ("lyrics", -80),
-    ("с текстом", -80),
-    ("karaoke", -100),
-    ("караоке", -100),
-    ("remix", -80),
-    ("ремикс", -80),
-    ("rmx", -80),
-    ("mashup", -90),
-    ("мэшап", -90),
-    ("nightcore", -100),
-    ("speed up", -100),
-    ("sped up", -100),
-    ("slowed", -90),
-    ("reverb", -90),
-    ("bass boosted", -90),
-    ("not mine", -90),
-    ("arrangement", -60),
-    ("аранжировка", -60),
-    ("parody", -110),
-    ("пародия", -110),
-    ("ai cover", -120),
-    ("fan made", -100),
-    ("fan-made", -100),
-    ("juno songs", -120),
+    ("with lyrics", -70),
+    ("lyrics", -50),
+    ("с текстом", -50),
+    ("metal cover", -60),
+    ("guitar cover", -50),
+    ("piano cover", -40),
+    ("vocal cover", -60),
+    ("cover", -40),
+    ("кавер", -40),
+    ("mashup", -50),
+    ("мэшап", -50),
+    ("remix", -40),
+    ("ремикс", -40),
+    ("rmx", -40),
+    ("arrangement", -15),
+    ("аранжировка", -15),
+    ("recreation", -10),
+    ("fan made", -30),
+    ("fan-made", -30),
+    ("not mine", -20),
+    ("juno songs", -60),
 ]
 
 def score_music_candidate(cand, user_title, target_artist=None):
@@ -304,7 +307,7 @@ def score_music_candidate(cand, user_title, target_artist=None):
         elif a_low in title:
             score += 80.0
         else:
-            score -= 70.0
+            score -= 35.0
 
     user_tokens = set(re.findall(r"\w+", u_title_low))
     title_tokens = set(re.findall(r"\w+", title))
@@ -377,7 +380,7 @@ def fetch_candidates(source_prefix, query_str, limit=5, timeout=12):
     ]
     if "ytsearch" in source_prefix:
         cmd.extend([
-            "--extractor-args", "youtube:player_client=visionos,web",
+            "--extractor-args", "youtube:player_client=android,web",
             "--geo-bypass"
         ])
     elif "scsearch" in source_prefix:
@@ -462,7 +465,7 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
         ])
     elif "youtube" in target_arg.lower() or "youtu.be" in target_arg.lower() or (source_prefix and "ytsearch" in source_prefix):
         cmd.extend([
-            "--extractor-args", "youtube:player_client=visionos,web",
+            "--extractor-args", "youtube:player_client=android,ios,mweb,web",
             "--geo-bypass"
         ])
 
@@ -480,6 +483,9 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
 
         if os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
             return out_file, extracted_title
+
+        if res.stderr and ("error" in res.stderr.lower() or "warning" in res.stderr.lower()):
+            sys.stderr.write(f"[MEDIA FINDER] yt-dlp notice for {target_arg}: {res.stderr.strip()[:250]}\n")
 
         # Поиск по шаблону и доконвертация в mp3, если yt-dlp оставил m4a/opus/webm
         for f in os.listdir(MUSIC_DIR):
@@ -513,8 +519,29 @@ def stream_invidious_video_id(video_id, title, author, out_file, timeout=20):
     """
     Прямой стриминг аудиопотока YouTube видео по ID через Invidious API (обход 403 блокировки).
     """
+    req_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     for base_url in INVIDIOUS_INSTANCES:
         try:
+            api_url = f"{base_url}/api/v1/videos/{video_id}?fields=title,author,adaptiveFormats,formatStreams"
+            req = urllib.request.Request(api_url, headers=req_headers)
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            formats = data.get("adaptiveFormats", [])
+            audio_formats = [f for f in formats if f.get("type", "").startswith("audio/")]
+            if not audio_formats:
+                audio_formats = [f for f in data.get("formatStreams", []) if f.get("url")]
+            if not audio_formats:
+                continue
+
+            best = max(audio_formats, key=lambda x: int(x.get("bitrate", 0) or 0))
+            stream_url = best.get("url")
+            if not stream_url:
+                continue
+
+            if stream_url.startswith("/"):
+                stream_url = f"{base_url}{stream_url}"
+
             ffmpeg_cmd = [
                 "ffmpeg", "-y",
                 "-reconnect", "1",
@@ -532,7 +559,8 @@ def stream_invidious_video_id(video_id, title, author, out_file, timeout=20):
             if f_res.returncode == 0 and os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
                 full_title = f"{title} - {author}" if author else title
                 return out_file, full_title
-        except Exception:
+        except Exception as ex:
+            sys.stderr.write(f"[MEDIA FINDER] Invidious instance {base_url} error: {ex}\n")
             continue
     return None, ""
 
@@ -697,15 +725,24 @@ def find_and_download_music(query, max_filesize="30M", allow_ai_fallback=True):
             if track:
                 return track, title or f"{cand_title} - {cand_author}"
 
-    # 3.1. Аварийный fallback на чистые SoundCloud-треки (если автор был только на YouTube, а YouTube заблокирован дата-центром):
-    # Отсекаем все фанатские вокальные каверы/lyrics и берем чистый инструментал / оригинальный трек
-    sc_clean = [
-        c for c in sc_candidates
-        if not any(mod in (c.get("title") or "").lower() for mod, _ in UNWANTED_MODIFIERS if mod not in title_q.lower())
-    ]
-    if sc_clean:
-        sc_clean.sort(key=lambda c: score_music_candidate(c, title_q, None), reverse=True)
-        for c in sc_clean:
+    # 3.1. Аварийный fallback на SoundCloud:
+    # Если YouTube заблокирован дата-центром (Render 403), берем лучший трек из SoundCloud.
+    # Отсекаем только явный жесткий спам (HARD_TRASH_MODIFIERS), сохраняя аранжировки и качественные инструменталы
+    sc_clean = []
+    for c in sc_candidates:
+        c_title = (c.get("title") or "").lower()
+        c_dur = c.get("duration") or 0
+        if c_dur and (c_dur < 30 or c_dur > 1200):
+            continue
+        if any(trash in c_title for trash in HARD_TRASH_MODIFIERS if trash not in title_q.lower()):
+            continue
+        sc_clean.append(c)
+
+    candidates_pool = sc_clean if sc_clean else sc_candidates
+    if candidates_pool:
+        # Ранжируем по соответствию названию трека (target_artist=None, т.к. автора с YouTube может не быть на SoundCloud)
+        candidates_pool.sort(key=lambda c: score_music_candidate(c, title_q, None), reverse=True)
+        for c in candidates_pool:
             c_url = c.get("url")
             if c_url:
                 track, title = download_via_ytdlp(None, c_url, out_file, safe_name, max_filesize=max_filesize, timeout=25)
@@ -806,7 +843,7 @@ def find_and_download_video(query, max_filesize="40M"):
         "yt-dlp",
         "-f", "mp4[filesize<35M]/best[filesize<35M]/best",
         "--default-search", "ytsearch",
-        "--extractor-args", "youtube:player_client=visionos,web",
+        "--extractor-args", "youtube:player_client=android",
         "--max-filesize", max_filesize,
         "--no-playlist",
         "-o", out_tmpl,
