@@ -94,5 +94,39 @@ class TestMusicCascade(unittest.TestCase):
             self.assertIn("InstrumentManiac", title)
             mock_stream.assert_called_with("vid123", "DELTARUNE - It's TV Time!", "InstrumentManiac", unittest.mock.ANY, timeout=20)
 
+    @patch("subprocess.run")
+    def test_refine_music_query_via_ai(self, mock_subproc):
+        mock_subproc.return_value = MagicMock(return_value=0, returncode=0, stdout="```\nInstrumentManiac - It's TV Time!\n```")
+        refined = media_finder.refine_music_query_via_ai("дельторун итс тиви тайм инструментманьяк")
+        self.assertEqual(refined, "InstrumentManiac - It's TV Time!")
+
+    @patch("media_finder.refine_music_query_via_ai")
+    @patch("media_finder.fetch_candidates")
+    @patch("media_finder.download_via_ytdlp")
+    @patch("media_finder.search_invidious_audio")
+    def test_find_and_download_music_triggers_ai_fallback(self, mock_inv, mock_ytdlp, mock_fetch, mock_refine):
+        # Initial search fails to find candidates and fallbacks fail
+        # AI refines the query to "Queen - The Show Must Go On"
+        # Second search succeeds
+        mock_inv.return_value = (None, "")
+        mock_refine.return_value = "Queen - The Show Must Go On"
+        mock_fetch.side_effect = [
+            [], # 1st yt search (empty)
+            [], # 1st sc search (empty)
+            [{"source": "youtube", "id": "q123", "url": "https://youtube.com/watch?v=q123", "title": "Queen - The Show Must Go On", "uploader": "Queen Official", "duration": 260}], # 2nd yt search
+            []  # 2nd sc search
+        ]
+        def ytdlp_side_effect(source_prefix, target_arg, *args, **kwargs):
+            if "youtube.com" in str(target_arg):
+                return ("/fake/music/queen.mp3", "Queen - The Show Must Go On")
+            return (None, "")
+        mock_ytdlp.side_effect = ytdlp_side_effect
+
+        with patch("os.path.exists", return_value=False):
+            track, title = media_finder.find_and_download_music("квины шоу маст гоу он", allow_ai_fallback=True)
+            self.assertEqual(track, "/fake/music/queen.mp3")
+            self.assertEqual(title, "Queen - The Show Must Go On")
+            mock_refine.assert_called_once_with("квины шоу маст гоу он")
+
 if __name__ == "__main__":
     unittest.main()

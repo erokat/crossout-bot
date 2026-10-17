@@ -564,7 +564,75 @@ def search_invidious_audio(query_str, out_file, timeout=15):
             continue
     return None, ""
 
-def find_and_download_music(query, max_filesize="30M"):
+def refine_music_query_via_ai(clean_q):
+    """
+    Резервный ИИ-поиск и нормализация музыкального запроса через Gemini 3.8 Flash Medium.
+    Если поиск по исходной строке не дал результатов (опечатки, транслит, слова из песни),
+    модель определяет каноническое название трека и исполнителя и возвращает очищенный запрос.
+    """
+    if not clean_q or len(clean_q.strip()) < 2:
+        return None
+
+    prompt = (
+        "Ты — профессиональный музыкальный эксперт и ассистент по поиску музыки.\n"
+        f"Пользователь искал трек: «{clean_q}»\n"
+        "По этой точной строке в базах аудио ничего не нашлось (возможно: опечатка, фраза на слух, "
+        "русский транслит англоязычного трека, обрывок слов из песни, неточное имя исполнителя или описание сцены).\n\n"
+        "Твоя задача:\n"
+        "1. Понять, какую именно песню, композицию или саундтрек имел в виду пользователь.\n"
+        "2. Восстановить правильное официальное название трека и исполнителя/композитора.\n"
+        "3. Выдать один точный, канонический поисковый запрос (например: 'Artist - Track Title' или 'Official Track Title').\n\n"
+        "СТРОЖАЙШЕЕ ПРАВИЛО: Верни ТОЛЬКО одну строку с очищенным запросом для поиска. "
+        "Без кавычек, без кавычек-ёлочек, без вводных слов, без пояснений, без markdown."
+    )
+
+    refined = None
+
+    # 1. Приоритет: Antigravity CLI (модель gemini-3.8-flash-medium)
+    try:
+        from keep_alive import run_antigravity_cli
+        refined = run_antigravity_cli(prompt, timeout=25)
+    except Exception:
+        pass
+
+    if not refined:
+        try:
+            import shutil
+            agy_bin = shutil.which("agy") or shutil.which("antigravity")
+            if not agy_bin:
+                for candidate in ["/usr/local/bin/agy", "/root/.local/bin/agy", "/data/data/com.termux/files/usr/bin/agy"]:
+                    if os.path.exists(candidate):
+                        agy_bin = candidate
+                        break
+            if agy_bin:
+                cmd = [agy_bin, "--model", "gemini-3.8-flash-medium", "--dangerously-skip-permissions", "--disable-slash-commands", "-p", prompt]
+                r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=25)
+                if r.returncode == 0 and r.stdout.strip():
+                    refined = r.stdout.strip()
+        except Exception:
+            pass
+
+    if not refined:
+        # 2. Резерв: Gemini API напрямую
+        try:
+            from keep_alive import ask_gemini_api
+            refined = ask_gemini_api(prompt, system_instruction="Return only the clean canonical music title and artist.")
+        except Exception:
+            pass
+
+    if refined:
+        refined = re.sub(r"^```[a-zA-Z]*\n?", "", refined.strip())
+        refined = re.sub(r"\n?```$", "", refined.strip())
+        refined = re.sub(r"^(?:поисковый запрос|запрос|query|результат|трек|песня)[:\s\-]+", "", refined, flags=re.IGNORECASE)
+        refined = refined.strip("\"'«»`").strip()
+        if "\n" in refined:
+            refined = refined.splitlines()[0].strip().strip("\"'«»`")
+        if refined and refined.lower() != clean_q.lower():
+            return refined
+
+    return None
+
+def find_and_download_music(query, max_filesize="30M", allow_ai_fallback=True):
     clean_q = clean_query(query, "music")
     safe_name = re.sub(r'[\\/*?:"<>|]', "", clean_q).strip()[:80]
     if not safe_name:
@@ -667,6 +735,18 @@ def find_and_download_music(query, max_filesize="30M"):
         fallback_classical = CLASSICAL_ARCHIVE[0]
         if download_file_direct(fallback_classical["url"], out_file):
             return out_file, fallback_classical["title"]
+
+    # 6. Резервный ИИ-поиск и нормализация запроса через Gemini 3.8 Flash Medium (если ничего не найдено)
+    if allow_ai_fallback:
+        try:
+            refined_q = refine_music_query_via_ai(clean_q)
+            if refined_q and refined_q.lower() != clean_q.lower():
+                sys.stderr.write(f"[MEDIA FINDER] AI Refinement triggered: '{clean_q}' -> '{refined_q}'. Retrying search...\n")
+                ai_track, ai_title = find_and_download_music(refined_q, max_filesize=max_filesize, allow_ai_fallback=False)
+                if ai_track:
+                    return ai_track, ai_title or refined_q
+        except Exception as ai_err:
+            sys.stderr.write(f"[MEDIA FINDER] AI Refinement error: {ai_err}\n")
 
     return None, clean_q
 
