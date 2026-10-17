@@ -17,10 +17,13 @@ class TestPhotoEditorFixes(unittest.TestCase):
 
     def test_visual_art_request_detection(self):
         self.assertTrue(is_visual_art_request("Бот нарисуй слизнекота вотчера"))
+        self.assertTrue(is_visual_art_request("Бот Сгенерируй вотчера из рэин ворлда, стоящим в какой-то локации из дополнения его, чтобы было красиво только"))
+        self.assertTrue(is_visual_art_request("Бот сгенерируй на шахматной доске на клетке B1 черного короля, на B3 белого короля"))
         self.assertTrue(is_visual_art_request("Сгенерируй фото кота на окне"))
         self.assertTrue(is_visual_art_request("Создай арт по игре Rain World"))
         self.assertFalse(is_visual_art_request("Напиши код калькулятора"))
         self.assertFalse(is_visual_art_request("Бот сделай мем про птур"))
+        self.assertFalse(is_visual_art_request("Бот как дела"))
 
     def test_photo_editor_chess_piece_overlay(self):
         # Create a test target image
