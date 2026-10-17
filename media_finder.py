@@ -219,6 +219,176 @@ def synthesize_classical_symphony(clean_q, dest_path, duration=22.0):
             try: os.remove(wav_path)
             except Exception: pass
 
+INVIDIOUS_INSTANCES = [
+    "https://inv.tux.pizza",
+    "https://invidious.jing.rocks",
+    "https://invidious.nerdvpn.de",
+    "https://vid.puffyan.us"
+]
+
+def generate_search_variations(clean_q):
+    """
+    Генерирует ранжированный список поисковых гипотез:
+    1. Запрос без предлогов и стоп-слов ('от', 'by', 'автор', 'исполнитель')
+    2. Только название трека (если был указан автор)
+    3. Автор + Название трека
+    4. Запрос без дефисов
+    5. Исходный очищенный запрос
+    """
+    variations = []
+    # 1. Заменяем связки авторов на пробел
+    q_norm = re.sub(r"(?i)\b(?:от|by|автора?|исполнителя?|группы)\b", " ", clean_q).strip()
+    q_norm = re.sub(r"\s+", " ", q_norm)
+    if q_norm:
+        variations.append(q_norm)
+
+    # 2. Если был предлог 'от' / 'by', пробуем выделить название трека отдельно и инвертировать
+    m_author = re.split(r"(?i)\s+(?:от|by)\s+", clean_q, maxsplit=1)
+    if len(m_author) == 2:
+        title_only = m_author[0].strip()
+        author_only = m_author[1].strip()
+        if title_only and title_only not in variations:
+            variations.append(title_only)
+        rev = f"{author_only} {title_only}".strip()
+        if rev not in variations:
+            variations.append(rev)
+
+    # 3. Дефис (Artist - Title или Game - Title)
+    if " - " in clean_q:
+        parts = clean_q.split(" - ", 1)
+        no_dash = f"{parts[0].strip()} {parts[1].strip()}".strip()
+        if no_dash not in variations:
+            variations.append(no_dash)
+
+    if clean_q not in variations:
+        variations.append(clean_q)
+
+    # Дедупликация с сохранением порядка
+    seen = set()
+    unique_vars = []
+    for v in variations:
+        v_low = v.lower()
+        if v_low not in seen:
+            seen.add(v_low)
+            unique_vars.append(v)
+    return unique_vars or [clean_q]
+
+
+def download_via_ytdlp(source_prefix, query_str, out_file, safe_name, max_filesize="30M", timeout=30):
+    """
+    Унифицированный скачиватель через yt-dlp с жестким тайм-аутом, сокет-таймаутом,
+    фильтрацией длительности и гарантированной конвертацией в MP3.
+    """
+    out_tmpl = os.path.join(MUSIC_DIR, f"{safe_name}.%(ext)s")
+    cmd = [
+        "yt-dlp",
+        "-x",
+        "--audio-format", "mp3",
+        "--audio-quality", "0",
+        "--max-filesize", max_filesize,
+        "--no-playlist",
+        "--no-simulate",
+        "--socket-timeout", "10",
+        "--retries", "1",
+        "--match-filter", "duration >=? 15 & duration <=? 1200",
+        "--embed-metadata",
+        "--print", "%(title)s - %(uploader,artist)s",
+        "-o", out_tmpl
+    ]
+
+    if "scsearch" in source_prefix:
+        cmd.extend([
+            "--extractor-args", "soundcloud:format=http"
+        ])
+    elif "ytsearch" in source_prefix:
+        cmd.extend([
+            "--extractor-args", "youtube:player_client=android,ios,mweb",
+            "--extractor-args", "youtube:player_skip=configs,webpage",
+            "--geo-bypass"
+        ])
+
+    cmd.append(f"{source_prefix}:{query_str}")
+
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        extracted_title = ""
+        if res.stdout:
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if line and not line.startswith("[") and not line.startswith("ERROR") and not line.startswith("WARNING"):
+                    extracted_title = line
+                    break
+
+        if os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
+            return out_file, extracted_title
+
+        # Поиск по шаблону и доконвертация в mp3, если yt-dlp оставил m4a/opus/webm
+        for f in os.listdir(MUSIC_DIR):
+            if f.startswith(safe_name):
+                fpath = os.path.join(MUSIC_DIR, f)
+                if not f.endswith(".mp3") and os.path.getsize(fpath) > 50000:
+                    conv_cmd = ["ffmpeg", "-y", "-i", fpath, "-vn", "-c:a", "libmp3lame", "-q:a", "2", out_file]
+                    subprocess.run(conv_cmd, capture_output=True, timeout=25)
+                    try: os.remove(fpath)
+                    except Exception: pass
+                    if os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
+                        return out_file, extracted_title
+                elif f.endswith(".mp3") and os.path.getsize(fpath) > 50000:
+                    return fpath, extracted_title
+    except subprocess.TimeoutExpired:
+        sys.stderr.write(f"[MEDIA FINDER] yt-dlp timeout ({timeout}s) for {source_prefix}:{query_str}\n")
+    except Exception as e:
+        sys.stderr.write(f"[MEDIA FINDER] yt-dlp error for {source_prefix}:{query_str}: {e}\n")
+    finally:
+        # Очистка мусора
+        for f in os.listdir(MUSIC_DIR):
+            if f.startswith(safe_name) and f.endswith((".part", ".ytdl", ".temp")):
+                try: os.remove(os.path.join(MUSIC_DIR, f))
+                except Exception: pass
+
+    return None, ""
+
+
+def search_invidious_audio(query_str, out_file, timeout=15):
+    """
+    Резервный поиск YouTube аудио через публичные Invidious API инстансы (обход IP блокировок дата-центра).
+    """
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CrossoutBot/1.0"}
+    for base_url in INVIDIOUS_INSTANCES:
+        try:
+            api_url = f"{base_url}/api/v1/search?q={urllib.parse.quote(query_str)}&type=video"
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=7) as resp:
+                results = json.loads(resp.read().decode("utf-8"))
+            if not results or not isinstance(results, list):
+                continue
+
+            video = results[0]
+            video_id = video.get("videoId")
+            title = video.get("title", query_str)
+            author = video.get("author", "")
+            if not video_id:
+                continue
+
+            # Прямая ссылка на аудио-поток (itag 140: 128k m4a)
+            stream_url = f"{base_url}/latest_version?id={video_id}&itag=140"
+            ffmpeg_cmd = [
+                "ffmpeg", "-y", "-i", stream_url,
+                "-vn", "-c:a", "libmp3lame", "-q:a", "2",
+                "-id3v2_version", "3",
+                "-metadata", f"title={title}",
+                "-metadata", f"artist={author}",
+                out_file
+            ]
+            f_res = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=timeout)
+            if f_res.returncode == 0 and os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
+                full_title = f"{title} - {author}" if author else title
+                return out_file, full_title
+        except Exception:
+            continue
+    return None, ""
+
+
 def find_and_download_music(query, max_filesize="30M"):
     clean_q = clean_query(query, "music")
     safe_name = re.sub(r'[\\/*?:"<>|]', "", clean_q).strip()[:80]
@@ -226,86 +396,59 @@ def find_and_download_music(query, max_filesize="30M"):
         safe_name = f"track_{hashlib.md5(clean_q.lower().encode()).hexdigest()[:10]}"
     out_file = os.path.join(MUSIC_DIR, f"{safe_name}.mp3")
 
+    # 0. Кэш-проверка: если файл уже есть на диске и валиден (>100 КБ)
     if os.path.exists(out_file) and os.path.getsize(out_file) > 100000:
         return out_file, clean_q
 
     q_lower = (query or "").lower()
     is_classical_query = any(w in q_lower for w in ["симфони", "symphony", "оркестр", "бетховен", "моцарт", "баха", "чайковск", "классик", "сочини", "сыграй"])
 
-    # 1. Если это классика или симфония — проверяем кураторский архив шедевров без 403 блокировок
+    # Если классика — приоритетно проверяем кураторский архив шедевров
     if is_classical_query:
         for item in CLASSICAL_ARCHIVE:
             if any(kw in q_lower for kw in item["keywords"]):
-                print(f"[MEDIA FINDER] Match in curated classical archive: {item['title']}")
                 if download_file_direct(item["url"], out_file):
                     return out_file, item["title"]
 
-    # 2. Формируем варианты поисковых запросов для yt-dlp
-    search_queries = [clean_q]
-    q_no_preps = re.sub(r"(?i)\b(?:от|by|автора?|исполнителя?|группы)\b", " ", clean_q).strip()
-    q_no_preps = re.sub(r"\s+", " ", q_no_preps)
-    if q_no_preps and q_no_preps.lower() != clean_q.lower():
-        search_queries.insert(0, q_no_preps)
+    variations = generate_search_variations(clean_q)
 
-    # Добавляем сокращенные запросы на случай опечаток в длинной фразе
-    words = [w for w in q_no_preps.split() if len(w) > 1]
-    if len(words) >= 4:
-        search_queries.append(f"{words[0]} {words[1]} {' '.join(words[3:])}")
-        search_queries.append(f"{words[0]} {words[1]}")
-    elif len(words) == 3:
-        search_queries.append(f"{words[0]} {words[1]}")
+    # 1. УРОВЕНЬ 1: SoundCloud (Локомотив, без 403 блокировок на Render)
+    for var in variations:
+        track, title = download_via_ytdlp("scsearch1", var, out_file, safe_name, max_filesize=max_filesize, timeout=30)
+        if track:
+            return track, title or clean_q
 
-    out_tmpl = os.path.join(MUSIC_DIR, f"{safe_name}.%(ext)s")
-    for sq in search_queries:
-        cmd = [
-            "yt-dlp",
-            "-x",
-            "--audio-format", "mp3",
-            "--default-search", "ytsearch",
-            "--extractor-args", "youtube:player_client=android,ios",
-            "--max-filesize", max_filesize,
-            "--no-playlist",
-            "--no-simulate",
-            "--print", "%(title)s",
-            "-o", out_tmpl,
-            f"ytsearch1:{sq}"
-        ]
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=50)
-            extracted_title = ""
-            if res.stdout:
-                for line in res.stdout.splitlines():
-                    line = line.strip()
-                    if line and not line.startswith("[") and not line.startswith("ERROR") and not line.startswith("WARNING"):
-                        extracted_title = line
-                        break
+    # 2. УРОВЕНЬ 2: Invidious Audio API (YouTube проксирование вне дата-центров)
+    for var in variations[:2]:
+        track, title = search_invidious_audio(var, out_file, timeout=20)
+        if track:
+            return track, title or clean_q
 
-            if os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
-                return out_file, extracted_title or clean_q
+    # 3. УРОВЕНЬ 3: Bandcamp (Открыт для дата-центров, саундтреки инди-игр и OST)
+    for var in variations[:2]:
+        track, title = download_via_ytdlp("bcsearch1", var, out_file, safe_name, max_filesize=max_filesize, timeout=25)
+        if track:
+            return track, title or clean_q
 
-            for f in os.listdir(MUSIC_DIR):
-                if f.startswith(safe_name) and f.endswith(".mp3"):
-                    fpath = os.path.join(MUSIC_DIR, f)
-                    if os.path.getsize(fpath) > 50000:
-                        return fpath, extracted_title or clean_q
-        except Exception as e:
-            print(f"[MEDIA FINDER] yt-dlp error for query {sq!r}: {e}")
+    # 4. УРОВЕНЬ 4: YouTube Direct (с эмуляцией мобильных клиентов)
+    for var in variations[:2]:
+        track, title = download_via_ytdlp("ytsearch1", var, out_file, safe_name, max_filesize=max_filesize, timeout=15)
+        if track:
+            return track, title or clean_q
 
-    # 3. Резервный поиск по Internet Archive (публичный архив)
-    ia_file, ia_title = search_internet_archive_audio(clean_q, out_file)
-    if ia_file:
-        return ia_file, ia_title or clean_q
-
-    # 4. СТРОГО ЕСЛИ ЗАПРОШЕНА КЛАССИКА / СИМФОНИЯ — используем классические фоллбэки
+    # 5. УРОВЕНЬ 5: Internet Archive & Синтезатор (СТРОГО ДЛЯ КЛАССИКИ / РЕТРО)
     if is_classical_query:
         synth_file, synth_title = synthesize_classical_symphony(clean_q, out_file)
         if synth_file:
             return synth_file, synth_title
+        ia_file, ia_title = search_internet_archive_audio(clean_q, out_file)
+        if ia_file:
+            return ia_file, ia_title or clean_q
         fallback_classical = CLASSICAL_ARCHIVE[0]
         if download_file_direct(fallback_classical["url"], out_file):
             return out_file, fallback_classical["title"]
 
-    # Для обычных песен (не классика) — НИКОГДА не подсовывать Бетховена!
+    # Для обычных современных песен (не классика) — НИКОГДА не подсовывать Бетховена!
     return None, clean_q
 
 find_and_download_audio = find_and_download_music
