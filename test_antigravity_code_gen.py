@@ -129,6 +129,21 @@ class TestAntigravityCodeGen(unittest.TestCase):
             prompt_called = cmd[cmd.index("-p") + 1]
             self.assertIn("image-generator", prompt_called)
 
+    def test_research_visual_context_invokes_cli(self):
+        with patch("subprocess.run") as mock_run:
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.stdout = "[LOCATION_DETAILS]: Coral Caves\n[CHARACTER_DETAILS]: Watcher slugcat"
+            mock_proc.stderr = ""
+            mock_run.return_value = mock_proc
+
+            research = dynamic_agent.research_visual_context("Rain World Watcher slugcat art")
+            self.assertIn("[LOCATION_DETAILS]", research)
+            self.assertIn("[CHARACTER_DETAILS]", research)
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            self.assertIn("search_web", cmd[cmd.index("-p") + 1])
+
 
 if __name__ == "__main__":
     unittest.main()
