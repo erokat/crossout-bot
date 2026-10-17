@@ -762,7 +762,7 @@ def find_and_download_music(query, max_filesize="30M", allow_ai_fallback=True):
             return track, title or clean_q
 
     for var in variations[:2]:
-        track, title = download_via_ytdlp("bcsearch1", var, out_file, safe_name, max_filesize=max_filesize, timeout=25)
+        track, title = download_via_ytdlp("ytsearch1", f"{var} Official Audio", out_file, safe_name, max_filesize=max_filesize, timeout=25)
         if track:
             return track, title or clean_q
 
