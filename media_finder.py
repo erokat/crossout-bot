@@ -24,6 +24,14 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
 }
 
+def log_music(msg):
+    sys.stderr.write(msg + "\n")
+    try:
+        from keep_alive import log_event
+        log_event(msg)
+    except Exception:
+        pass
+
 def clean_query(text, media_type="music"):
     t = text.strip()
     prefix_pattern = r"(?i)^(?:!бот|!bot|бот[,\s]*|ботик[,\s]*|пожалуйста[,\s]*|плиз[,\s]*|найди|скинь|скачай|загрузи|поставь|включи|отправь|сочини|сыграй|сделай|запили|сгенерируй)\s*"
@@ -459,7 +467,7 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
         except Exception as ce:
             sys.stderr.write(f"[MEDIA FINDER] Cookies setup error: {ce}\n")
 
-    clients_to_try = ["android,web", "ios,web", "tv,android"] if ("youtube" in target_arg.lower() or "youtu.be" in target_arg.lower() or not target_arg.startswith("http")) else ["default"]
+    clients_to_try = ["android", "ios", "tv_embedded"] if ("youtube" in target_arg.lower() or "youtu.be" in target_arg.lower() or not target_arg.startswith("http")) else ["default"]
 
     try:
         for client_arg in clients_to_try:
@@ -502,8 +510,9 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
                 if os.path.exists(out_file) and os.path.getsize(out_file) > 50000:
                     return out_file, extracted_title
 
-                if res.stderr and ("error" in res.stderr.lower() or "warning" in res.stderr.lower()):
-                    sys.stderr.write(f"[MEDIA FINDER] yt-dlp notice ({client_arg}) for {target_arg}: {res.stderr.strip()[:200]}\n")
+                err_snip = (res.stderr or "").strip()[:250]
+                if err_snip:
+                    log_music(f"[MEDIA FINDER] yt-dlp notice ({client_arg}) for {target_arg}: {err_snip}")
 
                 # Поиск по шаблону и доконвертация в mp3, если yt-dlp оставил m4a/opus/webm/mp4
                 for f in os.listdir(MUSIC_DIR):
@@ -519,9 +528,9 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
                         elif f.endswith(".mp3") and os.path.getsize(fpath) > 50000:
                             return fpath, extracted_title
             except subprocess.TimeoutExpired:
-                sys.stderr.write(f"[MEDIA FINDER] yt-dlp timeout ({timeout}s) for {target_arg} ({client_arg})\n")
+                log_music(f"[MEDIA FINDER] yt-dlp timeout ({timeout}s) for {target_arg} ({client_arg})")
             except Exception as e:
-                sys.stderr.write(f"[MEDIA FINDER] yt-dlp error for {target_arg}: {e}\n")
+                log_music(f"[MEDIA FINDER] yt-dlp error for {target_arg}: {e}")
             finally:
                 for f in os.listdir(MUSIC_DIR):
                     if f.startswith(safe_name) and f.endswith((".part", ".ytdl", ".temp")):
@@ -733,7 +742,7 @@ def find_and_download_music(query, max_filesize="30M", allow_ai_fallback=True):
     # Логируем результаты топ-3 скоринга для мониторинга
     if scored_candidates:
         top_logs = [f"[{c['score']:.0f}] {c['title'][:30]} ({c['uploader'][:15]})" for c in scored_candidates[:3]]
-        sys.stderr.write(f"[MUSIC SCORE] Top candidates for '{clean_q}': {' | '.join(top_logs)}\n")
+        log_music(f"[MUSIC SCORE] Top candidates for '{clean_q}': {' | '.join(top_logs)}")
 
     # 3. Скачивание лучшего кандидата (порог >= 60, отсекает любые ремиксы со штрафом -300)
     for cand in scored_candidates:

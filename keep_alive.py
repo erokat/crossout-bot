@@ -333,6 +333,53 @@ class WebServerHandler(BaseHTTPRequestHandler):
             self.wfile.write(resp.encode("utf-8"))
             return
 
+        elif path == "/test_music":
+            q = qs.get("q", ["DELTARUNE - It's TV Time! от InstrumentManiac"])[0]
+            from media_finder import find_and_download_music
+            t0 = time.time()
+            track_path, track_title = find_and_download_music(q)
+            dt = round(time.time() - t0, 2)
+            exists = bool(track_path and os.path.exists(track_path))
+            size = os.path.getsize(track_path) if exists else 0
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            resp = json.dumps({
+                "query": q,
+                "track_path": track_path,
+                "track_title": track_title,
+                "exists": exists,
+                "size_bytes": size,
+                "duration_sec": dt
+            }, ensure_ascii=False)
+            self.wfile.write(resp.encode("utf-8"))
+            return
+
+        elif path == "/test_ytdlp_raw":
+            target = qs.get("url", ["https://www.youtube.com/watch?v=L5sLWs853zM"])[0]
+            client = qs.get("client", ["android"])[0]
+            fmt = qs.get("format", ["bestaudio/18/best"])[0]
+            cmd = [
+                "yt-dlp",
+                "-x", "--audio-format", "mp3",
+                "-f", fmt,
+                "--extractor-args", f"youtube:player_client={client}",
+                "--geo-bypass",
+                "-o", f"/tmp/test_render_{int(time.time())}.%(ext)s",
+                target
+            ]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "cmd": cmd,
+                "returncode": r.returncode,
+                "stdout": r.stdout[-1000:],
+                "stderr": r.stderr[-1000:]
+            }, ensure_ascii=False).encode("utf-8"))
+            return
+
         elif path == "/confirm":
             req_id = qs.get("id", [None])[0]
             action = qs.get("action", [None])[0]
