@@ -378,7 +378,6 @@ def fetch_candidates(source_prefix, query_str, limit=5, timeout=12):
     if "ytsearch" in source_prefix:
         cmd.extend([
             "--extractor-args", "youtube:player_client=android,ios,mweb",
-            "--extractor-args", "youtube:player_skip=configs,webpage",
             "--geo-bypass"
         ])
     elif "scsearch" in source_prefix:
@@ -445,7 +444,6 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
     elif "youtube" in target_arg.lower() or "youtu.be" in target_arg.lower() or (source_prefix and "ytsearch" in source_prefix):
         cmd.extend([
             "--extractor-args", "youtube:player_client=android,ios,mweb",
-            "--extractor-args", "youtube:player_skip=configs,webpage",
             "--geo-bypass"
         ])
 
