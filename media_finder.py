@@ -467,7 +467,22 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
         except Exception as ce:
             sys.stderr.write(f"[MEDIA FINDER] Cookies setup error: {ce}\n")
 
-    clients_to_try = ["android", "ios", "tv_embedded"] if ("youtube" in target_arg.lower() or "youtu.be" in target_arg.lower() or not target_arg.startswith("http")) else ["default"]
+    clients_to_try = ["web_embedded,web", "mweb", "android", "ios"] if ("youtube" in target_arg.lower() or "youtu.be" in target_arg.lower() or not target_arg.startswith("http")) else ["default"]
+
+    # Определение доступности JS-рантайма (Deno / Node.js) для обхода PO-token challenge
+    import shutil
+    js_runtime = None
+    if shutil.which("deno") or os.path.exists("/usr/local/bin/deno"):
+        js_runtime = "deno"
+    elif shutil.which("node") or os.path.exists("/usr/bin/node") or os.path.exists("/usr/local/bin/node"):
+        js_runtime = "node"
+
+    can_impersonate = False
+    try:
+        import curl_cffi
+        can_impersonate = True
+    except ImportError:
+        pass
 
     try:
         for client_arg in clients_to_try:
@@ -482,11 +497,16 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
                 "--no-simulate",
                 "--socket-timeout", "10",
                 "--retries", "1",
+                "--no-check-certificates",
                 "--match-filter", "duration >=? 15 & duration <=? 1200",
                 "--embed-metadata",
                 "--print", "%(title)s - %(uploader,artist)s",
                 "-o", out_tmpl
             ]
+            if js_runtime:
+                cmd.extend(["--js-runtimes", js_runtime])
+            if can_impersonate:
+                cmd.extend(["--impersonate", "chrome"])
             if client_arg != "default":
                 cmd.extend([
                     "--extractor-args", f"youtube:player_client={client_arg}",

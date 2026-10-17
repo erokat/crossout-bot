@@ -357,17 +357,24 @@ class WebServerHandler(BaseHTTPRequestHandler):
 
         elif path == "/test_ytdlp_raw":
             target = qs.get("url", ["https://www.youtube.com/watch?v=L5sLWs853zM"])[0]
-            client = qs.get("client", ["android"])[0]
+            client = qs.get("client", ["web_embedded,web"])[0]
             fmt = qs.get("format", ["bestaudio/18/best"])[0]
+            imp = qs.get("impersonate", ["chrome"])[0]
+            js_rt = qs.get("js_runtime", ["deno"])[0]
             cmd = [
                 "yt-dlp",
                 "-x", "--audio-format", "mp3",
                 "-f", fmt,
+                "--no-check-certificates",
                 "--extractor-args", f"youtube:player_client={client}",
                 "--geo-bypass",
-                "-o", f"/tmp/test_render_{int(time.time())}.%(ext)s",
-                target
+                "-o", f"/tmp/test_render_{int(time.time())}.%(ext)s"
             ]
+            if imp and imp != "none":
+                cmd.extend(["--impersonate", imp])
+            if js_rt and js_rt != "none":
+                cmd.extend(["--js-runtimes", js_rt])
+            cmd.append(target)
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")

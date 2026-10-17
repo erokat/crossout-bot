@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     tar \
     gzip \
+    unzip \
     ffmpeg \
     imagemagick \
     fonts-dejavu-core \
@@ -22,6 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-eng \
     nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://deno.land/install.sh | sh -s -- -y && \
+    if [ -f /root/.deno/bin/deno ]; then cp /root/.deno/bin/deno /usr/local/bin/deno && chmod +x /usr/local/bin/deno; fi || true
 
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- -d /usr/local/bin || true
 RUN if [ ! -f /usr/local/bin/agy ] && [ -f /root/.local/bin/agy ]; then cp /root/.local/bin/agy /usr/local/bin/agy; fi || true

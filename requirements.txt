@@ -5,6 +5,7 @@ opencv-python-headless>=4.8.0.76
 imageio>=2.31.0
 numpy>=1.24.0
 pytesseract>=0.3.10
-yt-dlp>=2024.0.0
+yt-dlp[curl-cffi]>=2024.0.0
+curl-cffi>=0.7.0
 tzdata>=2024.1
 
