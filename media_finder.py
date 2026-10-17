@@ -377,7 +377,7 @@ def fetch_candidates(source_prefix, query_str, limit=5, timeout=12):
     ]
     if "ytsearch" in source_prefix:
         cmd.extend([
-            "--extractor-args", "youtube:player_client=android,ios,mweb",
+            "--extractor-args", "youtube:player_client=visionos,web",
             "--geo-bypass"
         ])
     elif "scsearch" in source_prefix:
@@ -437,13 +437,32 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
     if source_prefix and not query_or_url.startswith("http"):
         target_arg = f"{source_prefix}:{query_or_url}"
 
+    cookie_file = None
+    b64_cookies = os.environ.get("YOUTUBE_COOKIES_BASE64")
+    if not b64_cookies:
+        try:
+            from db import get_kv
+            b64_cookies = get_kv("yt_cookies_base64", "")
+        except Exception:
+            pass
+    if b64_cookies:
+        try:
+            import base64
+            import tempfile
+            cookie_file = os.path.join(tempfile.gettempdir(), f"yt_cookies_{os.getpid()}_{time.time_ns()}.txt")
+            with open(cookie_file, "wb") as cf:
+                cf.write(base64.b64decode(b64_cookies))
+            cmd.extend(["--cookies", cookie_file])
+        except Exception as ce:
+            sys.stderr.write(f"[MEDIA FINDER] Cookies setup error: {ce}\n")
+
     if "soundcloud" in target_arg.lower() or (source_prefix and "scsearch" in source_prefix):
         cmd.extend([
             "--extractor-args", "soundcloud:format=http"
         ])
     elif "youtube" in target_arg.lower() or "youtu.be" in target_arg.lower() or (source_prefix and "ytsearch" in source_prefix):
         cmd.extend([
-            "--extractor-args", "youtube:player_client=android,ios,mweb",
+            "--extractor-args", "youtube:player_client=visionos,web",
             "--geo-bypass"
         ])
 
@@ -480,6 +499,9 @@ def download_via_ytdlp(source_prefix, query_or_url, out_file, safe_name, max_fil
     except Exception as e:
         sys.stderr.write(f"[MEDIA FINDER] yt-dlp error for {target_arg}: {e}\n")
     finally:
+        if cookie_file and os.path.exists(cookie_file):
+            try: os.remove(cookie_file)
+            except Exception: pass
         for f in os.listdir(MUSIC_DIR):
             if f.startswith(safe_name) and f.endswith((".part", ".ytdl", ".temp")):
                 try: os.remove(os.path.join(MUSIC_DIR, f))
@@ -493,9 +515,13 @@ def stream_invidious_video_id(video_id, title, author, out_file, timeout=20):
     """
     for base_url in INVIDIOUS_INSTANCES:
         try:
-            stream_url = f"{base_url}/latest_version?id={video_id}&itag=140"
             ffmpeg_cmd = [
-                "ffmpeg", "-y", "-i", stream_url,
+                "ffmpeg", "-y",
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+                "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "-i", stream_url,
                 "-vn", "-c:a", "libmp3lame", "-q:a", "2",
                 "-id3v2_version", "3",
                 "-metadata", f"title={title}",
@@ -603,6 +629,21 @@ def find_and_download_music(query, max_filesize="30M"):
             if track:
                 return track, title or f"{cand_title} - {cand_author}"
 
+    # 3.1. Аварийный fallback на чистые SoundCloud-треки (если автор был только на YouTube, а YouTube заблокирован дата-центром):
+    # Отсекаем все фанатские вокальные каверы/lyrics и берем чистый инструментал / оригинальный трек
+    sc_clean = [
+        c for c in sc_candidates
+        if not any(mod in (c.get("title") or "").lower() for mod, _ in UNWANTED_MODIFIERS if mod not in title_q.lower())
+    ]
+    if sc_clean:
+        sc_clean.sort(key=lambda c: score_music_candidate(c, title_q, None), reverse=True)
+        for c in sc_clean:
+            c_url = c.get("url")
+            if c_url:
+                track, title = download_via_ytdlp(None, c_url, out_file, safe_name, max_filesize=max_filesize, timeout=25)
+                if track:
+                    return track, title or f"{c.get('title')} ({c.get('uploader')})"
+
     # 4. Резервные уровни (Bandcamp и Invidious Text Search)
     variations = generate_search_variations(clean_q)
     for var in variations[:2]:
@@ -685,7 +726,7 @@ def find_and_download_video(query, max_filesize="40M"):
         "yt-dlp",
         "-f", "mp4[filesize<35M]/best[filesize<35M]/best",
         "--default-search", "ytsearch",
-        "--extractor-args", "youtube:player_client=android,ios",
+        "--extractor-args", "youtube:player_client=visionos,web",
         "--max-filesize", max_filesize,
         "--no-playlist",
         "-o", out_tmpl,
