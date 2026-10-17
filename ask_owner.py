@@ -20,7 +20,7 @@ from db import (
     set_kv
 )
 
-def send_bot_message(bot_token, chat_id, text, reply_markup=None):
+def send_bot_message(bot_token, chat_id, text, reply_markup=None, disable_web_page_preview=True):
     if not bot_token:
         return None
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -30,7 +30,8 @@ def send_bot_message(bot_token, chat_id, text, reply_markup=None):
     payload = {
         "chat_id": chat_id,
         "text": clean_text,
-        "parse_mode": "HTML"
+        "parse_mode": "HTML",
+        "disable_web_page_preview": disable_web_page_preview
     }
     if reply_markup:
         payload["reply_markup"] = reply_markup
@@ -147,30 +148,12 @@ def main():
         ]
     }
 
-    sent_res = send_bot_message(bot_token, owner_id, msg_text, reply_markup=inline_keyboard)
+    sent_res = send_bot_message(bot_token, owner_id, msg_text, reply_markup=inline_keyboard, disable_web_page_preview=True)
     prompt_msg_id = None
     if sent_res and sent_res.get("ok"):
         prompt_msg_id = sent_res["result"]["message_id"]
 
     create_confirmation(req_id, question, message_id=prompt_msg_id, initiator=initiator)
-
-    offset_str = get_kv("control_bot_offset", "0")
-    try:
-        current_offset = int(offset_str)
-    except Exception:
-        current_offset = 0
-
-    if current_offset == 0 and bot_token:
-        try:
-            url_init = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset=-1&timeout=2"
-            req_init = urllib.request.Request(url_init, headers={"User-Agent": "CrossoutBot/1.0"})
-            with urllib.request.urlopen(req_init, timeout=4) as r_init:
-                d_init = json.loads(r_init.read().decode("utf-8"))
-                if d_init.get("ok") and d_init.get("result"):
-                    current_offset = d_init["result"][-1]["update_id"] + 1
-                    set_kv("control_bot_offset", str(current_offset))
-        except Exception:
-            pass
 
     timeout = 180
     start_time = time.time()
@@ -178,100 +161,13 @@ def main():
     comment = ""
 
     while time.time() - start_time < timeout:
-        # 1. Check SQLite database for resolution (from Web endpoint, inline buttons, or owner reply)
+        # Check SQLite database for resolution (from Web endpoint, inline buttons, or owner reply via main orchestrator)
         conf = get_confirmation(req_id)
         if conf and conf.get("status") in ["approved", "rejected"]:
             verdict = conf["status"].upper()
             comment = conf.get("comment") or ""
             if prompt_msg_id:
                 remove_inline_keyboard(bot_token, owner_id, prompt_msg_id)
-            break
-
-        # Check latest offset from DB in case wait_for_yarik advanced it
-        try:
-            db_offset = int(get_kv("control_bot_offset", "0"))
-            if db_offset > current_offset:
-                current_offset = db_offset
-        except Exception:
-            pass
-
-        # 2. Direct getUpdates polling from Telegram Bot API
-        if bot_token:
-            try:
-                poll_url = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={current_offset}&timeout=2&limit=10"
-                poll_req = urllib.request.Request(poll_url, headers={"User-Agent": "CrossoutBot/1.0"})
-                with urllib.request.urlopen(poll_req, timeout=4) as p_resp:
-                    upd_data = json.loads(p_resp.read().decode("utf-8"))
-
-                if upd_data.get("ok"):
-                    updates = upd_data.get("result", [])
-                    for upd in updates:
-                        upd_id = upd.get("update_id", 0)
-
-                        # Check callback query
-                        cq = upd.get("callback_query")
-                        if cq:
-                            cq_id = cq.get("id")
-                            cq_data = cq.get("data", "")
-                            from_uid = cq.get("from", {}).get("id")
-                            is_owner = (owner_id is None) or (from_uid == owner_id) or (str(from_uid) == str(owner_id))
-                            if is_owner and cq_data in [f"approve_{req_id}", f"reject_{req_id}"]:
-                                action = "approved" if cq_data.startswith("approve_") else "rejected"
-                                verdict = action.upper()
-                                comment = "Inline button"
-                                resolve_confirmation(req_id, action, comment=comment)
-                                answer_callback(bot_token, cq_id, f"{'✅ Разрешено' if action == 'approved' else '❌ Отклонено'}!")
-                                if prompt_msg_id:
-                                    remove_inline_keyboard(bot_token, owner_id, prompt_msg_id)
-                                current_offset = upd_id + 1
-                                set_kv("control_bot_offset", str(current_offset))
-                                try:
-                                    ack_url = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={current_offset}&limit=1"
-                                    urllib.request.urlopen(urllib.request.Request(ack_url, headers={"User-Agent": "CrossoutBot/1.0"}), timeout=3)
-                                except Exception:
-                                    pass
-                                break
-
-                        # Check incoming owner message (text replies like "да", "+", "нет", "-")
-                        msg = upd.get("message")
-                        if msg:
-                            from_uid = msg.get("from", {}).get("id")
-                            is_owner = (owner_id is None) or (from_uid == owner_id) or (str(from_uid) == str(owner_id))
-                            msg_text = (msg.get("text") or msg.get("caption") or "").strip()
-                            if is_owner and msg_text:
-                                t_lower = msg_text.lower()
-                                reply_to = msg.get("reply_to_message", {})
-                                is_reply_to_prompt = bool(reply_to and prompt_msg_id and reply_to.get("message_id") == prompt_msg_id)
-                                is_rejection = bool(re.search(r"(?:\b(?:нет|отказ[а-я]*|нельзя|отмен[а-я]*|отбой|reject)\b|(?<!\S)-(?!\S))", t_lower) or re.search(r"\bне\s+(?:удаляй|надо|трогай|делай|разрешай)", t_lower))
-                                is_approval = bool(not is_rejection and re.search(r"(?:\b(?:да|разреш[а-я]*|ок|удаляй|сноси|подтвержд[а-я]*|yes)\b|(?<!\S)\+(?!\S))", t_lower))
-
-                                if is_approval or is_rejection:
-                                    action = "rejected" if is_rejection else "approved"
-                                    verdict = action.upper()
-                                    comment = f"Текст владельца: {msg_text}"
-                                    resolve_confirmation(req_id, action, comment=comment)
-                                    mid = msg.get("message_id")
-                                    if mid:
-                                        try:
-                                            from db import add_handled_id, mark_message_handled
-                                            add_handled_id(mid, owner_id)
-                                            mark_message_handled(mid, owner_id)
-                                        except Exception:
-                                            pass
-                                    if prompt_msg_id:
-                                        remove_inline_keyboard(bot_token, owner_id, prompt_msg_id)
-                                    current_offset = upd_id + 1
-                                    set_kv("control_bot_offset", str(current_offset))
-                                    try:
-                                        ack_url = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={current_offset}&limit=1"
-                                        urllib.request.urlopen(urllib.request.Request(ack_url, headers={"User-Agent": "CrossoutBot/1.0"}), timeout=3)
-                                    except Exception:
-                                        pass
-                                    break
-            except Exception:
-                pass
-
-        if verdict:
             break
 
         time.sleep(0.5)

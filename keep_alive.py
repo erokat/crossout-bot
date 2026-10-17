@@ -14,7 +14,9 @@ import urllib.request
 import urllib.parse
 import collections
 import tempfile
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import hmac
+import hashlib
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 RECENT_LOGS = collections.deque(maxlen=250)
 
@@ -335,27 +337,38 @@ class WebServerHandler(BaseHTTPRequestHandler):
             req_id = qs.get("id", [None])[0]
             action = qs.get("action", [None])[0]
 
-            if req_id and action in ["approve", "reject"]:
-                resolve_confirmation(req_id, action, comment="Web link click")
-                conf = get_confirmation(req_id)
-                cfg = load_config()
-                bot_token = cfg.get("bot_token")
-                owner_id = cfg.get("owner_id")
-                if conf and conf.get("message_id") and bot_token and owner_id:
-                    delete_bot_message(bot_token, owner_id, conf["message_id"])
-                status_text = "РАЗРЕШЕНО" if action == "approve" else "ОТКЛОНЕНО"
-                badge_class = "badge-appr" if action == "approve" else "badge-rej"
+            if not req_id:
+                self.send_response(400)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"Bad Request: Missing 'id' parameter.")
+                return
 
+            conf = get_confirmation(req_id)
+            if not conf:
+                self.send_response(404)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"Not Found: Confirmation request not found.")
+                return
+
+            status = conf.get("status", "pending")
+            question = conf.get("question", "")
+            initiator = conf.get("initiator", "Неизвестный")
+
+            if status != "pending":
+                status_text = "РАЗРЕШЕНО" if status == "approved" else "ОТКЛОНЕНО"
+                badge_class = "badge-appr" if status == "approved" else "badge-rej"
                 html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Решение принято</title>
+    <title>Запрос уже обработан</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f141c; color: #ffffff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
-        .card {{ background: #1a2232; padding: 40px; border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); text-align: center; max-width: 450px; border: 1px solid #2a354b; }}
-        h1 {{ margin-bottom: 12px; font-size: 26px; }}
+        .card {{ background: #1a2232; padding: 40px; border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); text-align: center; max-width: 480px; border: 1px solid #2a354b; }}
+        h1 {{ margin-bottom: 12px; font-size: 24px; }}
         p {{ color: #9aa5b8; font-size: 16px; margin: 8px 0; }}
         .badge {{ display: inline-block; padding: 10px 24px; border-radius: 30px; font-weight: bold; margin-top: 20px; font-size: 18px; letter-spacing: 1px; }}
         .badge-appr {{ background: #10b981; color: #fff; }}
@@ -364,8 +377,9 @@ class WebServerHandler(BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="card">
-        <h1>✅ Решение принято!</h1>
-        <p>Запрос <code>{req_id}</code> успешно обработан.</p>
+        <h1>ℹ️ Запрос уже обработан</h1>
+        <p>Запрос <code>{req_id}</code> был ранее завершен.</p>
+        <p><b>Вопрос:</b> {question}</p>
         <div class="badge {badge_class}">{status_text}</div>
     </div>
 </body>
@@ -375,12 +389,46 @@ class WebServerHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(html.encode("utf-8"))
                 return
-            else:
-                self.send_response(400)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(b"Bad Request: Missing or invalid id/action parameters.")
-                return
+
+            csrf_token = hmac.new(b"crossout_confirm_secret_key", str(req_id).encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+
+            # Render confirmation page with POST form (Safe against crawler prefetching: GET is read-only)
+            html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Подтверждение действия</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f141c; color: #ffffff; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }}
+        .card {{ background: #1a2232; padding: 36px; border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); text-align: center; max-width: 500px; width: 100%; border: 1px solid #2a354b; }}
+        h1 {{ margin-bottom: 12px; font-size: 24px; color: #f59e0b; }}
+        .desc {{ color: #cbd5e1; font-size: 16px; margin: 16px 0; background: #111827; padding: 14px; border-radius: 8px; text-align: left; word-break: break-word; }}
+        .btn {{ display: inline-block; padding: 12px 24px; border-radius: 8px; font-weight: bold; margin: 8px; font-size: 16px; border: none; cursor: pointer; transition: opacity 0.2s; }}
+        .btn:hover {{ opacity: 0.85; }}
+        .btn-appr {{ background: #10b981; color: #fff; }}
+        .btn-rej {{ background: #ef4444; color: #fff; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>⚠️ Подтверждение действия</h1>
+        <p style="color:#94a3b8;">Инициатор: <b>{initiator}</b></p>
+        <div class="desc"><b>Действие:</b><br>{question}</div>
+        <form method="POST" action="/confirm">
+            <input type="hidden" name="id" value="{req_id}">
+            <input type="hidden" name="csrf_token" value="{csrf_token}">
+            <button type="submit" name="action" value="approve" class="btn btn-appr">✅ Разрешить</button>
+            <button type="submit" name="action" value="reject" class="btn btn-rej">❌ Отклонить</button>
+        </form>
+    </div>
+</body>
+</html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(html.encode("utf-8"))
+            return
 
         elif path == "/gdrive/connect":
             auth_url = get_auth_url()
@@ -465,8 +513,78 @@ class WebServerHandler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path == "/confirm":
+            content_length = int(self.headers.get("Content-Length", 0))
+            post_body = self.rfile.read(content_length).decode("utf-8")
+            params = urllib.parse.parse_qs(post_body)
+            req_id = params.get("id", [None])[0]
+            action = params.get("action", [None])[0]
+            csrf_token = params.get("csrf_token", [None])[0]
+
+            expected_token = hmac.new(b"crossout_confirm_secret_key", str(req_id).encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+            if not req_id or not csrf_token or not hmac.compare_digest(csrf_token, expected_token):
+                self.send_response(403)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"Forbidden: Invalid or missing CSRF token.")
+                return
+
+            if action in ["approve", "reject"]:
+                resolve_confirmation(req_id, action, comment="Web form POST")
+                conf = get_confirmation(req_id)
+                cfg = load_config()
+                bot_token = cfg.get("bot_token")
+                owner_id = cfg.get("owner_id")
+                if conf and conf.get("message_id") and bot_token and owner_id:
+                    delete_bot_message(bot_token, owner_id, conf["message_id"])
+                status_text = "РАЗРЕШЕНО" if action == "approve" else "ОТКЛОНЕНО"
+                badge_class = "badge-appr" if action == "approve" else "badge-rej"
+
+                html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Решение принято</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f141c; color: #ffffff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
+        .card {{ background: #1a2232; padding: 40px; border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); text-align: center; max-width: 450px; border: 1px solid #2a354b; }}
+        h1 {{ margin-bottom: 12px; font-size: 26px; }}
+        p {{ color: #9aa5b8; font-size: 16px; margin: 8px 0; }}
+        .badge {{ display: inline-block; padding: 10px 24px; border-radius: 30px; font-weight: bold; margin-top: 20px; font-size: 18px; letter-spacing: 1px; }}
+        .badge-appr {{ background: #10b981; color: #fff; }}
+        .badge-rej {{ background: #ef4444; color: #fff; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>✅ Решение принято!</h1>
+        <p>Запрос <code>{req_id}</code> успешно обработан.</p>
+        <div class="badge {badge_class}">{status_text}</div>
+    </div>
+</body>
+</html>"""
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(html.encode("utf-8"))
+                return
+            else:
+                self.send_response(400)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"Bad Request: Invalid action parameter.")
+                return
+
+        self.send_response(404)
+        self.end_headers()
+
 def run_http_server(port):
-    server = HTTPServer(("0.0.0.0", port), WebServerHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), WebServerHandler)
     print(f"[HTTP] Server listening on 0.0.0.0:{port}")
     server.serve_forever()
 
@@ -2621,16 +2739,26 @@ def main():
                     if is_handled(mid, chat_id) or is_message_handled(mid, chat_id):
                         log_event(f"[ORCHESTRATOR] Skipping already handled message id={mid} chat_id={chat_id}")
                         continue
-                    mark_message_handled(mid, chat_id)
-                    if source == "yarik":
-                        if last_processed_id is None or mid > last_processed_id:
-                            last_processed_id = mid
-                            set_kv("last_processed_id", str(mid))
+
                 try:
                     if source == "owner":
                         handle_owner_message(m)
                     elif source == "yarik":
                         handle_yarik_message(m, chat_title=data.get("chat_title", "Ярик"))
+                    if mid:
+                        mark_message_handled(mid, chat_id)
+                        if source == "yarik":
+                            if last_processed_id is None or mid > last_processed_id:
+                                last_processed_id = mid
+                                set_kv("last_processed_id", str(mid))
+                except Exception as proc_err:
+                    log_event(f"[ORCHESTRATOR ERROR] Exception processing message {mid} from {source}: {proc_err}. Marking handled to prevent poison pill loop.")
+                    if mid:
+                        mark_message_handled(mid, chat_id)
+                        if source == "yarik":
+                            if last_processed_id is None or mid > last_processed_id:
+                                last_processed_id = mid
+                                set_kv("last_processed_id", str(mid))
                 finally:
                     # After viewing/processing TikTok or any video, delete unless handed off to async worker
                     if not m.get("handed_off_to_async"):

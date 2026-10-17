@@ -5,6 +5,7 @@ import re
 import time
 import json
 import fcntl
+import threading
 import contextlib
 from config import DB_PATH
 
@@ -650,33 +651,29 @@ def session_flock(lock_path=None, timeout=10.0):
         lp = lock_path or LOCK_PATH
     except Exception:
         lp = "send.lock"
-    lock_file = None
+    fd = None
     try:
-        lock_file = open(lp, "w")
-        start = time.time()
+        fd = os.open(lp, os.O_CREAT | os.O_RDWR, 0o666)
+        deadline = time.monotonic() + timeout
         locked = False
-        while time.time() - start < timeout:
+        while True:
             try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 locked = True
                 break
             except (BlockingIOError, OSError):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Failed to acquire session lock '{lp}' within {timeout}s")
                 time.sleep(0.02)
-        if not locked:
-            try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-                locked = True
-            except Exception:
-                pass
-        yield
+        yield fd
     finally:
-        if lock_file:
+        if fd is not None:
             try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(fd, fcntl.LOCK_UN)
             except Exception:
                 pass
             try:
-                lock_file.close()
+                os.close(fd)
             except Exception:
                 pass
 

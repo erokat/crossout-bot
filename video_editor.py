@@ -37,6 +37,25 @@ def cleanup_file(path):
             print(f"[VIDEO CLEANUP] Removed file: {path}")
     except Exception as e:
         print(f"[VIDEO CLEANUP WARNING] Could not remove {path}: {e}")
+_LAST_FFMPEG_ERROR = None
+
+def get_last_ffmpeg_error():
+    global _LAST_FFMPEG_ERROR
+    return _LAST_FFMPEG_ERROR
+
+def set_last_ffmpeg_error(err):
+    global _LAST_FFMPEG_ERROR
+    _LAST_FFMPEG_ERROR = err
+
+def log_ffmpeg_error(action_name, res):
+    err_tail = ""
+    if res and res.stderr:
+        lines = [line.strip() for line in res.stderr.splitlines() if line.strip()]
+        err_tail = lines[-1] if lines else ""
+    msg = f"ffmpeg {action_name} failed (code {res.returncode if res else 'unknown'}): {err_tail}"
+    sys.stderr.write(f"[VIDEO ERROR] {msg}\n")
+    set_last_ffmpeg_error(err_tail or f"Ошибка ffmpeg ({action_name})")
+
 
 def is_video_editor_request(text, has_video=False):
     if not text:
@@ -74,6 +93,7 @@ def video_to_gif(video_path, fps=12, scale_w=480):
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
         return out_path
+    log_ffmpeg_error("конвертации в GIF", res)
     return None
 
 def build_atempo_filter(speed):
@@ -150,6 +170,7 @@ def change_video_speed(video_path, speed=2.0):
     res = subprocess.run(cmd_no_audio, capture_output=True, text=True, timeout=60)
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
         return out_path
+    log_ffmpeg_error("изменения скорости", res)
     return None
 
 
@@ -176,6 +197,7 @@ def reverse_video(video_path):
 
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
         return out_path
+    log_ffmpeg_error("реверса видео", res)
     return None
 
 def mute_video(video_path):
@@ -190,6 +212,7 @@ def mute_video(video_path):
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
         return out_path
+    log_ffmpeg_error("отключения звука", res)
     return None
 
 def extract_audio_from_video(video_path):
@@ -204,6 +227,7 @@ def extract_audio_from_video(video_path):
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
         return out_path
+    log_ffmpeg_error("извлечения звука", res)
     return None
 
 def add_music_to_video(video_path, music_query_or_file):
@@ -233,6 +257,7 @@ def add_music_to_video(video_path, music_query_or_file):
 
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
         return out_path
+    log_ffmpeg_error("наложения музыки", res)
     return None
 
 def add_text_to_video(video_path, text):
@@ -294,6 +319,7 @@ def add_text_to_video(video_path, text):
 
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
         return out_path
+    log_ffmpeg_error("наложения надписи", res)
     return None
 
 def process_video_command(video_path, command_text):
@@ -310,6 +336,7 @@ def process_video_command(video_path, command_text):
     reply_cap = "Держи обработанное видео! 🎬🔥"
     is_gif = False
     is_audio = False
+    set_last_ffmpeg_error(None)
 
     try:
         # 1. В гифку
@@ -405,6 +432,18 @@ def process_video_command(video_path, command_text):
             reply_cap = "Сконвертировал видео в качественную гифку! ✨🎞️"
             is_gif = True
 
+        if not out_file or not os.path.exists(out_file):
+            err_detail = get_last_ffmpeg_error() or "сбой при конвертации ffmpeg (поврежден файл или неподдерживаемый кодек)"
+            reply_cap = f"Ошибка обработки видео: {err_detail}"
+            out_file = None
+    except subprocess.TimeoutExpired:
+        sys.stderr.write("[VIDEO ERROR] ffmpeg operation timed out\n")
+        reply_cap = "Превышен лимит времени обработки видео (таймаут)!"
+        out_file = None
+    except Exception as e:
+        sys.stderr.write(f"[VIDEO ERROR] Exception in process_video_command: {e}\n")
+        reply_cap = f"Ошибка обработки видео: {e}"
+        out_file = None
     finally:
         # ПРАВИЛО 4: обязательно удалять исходный видеофайл с диска
         cleanup_file(video_path)

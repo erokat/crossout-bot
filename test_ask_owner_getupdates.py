@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-test_ask_owner_getupdates.py - Unit tests for ask_owner.py getUpdates polling,
-inline callbacks, removing keyboards, and offset progression.
+test_ask_owner_getupdates.py - Unit tests for ask_owner.py SQLite-based confirmation resolution,
+inline keyboard cleanup, and verification that getUpdates is NOT polled (preventing HTTP 409 Conflict).
 """
 
 import os
@@ -51,14 +51,10 @@ class TestAskOwnerGetUpdates(unittest.TestCase):
     @patch("ask_owner.load_config")
     @patch("ask_owner.init_db")
     @patch("ask_owner.create_confirmation")
-    @patch("ask_owner.resolve_confirmation")
     @patch("ask_owner.get_confirmation")
-    @patch("ask_owner.get_kv")
-    @patch("ask_owner.set_kv")
     @patch("urllib.request.urlopen")
-    def test_main_inline_approval(
-        self, mock_urlopen, mock_set_kv, mock_get_kv,
-        mock_get_conf, mock_resolve_conf, mock_create_conf,
+    def test_main_sqlite_approval(
+        self, mock_urlopen, mock_get_conf, mock_create_conf,
         mock_init_db, mock_load_config
     ):
         mock_load_config.return_value = {
@@ -66,42 +62,15 @@ class TestAskOwnerGetUpdates(unittest.TestCase):
             "owner_id": self.owner_id,
             "render_url": "https://test.onrender.com"
         }
-        mock_get_conf.return_value = None
-        mock_get_kv.return_value = "100"
+        # Simulate SQLite returning approved status
+        mock_get_conf.return_value = {
+            "status": "approved",
+            "comment": "Approved via Web/DB"
+        }
 
-        def make_mock_resp(data_dict):
-            m = MagicMock()
-            m.read.return_value = json.dumps(data_dict).encode("utf-8")
-            m.__enter__.return_value = m
-            m.__exit__.return_value = False
-            return m
-
-        saved_req_id = []
-        def side_create_conf(req_id, *args, **kwargs):
-            saved_req_id.append(req_id)
-        mock_create_conf.side_effect = side_create_conf
-
-        def smart_urlopen(req, timeout=None):
-            url = req.full_url if hasattr(req, "full_url") else str(req)
-            if "sendMessage" in url:
-                return make_mock_resp({"ok": True, "result": {"message_id": 999}})
-            elif "getUpdates" in url and "offset=100" in url:
-                rid = saved_req_id[0] if saved_req_id else "unknown"
-                return make_mock_resp({
-                    "ok": True,
-                    "result": [{
-                        "update_id": 105,
-                        "callback_query": {
-                            "id": "cq_abc",
-                            "from": {"id": self.owner_id},
-                            "data": f"approve_{rid}"
-                        }
-                    }]
-                })
-            else:
-                return make_mock_resp({"ok": True})
-
-        mock_urlopen.side_effect = smart_urlopen
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"ok": True, "result": {"message_id": 999}}).encode("utf-8")
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         with patch.object(sys, "argv", ["ask_owner.py", "Ярик просит удалить сообщение: привет"]):
             with patch("sys.stdout", new=io.StringIO()) as fake_out:
@@ -109,21 +78,20 @@ class TestAskOwnerGetUpdates(unittest.TestCase):
                 output = fake_out.getvalue()
                 self.assertIn("APPROVED", output)
 
-        mock_resolve_conf.assert_called_once()
-        self.assertEqual(mock_resolve_conf.call_args[0][1], "approved")
-        mock_set_kv.assert_called_with("control_bot_offset", "106")
+        mock_create_conf.assert_called_once()
+        # Ensure getUpdates is NEVER called, preventing HTTP 409 Conflict
+        for call in mock_urlopen.call_args_list:
+            req = call[0][0]
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            self.assertNotIn("getUpdates", url)
 
     @patch("ask_owner.load_config")
     @patch("ask_owner.init_db")
     @patch("ask_owner.create_confirmation")
-    @patch("ask_owner.resolve_confirmation")
     @patch("ask_owner.get_confirmation")
-    @patch("ask_owner.get_kv")
-    @patch("ask_owner.set_kv")
     @patch("urllib.request.urlopen")
-    def test_main_text_rejection(
-        self, mock_urlopen, mock_set_kv, mock_get_kv,
-        mock_get_conf, mock_resolve_conf, mock_create_conf,
+    def test_main_sqlite_rejection(
+        self, mock_urlopen, mock_get_conf, mock_create_conf,
         mock_init_db, mock_load_config
     ):
         mock_load_config.return_value = {
@@ -131,36 +99,15 @@ class TestAskOwnerGetUpdates(unittest.TestCase):
             "owner_id": self.owner_id,
             "render_url": "https://test.onrender.com"
         }
-        mock_get_conf.return_value = None
-        mock_get_kv.return_value = "200"
+        # Simulate SQLite returning rejected status
+        mock_get_conf.return_value = {
+            "status": "rejected",
+            "comment": "Rejected via Web/DB"
+        }
 
-        def make_mock_resp(data_dict):
-            m = MagicMock()
-            m.read.return_value = json.dumps(data_dict).encode("utf-8")
-            m.__enter__.return_value = m
-            m.__exit__.return_value = False
-            return m
-
-        def smart_urlopen(req, timeout=None):
-            url = req.full_url if hasattr(req, "full_url") else str(req)
-            if "sendMessage" in url:
-                return make_mock_resp({"ok": True, "result": {"message_id": 888}})
-            elif "getUpdates" in url and "offset=200" in url:
-                return make_mock_resp({
-                    "ok": True,
-                    "result": [{
-                        "update_id": 209,
-                        "message": {
-                            "message_id": 1122,
-                            "from": {"id": self.owner_id},
-                            "text": "нет, не разрешаю"
-                        }
-                    }]
-                })
-            else:
-                return make_mock_resp({"ok": True})
-
-        mock_urlopen.side_effect = smart_urlopen
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"ok": True, "result": {"message_id": 888}}).encode("utf-8")
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         with patch.object(sys, "argv", ["ask_owner.py", "Сгенерировать видео?"]):
             with patch("sys.stdout", new=io.StringIO()) as fake_out:
@@ -168,9 +115,12 @@ class TestAskOwnerGetUpdates(unittest.TestCase):
                 output = fake_out.getvalue()
                 self.assertIn("REJECTED", output)
 
-        mock_resolve_conf.assert_called_once()
-        self.assertEqual(mock_resolve_conf.call_args[0][1], "rejected")
-        mock_set_kv.assert_called_with("control_bot_offset", "210")
+        mock_create_conf.assert_called_once()
+        # Ensure getUpdates is NEVER called, preventing HTTP 409 Conflict
+        for call in mock_urlopen.call_args_list:
+            req = call[0][0]
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            self.assertNotIn("getUpdates", url)
 
 
 if __name__ == "__main__":

@@ -60,36 +60,20 @@ def get_auth_url():
     return f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
 
 def save_refresh_token_to_render(refresh_token):
-    """Персистентно сохраняет GDRIVE_REFRESH_TOKEN в переменные окружения Render через API."""
+    """Персистентно сохраняет GDRIVE_REFRESH_TOKEN в SQLite kv_store и локальный JSON (без перезапуска сервиса Render)."""
     try:
-        # 1. Получаем текущие переменные
-        get_url = f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars"
-        headers = {
-            "Authorization": f"Bearer {RENDER_API_KEY}",
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-        req = urllib.request.Request(get_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-
-        current_vars = {}
-        for item in data:
-            ev = item.get("envVar", {})
-            if "key" in ev and "value" in ev:
-                current_vars[ev["key"]] = ev["value"]
-
-        current_vars["GDRIVE_REFRESH_TOKEN"] = refresh_token
-
-        # 2. Обновляем переменные через PUT
-        put_payload = [{"key": k, "value": v} for k, v in current_vars.items()]
-        put_data = json.dumps(put_payload).encode("utf-8")
-        put_req = urllib.request.Request(get_url, data=put_data, headers=headers, method="PUT")
-        with urllib.request.urlopen(put_req, timeout=15) as put_resp:
-            print("[GDRIVE] GDRIVE_REFRESH_TOKEN successfully saved to Render environment variables!")
+        if refresh_token:
+            set_kv("gdrive_refresh_token", refresh_token)
+            try:
+                with open(TOKEN_FILE, "w", encoding="utf-8") as tf:
+                    json.dump({"refresh_token": refresh_token}, tf)
+            except Exception:
+                pass
+            print("[GDRIVE] GDRIVE_REFRESH_TOKEN successfully persisted to SQLite kv_store!")
             return True
+        return False
     except Exception as e:
-        sys.stderr.write(f"[GDRIVE WARNING] Could not persist token to Render env-vars: {e}\n")
+        sys.stderr.write(f"[GDRIVE WARNING] Could not persist token to kv_store: {e}\n")
         return False
 
 def exchange_code(code):
@@ -264,9 +248,55 @@ def ensure_folder(access_token=None, folder_name="memes"):
 def ensure_memes_folder(access_token=None):
     return ensure_folder(access_token, "memes")
 
+class ChunkedMultipartStream:
+    """Streams multipart data from file in chunks without loading entire file into memory."""
+    def __init__(self, header: bytes, file_path: str, footer: bytes, total_len: int):
+        self.header = header
+        self.file_path = file_path
+        self.footer = footer
+        self.total_len = total_len
+        self._f = open(file_path, "rb")
+        self._pos_h = 0
+        self._pos_f = 0
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = 65536
+        res = bytearray()
+        if self._pos_h < len(self.header):
+            take = min(size, len(self.header) - self._pos_h)
+            res.extend(self.header[self._pos_h:self._pos_h + take])
+            self._pos_h += take
+            if len(res) >= size:
+                return bytes(res)
+        remain = size - len(res)
+        if remain > 0:
+            chunk = self._f.read(remain)
+            if chunk:
+                res.extend(chunk)
+                if len(res) >= size:
+                    return bytes(res)
+        remain = size - len(res)
+        if remain > 0 and self._pos_f < len(self.footer):
+            take = min(remain, len(self.footer) - self._pos_f)
+            res.extend(self.footer[self._pos_f:self._pos_f + take])
+            self._pos_f += take
+        return bytes(res)
+
+    def close(self):
+        try:
+            self._f.close()
+        except Exception:
+            pass
+
+    def __len__(self):
+        return self.total_len
+
+
 def upload_file_to_drive(file_path, folder_type="memes"):
     """
     Выгружает файл на Google Диск в соответствующую папку (memes, music, videos, photos).
+    Использует чанковый стриминг ChunkedMultipartStream для исключения дублирования памяти.
     """
     if not os.path.exists(file_path):
         return None
@@ -287,36 +317,44 @@ def upload_file_to_drive(file_path, folder_type="memes"):
     if not mime_type:
         mime_type = "image/png"
 
-    with open(file_path, "rb") as f:
-        file_bytes = f.read()
-
+    file_size = os.path.getsize(file_path)
     boundary = "-------314159265358979323846"
     metadata = {
         "name": filename,
         "parents": [folder_id]
     }
 
-    body = bytearray()
-    body.extend(f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode("utf-8"))
-    body.extend(json.dumps(metadata).encode("utf-8"))
-    body.extend(f"\r\n--{boundary}\r\nContent-Type: {mime_type}\r\n\r\n".encode("utf-8"))
-    body.extend(file_bytes)
-    body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+    meta_json = json.dumps(metadata)
+    crlf = chr(13) + chr(10)
+    header_parts = [
+        "--" + boundary + crlf,
+        "Content-Type: application/json; charset=UTF-8" + crlf + crlf,
+        meta_json + crlf,
+        "--" + boundary + crlf,
+        "Content-Type: " + mime_type + crlf + crlf
+    ]
+    header = "".join(header_parts).encode("utf-8")
+    footer = (crlf + "--" + boundary + "--" + crlf).encode("utf-8")
+    total_size = len(header) + file_size + len(footer)
 
+    stream = ChunkedMultipartStream(header, file_path, footer, total_size)
     upload_url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink"
-    req = urllib.request.Request(upload_url, data=bytes(body), headers={
+    req = urllib.request.Request(upload_url, data=stream, headers={
         "Authorization": f"Bearer {access_token}",
-        "Content-Type": f"multipart/related; boundary={boundary}"
+        "Content-Type": f"multipart/related; boundary={boundary}",
+        "Content-Length": str(total_size)
     })
 
     try:
-        with urllib.request.urlopen(req, timeout=40) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             res = json.loads(resp.read().decode("utf-8"))
         print(f"[GDRIVE] Successfully uploaded {filename} to folder '{folder_type}' (ID: {res.get('id')})")
         return res
     except Exception as e:
         sys.stderr.write(f"[GDRIVE ERROR] Upload file failed for {filename}: {e}\n")
         return None
+    finally:
+        stream.close()
 
 def upload_and_cleanup(file_path, folder_type="memes"):
     """

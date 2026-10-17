@@ -18,5 +18,14 @@
     ],
     "produces_media": false,
     "updated_at": 1792023500.0
+  },
+  "test_agy_skill": {
+    "filename": "test_agy_skill.py",
+    "description": "Test agy skill",
+    "triggers": [
+      "тест_аги"
+    ],
+    "produces_media": false,
+    "updated_at": 1792234328.9211497
   }
 }

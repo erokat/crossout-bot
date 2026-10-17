@@ -3,11 +3,11 @@ import sys
 import asyncio
 import random
 import argparse
-import fcntl
 from PIL import Image
 from telethon import TelegramClient
 
 from config import load_config, SESSION_PATH, MEDIA_DIR, LOCK_PATH
+from db import session_flock
 
 PACK_SHORT_NAME = "crossout_memes_arhfb8_by_erokat"
 EMOJIS = ["💥", "💀", "🚗", "🤖", "🔥", "😂", "🚀", "💣", "🚜", "🗿", "⚡", "🎮", "😼", "🎯", "🛡️"]
@@ -26,6 +26,36 @@ def prepare_sticker(img_path):
     im_resized.save(tmp_path, "PNG", optimize=True)
     return tmp_path
 
+async def add_sticker_to_pack(client, sticker_file, emoji):
+    stickers_bot = await client.get_entity("Stickers")
+    async with client.conversation(stickers_bot, timeout=15) as conv:
+        # 1. Reset any stale state
+        await conv.send_message("/cancel")
+        await conv.get_response()
+
+        # 2. Request adding sticker
+        await conv.send_message("/addsticker")
+        await conv.get_response()
+
+        # 3. Specify target sticker pack
+        await conv.send_message(PACK_SHORT_NAME)
+        await conv.get_response()
+
+        # 4. Upload sticker file as document
+        await conv.send_file(sticker_file, force_document=True)
+        await conv.get_response()
+
+        # 5. Send matching emoji
+        await conv.send_message(emoji)
+        await conv.get_response()
+
+        # 6. Finalize with /done
+        await conv.send_message("/done")
+        final_resp = await conv.get_response()
+
+        print(f"SUCCESS: Sticker added to pack https://t.me/addstickers/{PACK_SHORT_NAME}")
+        return True
+
 async def main():
     parser = argparse.ArgumentParser(description="Добавить мем в стикерпак")
     parser.add_argument("--image", required=True, help="Путь к изображению мема")
@@ -39,44 +69,33 @@ async def main():
     sticker_file = prepare_sticker(args.image)
     emoji = args.emoji or random.choice(EMOJIS)
 
-    lock_file = open(LOCK_PATH, "w")
-    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-
     cfg = load_config()
-    client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
-    await client.connect()
-
-    if not await client.is_user_authorized():
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        lock_file.close()
-        sys.stderr.write("Error: Telethon session not authorized\n")
-        sys.exit(1)
 
     try:
-        stickers_bot = await client.get_entity("Stickers")
-        await client.send_message(stickers_bot, "/cancel")
-        await asyncio.sleep(1.5)
+        # Use session_flock with 15s timeout instead of infinite blocking fcntl.flock
+        with session_flock(LOCK_PATH, timeout=15.0):
+            client = TelegramClient(SESSION_PATH, cfg["api_id"], cfg["api_hash"])
+            await client.connect()
 
-        await client.send_message(stickers_bot, "/addsticker")
-        await asyncio.sleep(1.5)
+            if not await client.is_user_authorized():
+                await client.disconnect()
+                sys.stderr.write("Error: Telethon session not authorized\n")
+                sys.exit(1)
 
-        await client.send_message(stickers_bot, PACK_SHORT_NAME)
-        await asyncio.sleep(2)
-
-        await client.send_file(stickers_bot, sticker_file, force_document=True)
-        await asyncio.sleep(2.5)
-
-        await client.send_message(stickers_bot, emoji)
-        await asyncio.sleep(2)
-
-        await client.send_message(stickers_bot, "/done")
-        await asyncio.sleep(1)
-
-        print(f"SUCCESS: Sticker added to pack https://t.me/addstickers/{PACK_SHORT_NAME}")
+            try:
+                await add_sticker_to_pack(client, sticker_file, emoji)
+            finally:
+                await client.disconnect()
+    except TimeoutError:
+        sys.stderr.write("Error: Timeout acquiring session lock for sticker pack operation\n")
+        sys.exit(1)
+    except asyncio.TimeoutError:
+        sys.stderr.write("Error: Timeout waiting for response from @Stickers bot\n")
+        sys.exit(1)
+    except Exception as e:
+        sys.stderr.write(f"Error during sticker addition: {e}\n")
+        sys.exit(1)
     finally:
-        await client.disconnect()
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        lock_file.close()
         if os.path.exists(sticker_file):
             try:
                 os.remove(sticker_file)
